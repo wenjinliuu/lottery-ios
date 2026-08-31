@@ -39,11 +39,25 @@ jobs:
       - name: Pick simulator
         id: sim
         run: |
-          NAME=$(xcrun simctl list devices available --json \
-            | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];\
-c=[x['name'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')];\
-print(sorted(c)[-1] if c else '')")
-          if [ -z "$NAME" ]; then echo '找不到可用的 iPhone 模拟器' >&2; exit 1; fi
+          cat > /tmp/pick_sim.py <<'PYEOF'
+          import json, subprocess, sys
+
+          raw = subprocess.check_output(
+              ["xcrun", "simctl", "list", "devices", "available", "--json"]
+          )
+          devices = json.loads(raw)["devices"]
+          names = [
+              device["name"]
+              for runtime, items in devices.items()
+              if "iOS" in runtime
+              for device in items
+              if device["name"].startswith("iPhone")
+          ]
+          if not names:
+              sys.exit("找不到可用的 iPhone 模拟器")
+          print(sorted(names)[-1])
+          PYEOF
+          NAME=$(python3 /tmp/pick_sim.py)
           echo "找到模拟器：$NAME"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
