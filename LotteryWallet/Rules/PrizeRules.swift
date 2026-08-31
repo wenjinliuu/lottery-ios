@@ -221,12 +221,9 @@ enum PrizeRules {
         let candidates = prizeList.filter { entry in
             let name = entry.prizeName.isEmpty ? entry.require : entry.prizeName
             if gameKey == .k8 {
-                let count = playCount ?? 0
-                let lastNumber = prizeName.split(whereSeparator: { !$0.isNumber }).last.map(String.init) ?? ""
-                let hitsChinese = Int(lastNumber).map { ChineseNumber.text($0) } ?? ""
-                let matchesPlay = name.contains("选\(count)") || name.contains("选\(ChineseNumber.text(count))")
-                let matchesHits = name.contains("中\(lastNumber)") || (!hitsChinese.isEmpty && name.contains("中\(hitsChinese)"))
-                return matchesPlay && matchesHits
+                // 快乐8 走到这里时 prizeName 就是 findK8PrizeEntry 查到的那条奖级名
+                // （形如「选五中五」），按名字精确匹配即可，不需要再拆数字。
+                return canonicalPrizeName(name) == canonicalPrizeName(prizeName)
             }
             let normalizedName = canonicalPrizeName(name)
             let normalizedTarget = canonicalPrizeName(prizeName)

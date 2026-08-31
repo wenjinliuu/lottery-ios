@@ -114,6 +114,19 @@ final class PrizeRulesTests: XCTestCase {
         XCTAssertEqual(result.amount, 1000)
     }
 
+    /// 奖级表里同时有「选五中四」「选五中五」时，必须挑中对应那条，
+    /// 不能因为奖级名里含汉字数字而串到相邻奖级。
+    func testK8PicksExactPrizeRow() {
+        let drawValues = NumberSet([.nums: Array(1...20)])
+        let result = PrizeRules.evaluate(
+            gameKey: .k8,
+            ticket: ticket(NumberSet([.nums: [1, 2, 3, 4, 5]]), playMode: "5", playCount: 5),
+            draw: draw(.k8, drawValues, [prize("选五中四", 21), prize("选五中五", 1000)])
+        )
+        XCTAssertEqual(result.prizeName, "选五中五")
+        XCTAssertEqual(result.amount, 1000)
+    }
+
     // MARK: - 数字型
 
     func testDigitGames() {
@@ -182,6 +195,7 @@ final class PrizeRulesTests: XCTestCase {
 
     func testMoneyParsing() {
         XCTAssertEqual(MoneyText.parse("1,234"), 1234)
+        // Swift 的 isNumber 对「万」「亿」返回 true，过滤时必须限定 ASCII
         XCTAssertEqual(MoneyText.parse("500万"), 5_000_000)
         XCTAssertEqual(MoneyText.parse("1.2亿"), 120_000_000)
         XCTAssertEqual(MoneyText.parse(""), 0)

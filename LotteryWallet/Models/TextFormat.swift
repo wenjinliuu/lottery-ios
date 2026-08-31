@@ -5,7 +5,9 @@ enum MoneyText {
     static func parse(_ raw: String) -> Double {
         let text = raw.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return 0 }
-        let digits = text.filter { $0.isNumber || $0 == "." }
+        // 注意：Swift 的 isNumber 对「万」「亿」也返回 true（Unicode 给它们标了
+        // numericType），只留 ASCII 数字，否则 Double 解析直接失败、奖金归零。
+        let digits = text.filter { $0.isASCII && ($0.isNumber || $0 == ".") }
         guard let number = Double(digits) else { return 0 }
         if text.contains("亿") { return number * 100_000_000 }
         if text.contains("万") { return number * 10_000 }
