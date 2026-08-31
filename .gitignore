@@ -1,0 +1,22 @@
+# Xcode
+build/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+!*.xcworkspace/contents.xcworkspacedata
+xcuserdata/
+*.xcuserstate
+
+# XcodeGen 生成物
+LotteryWallet/Resources/Info.plist
+
+# 构建产物
+*.ipa
+*.dSYM.zip
+*.app.dSYM.zip
+ExportOptions.plist
+AuthKey_*.p8
+*.mobileprovision
+*.p12
+
+.DS_Store

@@ -1,0 +1,115 @@
+name: TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: "构建号（留空则用 GitHub run number）"
+        required: false
+        type: string
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    env:
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install tools
+        run: brew install xcodegen xcbeautify
+
+      - name: Write App Store Connect API key
+        env:
+          PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        run: |
+          # xcodebuild 只认这个固定目录下的 AuthKey_<KEY_ID>.p8
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s' "$PRIVATE_KEY" > ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8
+          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8
+
+      - name: Generate project
+        run: xcodegen generate
+        env:
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Resolve build number
+        id: build
+        run: |
+          NUMBER="${{ inputs.build_number }}"
+          if [ -z "$NUMBER" ]; then NUMBER="${{ github.run_number }}"; fi
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Archive
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project LotteryWallet.xcodeproj \
+            -scheme LotteryWallet \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/LotteryWallet.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CURRENT_PROJECT_VERSION=${{ steps.build.outputs.number }} \
+            | xcbeautify --renderer github-actions
+
+      - name: Write export options
+        run: |
+          mkdir -p build
+          cat > build/ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>uploadSymbols</key><true/>
+            <key>destination</key><string>upload</string>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Export and upload to TestFlight
+        run: |
+          set -o pipefail
+          xcodebuild -exportArchive \
+            -archivePath build/LotteryWallet.xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -exportPath build/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            | xcbeautify --renderer github-actions
+
+      - name: Upload dSYMs as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsyms-${{ steps.build.outputs.number }}
+          path: build/LotteryWallet.xcarchive/dSYMs
+          if-no-files-found: ignore
+
+      - name: Clean up API key
+        if: always()
+        run: rm -f ~/.appstoreconnect/private_keys/AuthKey_*.p8
