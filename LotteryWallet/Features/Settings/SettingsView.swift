@@ -185,7 +185,7 @@ struct SettingsView: View {
             let service = BackupService(context: context)
             let outcome = try service.importData(data, existing: records)
             // 导入后立刻按本地开奖数据重新核对一遍
-            try? RecordService(context: context, drawStore: drawStore).checkAll()
+            _ = try? RecordService(context: context, drawStore: drawStore).checkAll()
             showToast("已导入 \(outcome.inserted + outcome.updated) 条记录", symbol: "square.and.arrow.down")
         } catch {
             showToast(error.localizedDescription, symbol: "exclamationmark.triangle")

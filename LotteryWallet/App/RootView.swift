@@ -58,8 +58,8 @@ struct RootView: View {
     /// 冷启动拿到开奖数据后：先按官方日历校正预测期号，再自动核对。
     private func runStartupChecks() async {
         let service = RecordService(context: context, drawStore: drawStore)
-        try? service.reconcileInferredTargets()
-        try? service.checkAll()
+        _ = try? service.reconcileInferredTargets()
+        _ = try? service.checkAll()
     }
 }
 

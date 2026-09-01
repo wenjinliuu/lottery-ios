@@ -62,14 +62,19 @@ SDK 若调整签名，改动范围锁在这一个文件里。
 | `APP_STORE_CONNECT_ISSUER_ID` | 同页面的 Issuer ID |
 | `APP_STORE_CONNECT_PRIVATE_KEY` | `.p8` 私钥文件的完整内容（含 BEGIN/END 行） |
 
-API 密钥在 App Store Connect → 用户和访问 → 集成 → App Store Connect API 创建，
-角色至少选 **App Manager**（要让 `xcodebuild -allowProvisioningUpdates` 能自动创建证书和描述文件）。
-只能下载一次，注意保存。
+API 密钥在 App Store Connect → 用户和访问 → 集成 → App Store Connect API 创建**团队密钥**，
+角色必须选 **Admin**。App Manager 不够：云端签名需要创建分发证书，而 App Store Connect
+只允许 Admin 角色管理证书，否则 `exportArchive` 会报 `Cloud signing permission error`。
+`.p8` 只能下载一次，注意保存。
 
 上传前需要先在 App Store Connect 建好 App 记录，Bundle ID 用 `com.wenjinliu.lotterywallet`
 （要改的话同时改 `project.yml` 里的 `PRODUCT_BUNDLE_IDENTIFIER`）。
 
 构建号默认取 GitHub run number，手动触发时也可以指定。
+
+签名分两步走：归档时关闭签名，导出时才用 App Store 分发身份签名并上传。
+这么做是因为 Xcode 自动签名在归档阶段申请的是「开发」描述文件，而它必须绑定
+一台已注册设备 —— CI 上没有设备可绑，会直接失败。分发签名不需要注册设备。
 
 ## 与 web 版的关系
 

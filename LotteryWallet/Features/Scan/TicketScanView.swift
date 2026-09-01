@@ -292,7 +292,7 @@ struct TicketScanView: View {
                              multiple: editedMultiple,
                              target: target,
                              source: "ticket_scan")
-            try? service.checkAll()
+            _ = try? service.checkAll()
             showToast("已导入 \(tickets.count) 注", symbol: "checkmark.seal.fill")
             dismiss()
         } catch {
