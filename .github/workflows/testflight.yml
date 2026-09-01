@@ -56,7 +56,10 @@ jobs:
           if [ -z "$NUMBER" ]; then NUMBER="${{ github.run_number }}"; fi
           echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
 
-      - name: Archive
+      # 归档不签名：Xcode 自动签名在归档阶段要的是「开发」描述文件，
+      # 而开发描述文件必须绑定已注册设备，CI 上没有设备可绑。
+      # 分发签名本来就该在导出阶段做，那一步不需要注册设备。
+      - name: Archive (unsigned)
         run: |
           set -o pipefail
           xcodebuild archive \
@@ -65,10 +68,9 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath build/LotteryWallet.xcarchive \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8 \
-            -authenticationKeyID "$KEY_ID" \
-            -authenticationKeyIssuerID "$ISSUER_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             CURRENT_PROJECT_VERSION=${{ steps.build.outputs.number }} \
             | xcbeautify --renderer github-actions
@@ -83,12 +85,14 @@ jobs:
           <dict>
             <key>method</key><string>app-store-connect</string>
             <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
             <key>uploadSymbols</key><true/>
             <key>destination</key><string>upload</string>
           </dict>
           </plist>
           PLIST
 
+      # 这一步创建分发证书和 App Store 描述文件，给归档签名，然后直接上传
       - name: Export and upload to TestFlight
         run: |
           set -o pipefail
