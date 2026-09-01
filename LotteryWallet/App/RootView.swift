@@ -42,6 +42,9 @@ struct RootView: View {
         .overlay(alignment: .bottom) {
             if let toast {
                 ToastBanner(message: toast)
+                    // 悬浮标签栏大约 50pt 高，96 是为了压在它上面留一段空隙。
+                    // 左右也要留边，长文案（比如导入失败的系统报错）不能顶到屏幕边缘。
+                    .padding(.horizontal, 20)
                     .padding(.bottom, 96)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .task(id: toast.id) {
@@ -50,6 +53,9 @@ struct RootView: View {
                     }
             }
         }
+        // 保存、删除、核对完成这些都只有一个轻提示，没有任何触觉反馈，
+        // 手指在屏幕下半部分时经常察觉不到。
+        .sensoryFeedback(.success, trigger: toast?.id)
         .task {
             await drawStore.bootstrap()
             await runStartupChecks()
@@ -92,10 +98,13 @@ struct ToastBanner: View {
             Text(message.text)
                 .font(.subheadline.weight(.medium))
         }
+        .multilineTextAlignment(.leading)
+        .lineLimit(3)
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .glassPill(interactive: false)
         .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -16,6 +16,10 @@ struct WalletTicketCard: View {
     @Environment(DrawStore.self) private var drawStore
     @State private var isDeleteConfirmPresented = false
 
+    /// 展开时最多画这么多注。复式一张票可以到 2000 注，
+    /// 全画出来就是 2000 行、每行一个横向 ScrollView，点开的一瞬间主线程直接停住。
+    private static let expandedLineLimit = 50
+
     private var game: GameKey { batch.game }
     private var draw: Draw? {
         guard let first = batch.first else { return nil }
@@ -23,7 +27,12 @@ struct WalletTicketCard: View {
     }
 
     private var visibleRecords: [TicketRecord] {
-        isExpanded ? batch.records : Array(batch.records.prefix(2))
+        Array(batch.records.prefix(isExpanded ? Self.expandedLineLimit : 2))
+    }
+
+    /// 收起 / 展开状态下没画出来的注数。
+    private var hiddenCount: Int {
+        Swift.max(batch.records.count - visibleRecords.count, 0)
     }
 
     var body: some View {
@@ -39,6 +48,8 @@ struct WalletTicketCard: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onToggle)
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: isExpanded ? "收起" : "展开", onToggle)
         .contextMenu {
             Button("复制号码", systemImage: "doc.on.doc") { copyNumbers() }
             Button("删除这张票", systemImage: "trash", role: .destructive) {
@@ -66,6 +77,16 @@ struct WalletTicketCard: View {
             }
             Spacer(minLength: 8)
             StatusChip(status: batch.status)
+            // 整张卡片可以点开，但一张只有一两注的票上没有任何可点提示。
+            // 补一个箭头，展开 / 收起状态也才看得出来。
+            if batch.records.count > 2 {
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                    .padding(.top, 3)
+                    .accessibilityHidden(true)
+            }
         }
     }
 
@@ -97,8 +118,10 @@ struct WalletTicketCard: View {
             ForEach(Array(visibleRecords.enumerated()), id: \.element.id) { index, record in
                 lineRow(index: index, record: record)
             }
-            if !isExpanded && batch.records.count > 2 {
-                Text("还有 \(batch.records.count - 2) 注 · 点按展开")
+            if hiddenCount > 0 {
+                Text(isExpanded
+                     ? "另有 \(hiddenCount) 注未显示 · 长按可复制全部号码"
+                     : "还有 \(hiddenCount) 注 · 点按展开")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -129,7 +152,7 @@ struct WalletTicketCard: View {
             Spacer(minLength: 0)
 
             if record.prizeAmount > 0 {
-                Text("+\(MoneyText.compact(record.prizeAmount))")
+                Text("+\(MoneyText.compactYuan(record.prizeAmount))")
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(Palette.profit)
@@ -165,6 +188,8 @@ struct WalletTicketCard: View {
                 Text(batch.status == .pending ? "待核对" : MoneyText.format(batch.netProfit))
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .foregroundStyle(batch.status == .pending ? Color.secondary : Palette.profitColor(batch.netProfit))
                 Text("盈亏")
                     .font(.caption2)

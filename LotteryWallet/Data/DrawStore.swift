@@ -75,7 +75,9 @@ final class DrawStore {
 
     func loadHistory(for game: GameKey) async {
         guard !loadedHistoryGames.contains(game) else { return }
-        guard let history = try? await client.fetchHistory(for: game) else { return }
+        // 空结果不算"已加载"：否则往期页第一次拿到空数组之后就永远停在空状态，
+        // 连"重试"都点不动。
+        guard let history = try? await client.fetchHistory(for: game), !history.isEmpty else { return }
         merge(history)
         loadedHistoryGames.insert(game)
     }
@@ -94,7 +96,7 @@ final class DrawStore {
             return collected
         }
         for (game, history) in results {
-            guard let history else { continue }
+            guard let history, !history.isEmpty else { continue }
             merge(history)
             loadedHistoryGames.insert(game)
         }
@@ -129,6 +131,12 @@ final class DrawStore {
     }
 
     // MARK: - 查询
+
+    /// 开奖日程（今日开奖、轮播顺序、待更新）的变化指纹。
+    /// 这几项算一次要过一遍八个彩种，页面拿它当 `task(id:)`，避免放进 body 每帧重算。
+    var scheduleToken: String {
+        "\(latestUpdatedAt)|\(calendar == nil ? 0 : 1)|\(draws.count)"
+    }
 
     func draws(for game: GameKey) -> [Draw] {
         drawsByGame[game] ?? []

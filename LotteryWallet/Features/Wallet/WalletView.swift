@@ -17,10 +17,8 @@ struct WalletView: View {
     /// 分组结果和各状态计数只在记录变化时算一次，不放进 body。
     @State private var batches: [TicketBatch] = []
     @State private var counts: [WalletFilter: Int] = [:]
-
-    private var visibleBatches: [TicketBatch] {
-        filter == .all ? batches : batches.filter { filter.matches($0.status) }
-    }
+    /// 筛选结果也存下来。放在 body 里当计算属性的话，每帧都要把全部电子票过一遍。
+    @State private var visibleBatches: [TicketBatch] = []
 
     var body: some View {
         NavigationStack {
@@ -58,14 +56,18 @@ struct WalletView: View {
                         }
                     }
                     .disabled(isChecking)
+                    .accessibilityLabel("重新核对全部票据")
                 }
             }
-            .overlay(alignment: .bottomTrailing) { floatingButtons }
+            .overlay(alignment: .bottomTrailing) {
+                FloatingActionButtons(onScan: onOpenScan, onAdd: onOpenEntry)
+            }
             .refreshable {
                 await drawStore.refresh()
                 await recheck(silent: true)
             }
             .task(id: RecordsToken(records)) { rebuild() }
+            .onChange(of: filter) { _, _ in applyFilter() }
         }
     }
 
@@ -77,6 +79,11 @@ struct WalletView: View {
             tally[item] = item == .all ? grouped.count : grouped.reduce(0) { $0 + (item.matches($1.status) ? 1 : 0) }
         }
         counts = tally
+        applyFilter()
+    }
+
+    private func applyFilter() {
+        visibleBatches = filter == .all ? batches : batches.filter { filter.matches($0.status) }
     }
 
     // MARK: - 筛选
@@ -91,13 +98,16 @@ struct WalletView: View {
                     } label: {
                         Text("\(item.label) \(counts[item] ?? 0)")
                             .font(.subheadline.weight(.medium))
-                            .foregroundStyle(isOn ? Color.white : Color.primary)
+                            .monospacedDigit()
+                            // 深色模式下 AccentColor 是浅蓝，白字压上去只有 1.9:1
+                            .foregroundStyle(isOn ? Palette.onAccent : Color.primary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 7)
                             .background(isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Palette.card),
                                         in: Capsule())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
                 }
             }
             .padding(.vertical, 2)
@@ -105,41 +115,33 @@ struct WalletView: View {
         .scrollClipDisabled()
     }
 
+    /// 空状态要分清是「一张票都没有」还是「筛选之后没有」。
+    /// 原来两种情况都说"票夹是空的 / 添加彩票"，用户会以为记录丢了。
+    @ViewBuilder
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("票夹是空的", systemImage: "wallet.bifold")
-        } description: {
-            Text("扫描纸质彩票，或手动录入已经购买的号码")
-        } actions: {
-            Button("添加彩票", action: onOpenEntry)
+        if batches.isEmpty {
+            ContentUnavailableView {
+                Label("票夹是空的", systemImage: "wallet.bifold")
+            } description: {
+                Text("扫描纸质彩票，或手动录入已经购买的号码")
+            } actions: {
+                Button("添加彩票", action: onOpenEntry)
+                    .buttonStyle(SecondaryGlassButton(tint: .accentColor))
+            }
+            .padding(.top, 50)
+        } else {
+            ContentUnavailableView {
+                Label("没有\(filter.label)的票", systemImage: "line.3.horizontal.decrease.circle")
+            } description: {
+                Text("这里只显示\(filter.label)的电子票，切回「全部」可以看到其余 \(batches.count) 张。")
+            } actions: {
+                Button("查看全部") {
+                    withAnimation(.easeOut(duration: 0.18)) { filter = .all }
+                }
                 .buttonStyle(SecondaryGlassButton(tint: .accentColor))
-        }
-        .padding(.top, 50)
-    }
-
-    private var floatingButtons: some View {
-        HStack(spacing: 12) {
-            Button(action: onOpenScan) {
-                Image(systemName: "camera.viewfinder")
-                    .font(.title3.weight(.semibold))
-                    .frame(width: 50, height: 50)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.accentColor)
-            .glassCircle()
-
-            Button(action: onOpenEntry) {
-                Image(systemName: "plus")
-                    .font(.title2.weight(.semibold))
-                    .frame(width: 56, height: 56)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white)
-            .background(Color.accentColor, in: Circle())
-            .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+            .padding(.top, 40)
         }
-        .padding(.trailing, 18)
-        .padding(.bottom, 22)
     }
 
     // MARK: - 动作

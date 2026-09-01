@@ -52,7 +52,7 @@ struct SettingsView: View {
                     LabeledContent {
                         Text(drawStore.calendar == nil ? "未获取" : "正常")
                             .font(.footnote)
-                            .foregroundStyle(drawStore.calendar == nil ? .orange : .secondary)
+                            .foregroundStyle(drawStore.calendar == nil ? Palette.warning : Color.secondary)
                     } label: {
                         row("calendar", .red, "开奖日历")
                     }
@@ -163,7 +163,10 @@ struct SettingsView: View {
 
     private var busyOverlay: some View {
         ZStack {
-            Color.black.opacity(0.12).ignoresSafeArea()
+            // 12% 的黑在深色模式下几乎看不出来，用材质两种模式都能压住底下的内容
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
             VStack(spacing: 12) {
                 ProgressView()
                 Text(busyLabel)
@@ -172,7 +175,10 @@ struct SettingsView: View {
             }
             .padding(24)
             .background(Palette.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: .black.opacity(0.15), radius: 16, y: 6)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(busyLabel)
     }
 
     private var backupFooter: String {

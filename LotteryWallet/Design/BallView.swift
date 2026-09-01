@@ -22,35 +22,35 @@ struct BallView: View {
         Text(label)
             .font(.system(size: size * 0.44, weight: .heavy, design: .rounded))
             .monospacedDigit()
-            .foregroundStyle(isHollow ? AnyShapeStyle(color.deep) : AnyShapeStyle(Color.white))
+            .foregroundStyle(isHollow ? color.accentColor : color.ink)
             .frame(width: size, height: size)
             .background {
                 if isHollow {
                     Circle()
-                        .fill(color.deep.opacity(0.10))
-                        .overlay(Circle().strokeBorder(color.deep.opacity(0.35), lineWidth: 1))
+                        .fill(color.accentColor.opacity(0.12))
+                        .overlay(Circle().strokeBorder(color.accentColor.opacity(0.38), lineWidth: 1))
                 } else {
                     Circle()
                         .fill(color.gradient)
                         .overlay(
-                            // 顶部高光，让球有体积
-                            Circle()
-                                .strokeBorder(.white.opacity(0.45), lineWidth: 0.8)
-                                .blendMode(.plusLighter)
+                            // 顶部高光，让球有体积。这里刻意不用 plusLighter：
+                            // 没有 compositingGroup 的加色混合会连页面底色一起提亮，
+                            // 在浅色模式下球周围会糊出一圈。
+                            Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.8)
                         )
+                }
+            }
+            .overlay {
+                if isHit {
+                    // 命中环紧贴球沿。父层已经整体放大 1.08，这里不能再叠一次缩放，
+                    // 否则环会被放到 1.17 倍，飘在球外面。
+                    Circle().strokeBorder(.white.opacity(0.9), lineWidth: 1.6)
                 }
             }
             .shadow(color: isHollow ? .clear : color.deep.opacity(isHit ? 0.5 : 0.28),
                     radius: isHit ? 8 : 4, y: isHit ? 3 : 2)
             .opacity(isDimmed ? 0.34 : 1)
             .scaleEffect(isHit ? 1.08 : 1)
-            .overlay {
-                if isHit {
-                    Circle()
-                        .strokeBorder(.white.opacity(0.9), lineWidth: 1.6)
-                        .scaleEffect(1.08)
-                }
-            }
             .animation(.spring(response: 0.34, dampingFraction: 0.62), value: isHit)
             .accessibilityLabel(Text(isHit ? "\(label) 已命中" : label))
     }

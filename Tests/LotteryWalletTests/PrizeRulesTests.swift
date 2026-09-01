@@ -200,4 +200,16 @@ final class PrizeRulesTests: XCTestCase {
         XCTAssertEqual(MoneyText.parse("1.2亿"), 120_000_000)
         XCTAssertEqual(MoneyText.parse(""), 0)
     }
+
+    /// 金额格式化不能因为异常输入崩掉。
+    /// `compact` 原来对整数走 `String(Int(value))`，超出 Int64 范围的 Double 会直接 trap，
+    /// 而 `parse` 完全可能从"9999999999亿"这种脏数据里解析出这么大的值。
+    func testMoneyFormattingHandlesExtremeValues() {
+        XCTAssertEqual(MoneyText.compact(Double.infinity), "0")
+        XCTAssertEqual(MoneyText.compact(Double.nan), "0")
+        XCTAssertEqual(MoneyText.format(Double.nan), "0元")
+        XCTAssertFalse(MoneyText.compact(1e30).isEmpty)
+        XCTAssertEqual(MoneyText.compact(12_000), "1.2万")
+        XCTAssertEqual(MoneyText.compactYuan(500), "500元")
+    }
 }

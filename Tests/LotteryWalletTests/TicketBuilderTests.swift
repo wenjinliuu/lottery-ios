@@ -71,14 +71,44 @@ final class TicketBuilderTests: XCTestCase {
 
     func testRandomTicketsRespectRanges() {
         for game in GameKey.ordered {
-            let ticket = TicketBuilder.randomTicket(game: game, playMode: game.defaultPlayMode)
+            let playMode = game.defaultPlayMode
+            let ticket = TicketBuilder.randomTicket(game: game, playMode: playMode)
             for section in game.sections {
                 let values = ticket[section.key]
-                XCTAssertEqual(values.count, section.count, "\(game.label) 的 \(section.label) 个数不对")
+                let need = game.pickCount(for: section, playMode: playMode)
+                XCTAssertEqual(values.count, need, "\(game.label) 的 \(section.label) 个数不对")
                 XCTAssertTrue(values.allSatisfy { section.range.contains($0) }, "\(game.label) 的 \(section.label) 越界")
                 if !section.isPositional {
                     XCTAssertEqual(Set(values).count, values.count, "\(game.label) 的 \(section.label) 不该重复")
                 }
+            }
+        }
+    }
+
+    /// 快乐8 选几个号由玩法决定，不是开奖的 20 个。
+    func testK8PickCountFollowsPlayMode() {
+        guard let section = GameKey.k8.sections.first else { return XCTFail("快乐8 没有号码区") }
+        XCTAssertEqual(GameKey.k8.pickCount(for: section, playMode: "5"), 5)
+        XCTAssertEqual(GameKey.k8.pickCount(for: section, playMode: "10"), 10)
+        // 玩法缺失时退回开奖个数，不至于算出 0 注
+        XCTAssertEqual(GameKey.k8.pickCount(for: section, playMode: ""), section.count)
+
+        let ticket = TicketBuilder.randomTicket(game: .k8, playMode: "5")
+        XCTAssertEqual(ticket[.nums].count, 5)
+        XCTAssertEqual(ticket.playCount, 5)
+
+        let selections: [SectionKey: SectionSelection] = [.nums: SectionSelection(selected: [1, 2, 3, 4, 5])]
+        XCTAssertEqual(
+            TicketBuilder.combinationCount(game: .k8, selections: selections, mode: .manual, playMode: "5"),
+            1
+        )
+    }
+
+    /// 其余彩种不受影响：选几个就是开奖开几个。
+    func testPickCountUnchangedForOtherGames() {
+        for game in GameKey.ordered where game != .k8 {
+            for section in game.sections {
+                XCTAssertEqual(game.pickCount(for: section, playMode: game.defaultPlayMode), section.count)
             }
         }
     }

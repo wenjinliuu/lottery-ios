@@ -22,6 +22,7 @@ struct TicketScanView: View {
     @State private var editedMultiple = 1
     @State private var editedAddOn = false
     @State private var editedTickets: [ScannedTicket] = []
+    @FocusState private var isIssueFocused: Bool
 
     enum Stage {
         case intro, scanning, review
@@ -43,6 +44,21 @@ struct TicketScanView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
                 }
+                // 期号用的是数字键盘，没有回车键。不给一个"完成"，
+                // 键盘弹起来之后就再也收不掉，底部的"加入票夹"被永久挡住。
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完成") { isIssueFocused = false }
+                }
+            }
+            // 复核页的错误（比如导入失败）原来只在入口页显示，等于静默失败
+            .alert("操作没有完成", isPresented: .init(
+                get: { errorText != nil && stage == .review },
+                set: { if !$0 { errorText = nil } }
+            )) {
+                Button("好", role: .cancel) { errorText = nil }
+            } message: {
+                Text(errorText ?? "")
             }
         }
         .fullScreenCover(isPresented: $isCameraPresented) {
@@ -87,7 +103,9 @@ struct TicketScanView: View {
             if let errorText {
                 Label(errorText, systemImage: "exclamationmark.triangle")
                     .font(.footnote)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Palette.warning)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
             }
 
             Spacer()
@@ -103,6 +121,7 @@ struct TicketScanView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 13)
                 }
+                .foregroundStyle(Color.accentColor)
                 .glassPill(tint: .accentColor)
             }
             .padding(.horizontal, 24)
@@ -119,7 +138,9 @@ struct TicketScanView: View {
                     .scaledToFit()
                     .frame(maxHeight: 280)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.3)))
+                    // 白色描边在浅色模式下等于没有，用系统分隔线色两种模式都看得见
+                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Palette.separator))
             }
             ProgressView()
             Text("正在本机识别号码…")
@@ -142,12 +163,10 @@ struct TicketScanView: View {
                             ForEach(result.warnings, id: \.self) { warning in
                                 Label(warning, systemImage: "exclamationmark.circle")
                                     .font(.caption)
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(Palette.warning)
                             }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(14)
-                        .contentCard(cornerRadius: 18)
+                        .contentCard(cornerRadius: 18, padding: 14)
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
@@ -156,21 +175,24 @@ struct TicketScanView: View {
                             TextField("期号", text: $editedIssue)
                                 .multilineTextAlignment(.trailing)
                                 .keyboardType(.numberPad)
+                                .focused($isIssueFocused)
                         }
                         Stepper("倍数 \(editedMultiple)", value: $editedMultiple, in: 1...99)
                         if game == .dlt {
                             Toggle("追加投注", isOn: $editedAddOn)
                         }
                     }
-                    .padding(16)
                     .contentCard()
 
                     VStack(alignment: .leading, spacing: 12) {
-                        SectionHeader(title: "识别到 \(editedTickets.count) 注", subtitle: "左滑可以删除认错的一注")
+                        // 这里是普通的 VStack，不是 List，本来就没有左滑删除。
+                        // 原文案写"左滑可以删除"，用户会一直左滑却什么都不发生。
+                        SectionHeader(title: "识别到 \(editedTickets.count) 注", subtitle: "点右侧减号删掉认错的一注")
                         ForEach(Array(editedTickets.enumerated()), id: \.element.id) { index, ticket in
                             HStack(spacing: 10) {
                                 Text("\(index + 1)")
                                     .font(.caption2.weight(.bold))
+                                    .monospacedDigit()
                                     .foregroundStyle(.secondary)
                                     .frame(width: 20)
                                 ScrollView(.horizontal, showsIndicators: false) {
@@ -183,16 +205,22 @@ struct TicketScanView: View {
                                 .scrollClipDisabled()
                                 Spacer(minLength: 0)
                                 Button {
-                                    editedTickets.removeAll { $0.id == ticket.id }
+                                    withAnimation(.easeOut(duration: 0.18)) {
+                                        editedTickets.removeAll { $0.id == ticket.id }
+                                    }
                                 } label: {
-                                    Image(systemName: "minus.circle")
+                                    Image(systemName: "minus.circle.fill")
+                                        .font(.title3)
                                         .foregroundStyle(.secondary)
+                                        // 图标本身只有 20pt 出头，够不上 44pt 的最小点击区
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel("删除第 \(index + 1) 注")
                             }
                         }
                     }
-                    .padding(16)
                     .contentCard()
 
                     DisclosureGroup("查看识别原文") {
@@ -202,27 +230,31 @@ struct TicketScanView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.top, 8)
                     }
-                    .padding(16)
                     .contentCard(cornerRadius: 18)
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 120)
+                // 底栏走的是 safeAreaInset，内容已经被顶上去了，不用再垫 120
+                .padding(.bottom, 20)
             }
+            .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 8) {
+                    Divider()
                     Text("\(editedTickets.count) 注 × \(editedMultiple) 倍 · \(MoneyText.format(Double(editedTickets.count) * game.unitPrice * Double(editedMultiple)))")
                         .font(.footnote)
+                        .monospacedDigit()
                         .foregroundStyle(.secondary)
                     HStack(spacing: 12) {
                         Button("重新扫描") { reset() }
                             .buttonStyle(SecondaryGlassButton(tint: game.tint))
+                            .fixedSize()
                         Button("加入票夹") { importTickets(game: game) }
-                            .buttonStyle(ProminentGlassButton(tint: game.tint))
+                            .buttonStyle(ProminentGlassButton(tint: game.tint, foreground: game.onTint))
                             .disabled(editedTickets.isEmpty || editedIssue.isEmpty)
                     }
+                    .padding(.horizontal, 16)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+                .padding(.bottom, 14)
                 .background(.bar)
             }
         } else {
@@ -231,7 +263,8 @@ struct TicketScanView: View {
                 .safeAreaInset(edge: .bottom) {
                     Button("重新扫描") { reset() }
                         .buttonStyle(ProminentGlassButton(tint: .accentColor))
-                        .padding(20)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
                 }
         }
     }
@@ -261,6 +294,8 @@ struct TicketScanView: View {
         preview = nil
         photoItem = nil
         editedTickets = []
+        errorText = nil
+        isIssueFocused = false
     }
 
     private func importTickets(game: GameKey) {

@@ -11,10 +11,15 @@ struct StatsView: View {
     @State private var entries: [SettledEntry] = []
     @State private var stats = ProfitStats.PeriodStats()
     @State private var years: [Int] = []
+    @State private var isShowingAllDays = false
+
+    /// 「每日明细」默认最多画这么多行。全年有记录的日子可以有三百多天，
+    /// 一次性把三百多行塞进一个非惰性的 VStack，滚到这里就会明显卡一下。
+    private static let dayPreviewLimit = 60
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            LazyVStack(spacing: 16) {
                 selector
                 kpiGrid
                 gameShareCard
@@ -41,6 +46,8 @@ struct StatsView: View {
 
     private func recompute() {
         stats = ProfitStats.period(entries: entries, year: year, month: month)
+        // 换年 / 换月之后重新收起，否则从"全年"切到某个月还留着展开状态
+        isShowingAllDays = false
     }
 
     // MARK: - 年月选择
@@ -68,10 +75,12 @@ struct StatsView: View {
 
     private var kpiGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 2), spacing: 12) {
-            kpi("投入", MoneyText.format(stats.cost), "cart", .secondary)
+            // 数值本身用 primary。原来给"投入""中奖率"传的是 .secondary，
+            // KPI 最该看清的那个数字反而是灰的。
+            kpi("投入", MoneyText.format(stats.cost), "cart", .primary)
             kpi("奖金", MoneyText.format(stats.prize), "trophy", Palette.profit)
             kpi("盈亏", MoneyText.format(stats.net), "chart.line.uptrend.xyaxis", Palette.profitColor(stats.net))
-            kpi("中奖率", String(format: "%.1f%%", stats.winRate), "target", .secondary)
+            kpi("中奖率", String(format: "%.1f%%", stats.winRate), "target", .primary)
         }
     }
 
@@ -137,32 +146,43 @@ struct StatsView: View {
     }
 
     private var calendarCard: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let visible = isShowingAllDays ? stats.byDay : Array(stats.byDay.prefix(Self.dayPreviewLimit))
+        let hidden = stats.byDay.count - visible.count
+        return VStack(alignment: .leading, spacing: 4) {
             SectionHeader(title: "每日明细",
                           subtitle: month == nil ? "全年有记录的日子" : "\(month ?? 0) 月")
                 .padding(.bottom, 8)
             if stats.byDay.isEmpty {
                 emptyHint
             } else {
-                ForEach(stats.byDay) { day in
-                    HStack {
+                ForEach(visible) { day in
+                    HStack(spacing: 8) {
                         Text(DateText.monthDay(day.date))
                             .font(.subheadline)
                             .monospacedDigit()
-                        Spacer()
+                        Spacer(minLength: 4)
                         Text("\(day.count) 注")
                             .font(.caption)
+                            .monospacedDigit()
                             .foregroundStyle(.secondary)
                         Text(MoneyText.format(day.net))
                             .font(.subheadline.weight(.medium))
                             .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                             .foregroundStyle(Palette.profitColor(day.net))
-                            .frame(width: 90, alignment: .trailing)
+                            .frame(width: 96, alignment: .trailing)
                     }
                     .padding(.vertical, 9)
-                    if day.id != stats.byDay.last?.id {
+                    if day.id != visible.last?.id {
                         Divider()
                     }
+                }
+                if hidden > 0 {
+                    Divider()
+                    Button("展开其余 \(hidden) 天") { isShowingAllDays = true }
+                        .font(.subheadline)
+                        .padding(.top, 10)
                 }
             }
         }

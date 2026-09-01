@@ -57,21 +57,20 @@ enum TicketBuilder {
     static func randomTicket(game: GameKey, playMode: String) -> Ticket {
         var numbers = NumberSet()
         for section in game.sections {
+            // 快乐8 选几个号由玩法决定，不是开奖的 20 个。
+            // 之前一律按 section.count 机选，选十的票上会出现 20 个球，判奖也对不上。
+            let need = game.pickCount(for: section, playMode: playMode)
             if section.isPositional {
                 // 数字型玩法按位取值，允许重复
-                numbers[section.key] = (0..<section.count).map { _ in Int.random(in: section.range) }
+                numbers[section.key] = (0..<need).map { _ in Int.random(in: section.range) }
             } else {
-                numbers[section.key] = pickUnique(count: section.count, from: section.range).sorted()
+                numbers[section.key] = pickUnique(count: need, from: section.range).sorted()
             }
         }
         var ticket = Ticket(numbers: numbers, playMode: playMode, entryLabel: EntryMode.random.label)
-        if game == .k8 { ticket.playCount = Int(playMode) ?? sectionCount(game) }
+        if game == .k8 { ticket.playCount = numbers[.nums].count }
         ticket.addOn = game == .dlt && playMode == "add"
         return ticket
-    }
-
-    private static func sectionCount(_ game: GameKey) -> Int {
-        game.sections.first?.count ?? 0
     }
 
     static func pickUnique(count: Int, from range: ClosedRange<Int>) -> [Int] {
@@ -92,19 +91,20 @@ enum TicketBuilder {
         var perSection: [(key: SectionKey, groups: [[Int]])] = []
         for section in game.sections {
             let selection = selections[section.key] ?? SectionSelection()
+            let need = game.pickCount(for: section, playMode: playMode)
             let groups: [[Int]]
             switch mode {
             case .manual, .random:
-                guard selection.selected.count == section.count else { return [] }
+                guard selection.selected.count == need else { return [] }
                 groups = [section.isPositional ? selection.selected : selection.selected.sorted()]
             case .system:
-                guard selection.selected.count >= section.count else { return [] }
-                groups = combinations(of: selection.selected.sorted(), choose: section.count)
+                guard selection.selected.count >= need else { return [] }
+                groups = combinations(of: selection.selected.sorted(), choose: need)
             case .dantuo:
                 let dan = selection.dan.sorted()
                 let tuo = selection.tuo.sorted()
-                guard dan.count < section.count, dan.count + tuo.count >= section.count else { return [] }
-                groups = combinations(of: tuo, choose: section.count - dan.count).map { (dan + $0).sorted() }
+                guard dan.count < need, dan.count + tuo.count >= need else { return [] }
+                groups = combinations(of: tuo, choose: need - dan.count).map { (dan + $0).sorted() }
             }
             if groups.isEmpty { return [] }
             perSection.append((section.key, groups))
@@ -126,7 +126,7 @@ enum TicketBuilder {
             }
             tickets = next
         }
-        if game == .k8 { tickets = tickets.map { var t = $0; t.playCount = Int(playMode); return t } }
+        if game == .k8 { tickets = tickets.map { var t = $0; t.playCount = t[.nums].count; return t } }
         if game == .dlt && addOn { tickets = tickets.map { var t = $0; t.addOn = true; return t } }
         return tickets
     }
@@ -134,21 +134,23 @@ enum TicketBuilder {
     /// 展开后的注数，用于在保存前给用户看"共 N 注 / 合计 M 元"。
     static func combinationCount(game: GameKey,
                                  selections: [SectionKey: SectionSelection],
-                                 mode: EntryMode) -> Int {
+                                 mode: EntryMode,
+                                 playMode: String = "") -> Int {
         var total = 1
         for section in game.sections {
             let selection = selections[section.key] ?? SectionSelection()
+            let need = game.pickCount(for: section, playMode: playMode)
             switch mode {
             case .manual, .random:
-                guard selection.selected.count == section.count else { return 0 }
+                guard selection.selected.count == need else { return 0 }
             case .system:
-                guard selection.selected.count >= section.count else { return 0 }
-                total *= binomial(selection.selected.count, section.count)
+                guard selection.selected.count >= need else { return 0 }
+                total *= binomial(selection.selected.count, need)
             case .dantuo:
                 let dan = selection.dan.count
                 let tuo = selection.tuo.count
-                guard dan < section.count, dan + tuo >= section.count else { return 0 }
-                total *= binomial(tuo, section.count - dan)
+                guard dan < need, dan + tuo >= need else { return 0 }
+                total *= binomial(tuo, need - dan)
             }
             if total > maxCombinations { return total }
         }

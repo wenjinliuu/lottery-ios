@@ -118,6 +118,15 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         }
     }
 
+    /// 投注时这个号码区实际要选几个号。
+    ///
+    /// 快乐8 的 `section.count` 是**开奖**开出的 20 个号，投注选几个由玩法决定
+    /// （选一 … 选十）。其余彩种两者一致。
+    func pickCount(for section: GameSection, playMode: String) -> Int {
+        guard self == .k8 else { return section.count }
+        return Int(playMode) ?? section.count
+    }
+
     /// 开奖号的号码区定义，多数与投注票相同，七乐彩多一个特别号。
     var drawSections: [GameSection] {
         switch self {
