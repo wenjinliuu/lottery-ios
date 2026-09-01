@@ -1,49 +1,43 @@
 import SwiftUI
 
-/// 电子票纸张背景。玻璃打底，叠一层彩种色辉光，
-/// 左右腰部各盖一个与页面同色的小圆，做出撕票孔，
-/// 对应 web 版 `.wallet-ticket::before/::after`。
+/// 电子票纸张。不透明卡片打底，右上角压一层很淡的彩种色，
+/// 左右腰部各盖一个与页面同色的小圆做撕票孔，
+/// 对应 web 版 `.wallet-ticket` 及其 `::before/::after`。
 struct TicketPaper<Content: View>: View {
     let game: GameKey
     /// 缺口在票面高度上的位置比例。
     var notchPosition: CGFloat = 0.5
     @ViewBuilder var content: Content
 
-    private let cornerRadius: CGFloat = 25
-    private let notchDiameter: CGFloat = 17
+    private let cornerRadius: CGFloat = 18
+    private let notchDiameter: CGFloat = 16
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content
             .padding(.horizontal, 16)
-            .padding(.top, 17)
+            .padding(.top, 15)
             .padding(.bottom, 13)
             .background {
                 ZStack {
-                    // 右上角的彩种辉光，对应 web 版的 radial-gradient
+                    Palette.card
+                    // 右上角的彩种辉光，很轻，只用来区分彩种
                     RadialGradient(
-                        colors: [game.tint.opacity(0.20), .clear],
+                        colors: [game.tint.opacity(0.13), .clear],
                         center: .init(x: 1, y: 0),
                         startRadius: 0,
-                        endRadius: 240
-                    )
-                    LinearGradient(
-                        colors: [game.tint.opacity(0.10), .clear],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                        endRadius: 200
                     )
                 }
                 .clipShape(shape)
             }
-            .glassEffect(GlassStyle.card(tint: game.tint), in: shape)
             .overlay {
-                shape.stroke(game.tint.opacity(0.20), lineWidth: 1)
+                shape.stroke(game.tint.opacity(0.14), lineWidth: 1)
             }
             .overlay(alignment: .topLeading) { notches }
-            .shadow(color: game.tint.opacity(0.14), radius: 12, y: 5)
     }
 
-    /// 左右两个撕票孔。用 GeometryReader 换算缺口的纵向位置。
+    /// 左右两个撕票孔。
     private var notches: some View {
         GeometryReader { proxy in
             let y = proxy.size.height * min(max(notchPosition, 0.08), 0.92)
@@ -57,19 +51,18 @@ struct TicketPaper<Content: View>: View {
 
     private var notch: some View {
         Circle()
-            .fill(Color(.systemGroupedBackground))
-            .overlay(Circle().strokeBorder(game.tint.opacity(0.12), lineWidth: 1))
+            .fill(Palette.canvas)
             .frame(width: notchDiameter, height: notchDiameter)
     }
 }
 
-/// 票面上的虚线分隔，对应 web 版 `border-bottom: 1px dashed`。
+/// 票面上的虚线分隔。
 struct TicketDivider: View {
     var tint: Color
 
     var body: some View {
         Line()
-            .stroke(tint.opacity(0.28), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            .stroke(tint.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
             .frame(height: 1)
     }
 
@@ -88,16 +81,16 @@ struct StatusChip: View {
     let status: RecordStatus
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 3) {
             Image(systemName: status.symbol)
-                .font(.caption2.weight(.bold))
+                .font(.system(size: 9, weight: .bold))
             Text(status.label)
-                .font(.caption2.weight(.heavy))
+                .font(.caption2.weight(.semibold))
         }
         .foregroundStyle(status.tint)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(status.tint.opacity(0.14), in: Capsule())
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(status.tint.opacity(0.13), in: Capsule())
     }
 }
 

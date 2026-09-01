@@ -45,6 +45,11 @@ enum EntryKind: String, Codable, Sendable {
 }
 
 /// 一注彩票记录。一次购买生成一个 `batchId`，一张电子票即一个 batch。
+///
+/// 设计要点：凡是渲染或统计要反复读的值，一律**落库存好**，
+/// 不在视图里现算。早期版本把号码存成 JSON、把统计日期临时解析，
+/// 导致列表每帧都要做成千上万次 JSONDecoder 和 DateFormatter 调用，
+/// 记录一多就直接卡死主线程。
 @Model
 final class TicketRecord {
     @Attribute(.unique) var id: String
@@ -63,7 +68,7 @@ final class TicketRecord {
     var targetOpenTime: String
     var targetBuyEndTime: String
     var targetSourceDrawId: String
-    /// "confirmed" / "inferred"。
+    /// "confirmed" / "inferred" / "review"。
     var targetStatusRaw: String
     var targetSource: String
     var targetBasisIssue: String
@@ -77,9 +82,22 @@ final class TicketRecord {
     var statusRaw: String
     var resultText: String
     var prizeAmount: Double
+    /// 中奖等级名，核对时写入，列表直接读，不再重算。
+    var prizeName: String
+    /// 逐球命中标记的编码，核对时写入，票面展开直接读。
+    var matchedData: Data
     var source: String
     var createdAt: Date
     var updatedAt: Date
+
+    /// 计入盈亏的日期（yyyy-MM-dd），写入时算好。
+    /// 统计要按天分组，如果每次都去解析日期字符串，几百条记录就能拖垮一帧。
+    var profitDay: String
+
+    // MARK: - 解码缓存（不落库）
+
+    @Transient private var ticketCache: Ticket?
+    @Transient private var matchedCache: [SectionKey: [Bool]]?
 
     init(id: String,
          batchId: String,
@@ -115,9 +133,14 @@ final class TicketRecord {
         self.statusRaw = RecordStatus.pending.rawValue
         self.resultText = RecordStatus.pending.label
         self.prizeAmount = 0
+        self.prizeName = ""
+        self.matchedData = Data()
         self.source = source
         self.createdAt = createdAt
         self.updatedAt = createdAt
+        self.profitDay = TicketRecord.profitDay(openDate: target.openDate,
+                                                openTime: target.openTime,
+                                                createdAt: createdAt)
     }
 
     // MARK: - 派生属性
@@ -142,9 +165,36 @@ final class TicketRecord {
         set { targetStatusRaw = newValue.rawValue }
     }
 
+    /// 号码。首次访问解码一次，之后走内存缓存。
     var ticket: Ticket {
-        get { (try? JSONDecoder().decode(Ticket.self, from: numbersData)) ?? Ticket() }
-        set { numbersData = (try? JSONEncoder().encode(newValue)) ?? Data() }
+        get {
+            if let ticketCache { return ticketCache }
+            let decoded = (try? JSONDecoder().decode(Ticket.self, from: numbersData)) ?? Ticket()
+            ticketCache = decoded
+            return decoded
+        }
+        set {
+            ticketCache = newValue
+            numbersData = (try? JSONEncoder().encode(newValue)) ?? Data()
+        }
+    }
+
+    /// 逐球命中标记。没核对过就是空字典。
+    var matched: [SectionKey: [Bool]] {
+        get {
+            if let matchedCache { return matchedCache }
+            guard !matchedData.isEmpty,
+                  let decoded = try? JSONDecoder().decode([SectionKey: [Bool]].self, from: matchedData) else {
+                matchedCache = [:]
+                return [:]
+            }
+            matchedCache = decoded
+            return decoded
+        }
+        set {
+            matchedCache = newValue
+            matchedData = (try? JSONEncoder().encode(newValue)) ?? Data()
+        }
     }
 
     /// 这一注的投入金额。
@@ -153,8 +203,20 @@ final class TicketRecord {
     /// 净盈亏，未开奖按 0 计。
     var netProfit: Double { prizeAmount - cost }
 
-    /// 是否还需要核对。
-    var needsEvaluation: Bool { !status.isFinal || status == .prizeFloat }
+    /// 绑定期次变化后同步重算统计日期。
+    func refreshProfitDay() {
+        profitDay = TicketRecord.profitDay(openDate: targetOpenDate,
+                                           openTime: targetOpenTime,
+                                           createdAt: createdAt)
+    }
+
+    /// 计入盈亏的日期：优先绑定的开奖日，其次开奖时刻，最后记录创建日。
+    static func profitDay(openDate: String, openTime: String, createdAt: Date) -> String {
+        for candidate in [openDate, openTime] where !candidate.isEmpty {
+            if let date = DateText.parse(candidate) { return DateText.day(date) }
+        }
+        return DateText.day(createdAt)
+    }
 }
 
 /// 录入时绑定的开奖期次。

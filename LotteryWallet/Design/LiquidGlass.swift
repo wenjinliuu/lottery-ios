@@ -1,24 +1,33 @@
 import SwiftUI
 
-/// 液态玻璃的统一封装。
+/// 视觉分层的统一封装。
+///
+/// 分层原则按苹果自己的用法来：
+/// **液态玻璃属于悬浮在内容之上的导航层**（标签栏、工具栏、悬浮按钮、轻提示），
+/// 内容本身坐在系统分组背景上，用不透明卡片承载。
+/// 早期版本把玻璃铺满内容卡片，结果底下没东西可折射，整页发灰发糊。
 ///
 /// 所有 iOS 26 的 Liquid Glass 系统 API 都只在这一个文件里出现，
-/// 页面代码一律走下面这些语义化修饰符。这样 SDK 若调整签名，
-/// 改动范围就锁在这里，不会散落到二十几个视图里。
+/// 页面代码一律走下面这些语义化修饰符。
 extension View {
 
-    /// 卡片级玻璃：首页趋势卡、统计卡、设置分组。
-    func glassCard(cornerRadius: CGFloat = 26, tint: Color? = nil) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        return glassEffect(GlassStyle.card(tint: tint), in: shape)
+    /// 内容卡片：分组列表里的那种白底圆角块，不是玻璃。
+    func contentCard(cornerRadius: CGFloat = 16, padding: CGFloat = 16) -> some View {
+        self
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color(.secondarySystemGroupedBackground))
+            )
     }
 
-    /// 胶囊玻璃：筛选 chip、分段控件、悬浮按钮。
+    /// 胶囊玻璃：悬浮在内容之上的筛选 chip、分段控件。
     func glassPill(tint: Color? = nil, interactive: Bool = true) -> some View {
         glassEffect(GlassStyle.pill(tint: tint, interactive: interactive), in: Capsule())
     }
 
-    /// 圆形玻璃：右下角悬浮扫描/添加按钮。
+    /// 圆形玻璃：右下角悬浮扫描 / 添加按钮。
     func glassCircle(tint: Color? = nil) -> some View {
         glassEffect(GlassStyle.pill(tint: tint, interactive: true), in: Circle())
     }
@@ -31,12 +40,6 @@ extension View {
 
 /// Glass 配置的集中定义。
 enum GlassStyle {
-    static func card(tint: Color?) -> Glass {
-        guard let tint else { return .regular }
-        // 淡淡染上彩种色，让玻璃"知道"自己属于哪个彩种，但不喧宾夺主。
-        return Glass.regular.tint(tint.opacity(0.14))
-    }
-
     static func pill(tint: Color?, interactive: Bool) -> Glass {
         var glass = Glass.regular
         if let tint { glass = glass.tint(tint.opacity(0.22)) }
@@ -46,7 +49,7 @@ enum GlassStyle {
 }
 
 /// 一组会互相融合的玻璃元素。放在同一个容器里，
-/// 出现/消失/移动时系统会做液态形变而不是各自淡入淡出。
+/// 出现 / 消失 / 移动时系统会做液态形变而不是各自淡入淡出。
 struct GlassGroup<Content: View>: View {
     var spacing: CGFloat = 16
     @ViewBuilder var content: Content
@@ -68,17 +71,14 @@ struct ProminentGlassButton: ButtonStyle {
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 15)
-            .background(tint.gradientFill, in: Capsule())
-            .overlay(
-                Capsule().strokeBorder(.white.opacity(0.30), lineWidth: 0.8)
-            )
-            .shadow(color: tint.opacity(0.35), radius: 14, y: 6)
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
+            .background(tint, in: Capsule())
+            .opacity(configuration.isPressed ? 0.86 : 1)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.75), value: configuration.isPressed)
     }
 }
 
-/// 次级操作按钮：玻璃底 + 彩种色文字。
+/// 次级操作按钮：淡色底 + 彩种色文字。
 struct SecondaryGlassButton: ButtonStyle {
     var tint: Color
 
@@ -87,25 +87,14 @@ struct SecondaryGlassButton: ButtonStyle {
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(tint)
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .glassPill(tint: tint)
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .animation(.spring(response: 0.28, dampingFraction: 0.72), value: configuration.isPressed)
+            .padding(.vertical, 9)
+            .background(tint.opacity(0.12), in: Capsule())
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
     }
 }
 
-extension Color {
-    /// 主按钮用的同色微渐变，比纯色更有体积感。
-    var gradientFill: LinearGradient {
-        LinearGradient(
-            colors: [opacity(0.92), self],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-    }
-}
-
-/// 分区标题，对应 web 版 `.section-title`。
+/// 分区标题。
 struct SectionHeader: View {
     let title: String
     var subtitle: String?
@@ -137,5 +126,23 @@ struct SectionHeader: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+}
+
+/// 设置页那种圆角方形彩色图标，和系统「设置」保持一致的观感。
+struct SettingsIcon: View {
+    let symbol: String
+    let tint: Color
+    var size: CGFloat = 29
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.235, style: .continuous)
+            .fill(tint)
+            .frame(width: size, height: size)
+            .overlay(
+                Image(systemName: symbol)
+                    .font(.system(size: size * 0.52, weight: .semibold))
+                    .foregroundStyle(.white)
+            )
     }
 }

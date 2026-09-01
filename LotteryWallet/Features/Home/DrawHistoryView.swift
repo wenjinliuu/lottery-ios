@@ -28,8 +28,7 @@ struct DrawHistoryView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 40)
             }
-            .background { Palette.canvas(game.tint) }
-            .scrollEdgeEffectStyle(.soft, for: .top)
+            .background(Palette.canvas)
             .navigationTitle("往期开奖")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -94,6 +93,6 @@ struct DrawHistoryRow: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(cornerRadius: 20, tint: draw.gameKey.tint)
+        .contentCard(cornerRadius: 20)
     }
 }

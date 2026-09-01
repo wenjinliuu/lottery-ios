@@ -33,6 +33,12 @@ final class DrawStore {
     private(set) var loadFailed = false
     private(set) var loadedHistoryGames: Set<GameKey> = []
 
+    /// 按彩种+期号建索引。核对成百上千条记录时，每条都去线性扫全部开奖
+    /// 是 O(记录 × 开奖)，几百条就能让主线程停住。
+    private var drawIndex: [GameKey: [String: Draw]] = [:]
+    private var latestByGame: [GameKey: Draw] = [:]
+    private var drawsByGame: [GameKey: [Draw]] = [:]
+
     private let client: LotteryDataClient
 
     init(client: LotteryDataClient = .shared) {
@@ -94,13 +100,27 @@ final class DrawStore {
         }
     }
 
-    /// 去重后按开奖时间倒序，逻辑同 web 版 `dedupeDraws`。
+    /// 去重后按开奖时间倒序，逻辑同 web 版 `dedupeDraws`，顺带重建索引。
     private func merge(_ incoming: [Draw]) {
         var map = Dictionary(draws.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for draw in incoming where !draw.expect.isEmpty {
             map[draw.id] = draw
         }
         draws = map.values.sorted(by: Self.newerFirst)
+        rebuildIndex()
+    }
+
+    private func rebuildIndex() {
+        var byGame: [GameKey: [Draw]] = [:]
+        var index: [GameKey: [String: Draw]] = [:]
+        for draw in draws {
+            byGame[draw.gameKey, default: []].append(draw)
+            index[draw.gameKey, default: [:]][draw.expect] = draw
+        }
+        drawsByGame = byGame
+        drawIndex = index
+        // draws 已按时间倒序，每个彩种的第一条就是最新一期
+        latestByGame = byGame.compactMapValues(\.first)
     }
 
     static func newerFirst(_ lhs: Draw, _ rhs: Draw) -> Bool {
@@ -111,22 +131,21 @@ final class DrawStore {
     // MARK: - 查询
 
     func draws(for game: GameKey) -> [Draw] {
-        draws.filter { $0.gameKey == game }
+        drawsByGame[game] ?? []
     }
 
     func latestDraw(for game: GameKey) -> Draw? {
-        draws(for: game).first
+        latestByGame[game]
     }
 
     func draw(for game: GameKey, expect: String) -> Draw? {
-        draws.first { $0.gameKey == game && $0.expect == expect }
+        drawIndex[game]?[expect]
     }
 
-    /// 记录对应的开奖期。优先按绑定期号精确匹配，其次取购买日之后最早的一期。
+    /// 记录对应的开奖期。优先按绑定期号走索引，其次取购买日之后最早的一期。
     func draw(matching record: TicketRecord) -> Draw? {
-        let expect = record.targetExpect
-        if !expect.isEmpty {
-            return draw(for: record.game, expect: expect)
+        if !record.targetExpect.isEmpty {
+            return drawIndex[record.game]?[record.targetExpect]
         }
         let createdDay = DateText.day(record.createdAt)
         return draws(for: record.game)

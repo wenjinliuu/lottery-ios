@@ -14,19 +14,18 @@ struct WalletView: View {
     @State private var filter: WalletFilter = .all
     @State private var expandedBatches: Set<String> = []
     @State private var isChecking = false
-
-    private var batches: [TicketBatch] {
-        TicketBatch.group(records)
-    }
+    /// 分组结果和各状态计数只在记录变化时算一次，不放进 body。
+    @State private var batches: [TicketBatch] = []
+    @State private var counts: [WalletFilter: Int] = [:]
 
     private var visibleBatches: [TicketBatch] {
-        batches.filter { filter.matches($0.status) }
+        filter == .all ? batches : batches.filter { filter.matches($0.status) }
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(spacing: 13) {
+                LazyVStack(spacing: 12) {
                     filterBar
                     if visibleBatches.isEmpty {
                         emptyState
@@ -42,10 +41,10 @@ struct WalletView: View {
                     }
                 }
                 .padding(.horizontal, 16)
+                .padding(.top, 4)
                 .padding(.bottom, 120)
             }
-            .background { Palette.canvas(Color.accentColor) }
-            .scrollEdgeEffectStyle(.soft, for: .top)
+            .background(Palette.canvas)
             .navigationTitle("票夹")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -66,37 +65,42 @@ struct WalletView: View {
                 await drawStore.refresh()
                 await recheck(silent: true)
             }
+            .task(id: RecordsToken(records)) { rebuild() }
         }
+    }
+
+    private func rebuild() {
+        let grouped = TicketBatch.group(records)
+        batches = grouped
+        var tally: [WalletFilter: Int] = [:]
+        for item in WalletFilter.allCases {
+            tally[item] = item == .all ? grouped.count : grouped.reduce(0) { $0 + (item.matches($1.status) ? 1 : 0) }
+        }
+        counts = tally
     }
 
     // MARK: - 筛选
 
     private var filterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            GlassGroup(spacing: 10) {
-                HStack(spacing: 8) {
-                    ForEach(WalletFilter.allCases) { item in
-                        let count = batches.filter { item.matches($0.status) }.count
-                        Button {
-                            withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) { filter = item }
-                        } label: {
-                            Text("\(item.label) \(count)")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(filter == item ? .white : Color.primary)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                        }
-                        .buttonStyle(.plain)
-                        .background {
-                            if filter == item {
-                                Capsule().fill(Color.accentColor.gradientFill)
-                            }
-                        }
-                        .glassPill(tint: filter == item ? Color.accentColor : nil)
+            HStack(spacing: 8) {
+                ForEach(WalletFilter.allCases) { item in
+                    let isOn = filter == item
+                    Button {
+                        withAnimation(.easeOut(duration: 0.18)) { filter = item }
+                    } label: {
+                        Text("\(item.label) \(counts[item] ?? 0)")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(isOn ? Color.white : Color.primary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Palette.card),
+                                        in: Capsule())
                     }
+                    .buttonStyle(.plain)
                 }
-                .padding(.vertical, 2)
             }
+            .padding(.vertical, 2)
         }
         .scrollClipDisabled()
     }
@@ -110,7 +114,7 @@ struct WalletView: View {
             Button("添加彩票", action: onOpenEntry)
                 .buttonStyle(SecondaryGlassButton(tint: .accentColor))
         }
-        .padding(.top, 60)
+        .padding(.top, 50)
     }
 
     private var floatingButtons: some View {
@@ -118,30 +122,30 @@ struct WalletView: View {
             Button(action: onOpenScan) {
                 Image(systemName: "camera.viewfinder")
                     .font(.title3.weight(.semibold))
-                    .frame(width: 52, height: 52)
+                    .frame(width: 50, height: 50)
             }
             .buttonStyle(.plain)
             .foregroundStyle(Color.accentColor)
-            .glassCircle(tint: .accentColor)
+            .glassCircle()
 
             Button(action: onOpenEntry) {
                 Image(systemName: "plus")
                     .font(.title2.weight(.semibold))
-                    .frame(width: 58, height: 58)
+                    .frame(width: 56, height: 56)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.white)
-            .background(Color.accentColor.gradientFill, in: Circle())
-            .shadow(color: Color.accentColor.opacity(0.4), radius: 14, y: 6)
+            .background(Color.accentColor, in: Circle())
+            .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
         }
         .padding(.trailing, 18)
-        .padding(.bottom, 24)
+        .padding(.bottom, 22)
     }
 
     // MARK: - 动作
 
     private func toggle(_ batch: TicketBatch) {
-        withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
+        withAnimation(.easeOut(duration: 0.22)) {
             if expandedBatches.contains(batch.id) {
                 expandedBatches.remove(batch.id)
             } else {
@@ -151,9 +155,8 @@ struct WalletView: View {
     }
 
     private func delete(_ batch: TicketBatch) {
-        let service = RecordService(context: context, drawStore: drawStore)
         do {
-            try service.delete(batchId: batch.id)
+            try RecordService(context: context, drawStore: drawStore).delete(batchId: batch.id)
             showToast("已删除这张票", symbol: "trash")
         } catch {
             showToast("删除失败", symbol: "exclamationmark.triangle")
@@ -165,7 +168,7 @@ struct WalletView: View {
         defer { isChecking = false }
         await drawStore.loadAllHistories()
         let service = RecordService(context: context, drawStore: drawStore)
-        guard let outcome = try? service.checkAll() else {
+        guard let outcome = try? service.checkAll(records) else {
             if !silent { showToast("核对失败", symbol: "exclamationmark.triangle") }
             return
         }

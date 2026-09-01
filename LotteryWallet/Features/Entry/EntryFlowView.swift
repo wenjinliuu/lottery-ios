@@ -56,8 +56,7 @@ struct EntryFlowView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 130)
             }
-            .background { Palette.canvas(game.tint) }
-            .scrollEdgeEffectStyle(.soft, for: .top)
+            .background(Palette.canvas)
             .navigationTitle("添加彩票")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -97,7 +96,7 @@ struct EntryFlowView: View {
             }
         }
         .padding(16)
-        .glassCard(tint: game.tint)
+        .contentCard()
     }
 
     private func gameChip(_ item: GameKey) -> some View {
@@ -139,7 +138,7 @@ struct EntryFlowView: View {
             .pickerStyle(.segmented)
         }
         .padding(16)
-        .glassCard(tint: game.tint)
+        .contentCard()
     }
 
     private var modePicker: some View {
@@ -181,7 +180,7 @@ struct EntryFlowView: View {
             .foregroundStyle(.secondary)
         }
         .padding(16)
-        .glassCard(tint: game.tint)
+        .contentCard()
     }
 
     // MARK: - 随机
@@ -219,7 +218,7 @@ struct EntryFlowView: View {
             }
         }
         .padding(16)
-        .glassCard(tint: game.tint)
+        .contentCard()
     }
 
     // MARK: - 手动选号
@@ -256,7 +255,7 @@ struct EntryFlowView: View {
             }
         }
         .padding(16)
-        .glassCard(tint: game.tint)
+        .contentCard()
     }
 
     private func binding(for key: SectionKey) -> Binding<SectionSelection> {
@@ -282,7 +281,7 @@ struct EntryFlowView: View {
             .fixedSize()
         }
         .padding(16)
-        .glassCard(tint: game.tint)
+        .contentCard()
     }
 
     // MARK: - 底栏

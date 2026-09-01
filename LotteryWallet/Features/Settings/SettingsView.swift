@@ -14,65 +14,62 @@ struct SettingsView: View {
     @State private var exportDocument: BackupDocument?
     @State private var isClearConfirmPresented = false
     @State private var isRefreshing = false
+    @State private var isBusy = false
+    @State private var busyLabel = ""
 
     var body: some View {
         @Bindable var settings = settings
 
         NavigationStack {
             Form {
-                Section("核对") {
+                Section {
                     Toggle(isOn: $settings.autoCheck) {
-                        Label("开奖后自动核对", systemImage: "checkmark.circle")
+                        row("checkmark.circle.fill", .green, "开奖后自动核对")
                     }
-                    Text("开启后，每次打开应用并拿到新开奖数据时自动核对待开奖的票据。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                } footer: {
+                    Text("每次打开应用并拿到新开奖数据时，自动核对待开奖的票据。")
                 }
 
-                Section("外观") {
+                Section {
                     Picker(selection: $settings.appearance) {
                         ForEach(AppSettings.Appearance.allCases) { item in
                             Label(item.label, systemImage: item.symbol).tag(item)
                         }
                     } label: {
-                        Label("主题", systemImage: "paintbrush")
+                        row("circle.lefthalf.filled", .indigo, "外观")
                     }
                 }
 
                 Section {
                     LabeledContent {
                         Text(drawStore.latestUpdatedAt.isEmpty ? "暂无" : DateText.friendly(drawStore.latestUpdatedAt))
-                            .font(.caption)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     } label: {
-                        Label("开奖数据", systemImage: "arrow.down.circle")
+                        row("arrow.down.circle.fill", .blue, "开奖数据")
                     }
 
                     LabeledContent {
                         Text(drawStore.calendar == nil ? "未获取" : "正常")
-                            .font(.caption)
+                            .font(.footnote)
                             .foregroundStyle(drawStore.calendar == nil ? .orange : .secondary)
                     } label: {
-                        Label("开奖日历", systemImage: "calendar")
+                        row("calendar", .red, "开奖日历")
                     }
 
                     LabeledContent {
-                        Text("\(drawStore.loadedHistoryGames.count)/\(GameKey.ordered.count) 个彩种")
-                            .font(.caption)
+                        Text("\(drawStore.loadedHistoryGames.count)/\(GameKey.ordered.count)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     } label: {
-                        Label("往期缓存", systemImage: "externaldrive")
+                        row("externaldrive.fill", .gray, "往期缓存")
                     }
 
                     Button {
-                        Task {
-                            isRefreshing = true
-                            await drawStore.refresh()
-                            await drawStore.loadAllHistories()
-                            isRefreshing = false
-                            showToast("数据状态已更新")
-                        }
+                        refreshData()
                     } label: {
                         HStack {
-                            Label("刷新开奖数据", systemImage: "arrow.clockwise")
+                            row("arrow.clockwise", .teal, "刷新开奖数据")
                             Spacer()
                             if isRefreshing { ProgressView() }
                         }
@@ -87,26 +84,24 @@ struct SettingsView: View {
                 Section {
                     LabeledContent {
                         Text("\(records.count) 条")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     } label: {
-                        Label("本机记录", systemImage: "tray.full")
+                        row("tray.full.fill", .orange, "本机记录")
                     }
 
-                    Button {
-                        export()
-                    } label: {
-                        Label("导出备份", systemImage: "square.and.arrow.up")
+                    Button { export() } label: {
+                        row("square.and.arrow.up.fill", .blue, "导出备份")
                     }
 
-                    Button {
-                        isImporting = true
-                    } label: {
-                        Label("导入备份", systemImage: "square.and.arrow.down")
+                    Button { isImporting = true } label: {
+                        row("square.and.arrow.down.fill", .green, "导入备份")
                     }
 
                     Button(role: .destructive) {
                         isClearConfirmPresented = true
                     } label: {
-                        Label("清空全部记录", systemImage: "trash")
+                        row("trash.fill", .red, "清空全部记录", tint: .red)
                     }
                 } header: {
                     Text("数据备份")
@@ -115,16 +110,23 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("版本", value: "\(AppInfo.version) (\(AppInfo.build))")
+                    LabeledContent {
+                        Text("\(AppInfo.version) (\(AppInfo.build))")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } label: {
+                        row("app.badge.fill", .purple, "版本")
+                    }
                     NavigationLink {
                         AboutView()
                     } label: {
-                        Label("关于与免责声明", systemImage: "info.circle")
+                        row("info.circle.fill", .gray, "关于与免责声明")
                     }
                 }
             }
             .navigationTitle("设置")
-            .scrollEdgeEffectStyle(.soft, for: .top)
+            .disabled(isBusy)
+            .overlay { if isBusy { busyOverlay } }
             .fileExporter(
                 isPresented: $isExporting,
                 document: exportDocument,
@@ -151,6 +153,28 @@ struct SettingsView: View {
         }
     }
 
+    /// 系统「设置」那种彩色圆角图标 + 文字。
+    private func row(_ symbol: String, _ color: Color, _ title: String, tint: Color = .primary) -> some View {
+        HStack(spacing: 12) {
+            SettingsIcon(symbol: symbol, tint: color)
+            Text(title).foregroundStyle(tint)
+        }
+    }
+
+    private var busyOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.12).ignoresSafeArea()
+            VStack(spacing: 12) {
+                ProgressView()
+                Text(busyLabel)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(24)
+            .background(Palette.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
     private var backupFooter: String {
         guard let days = settings.daysSinceBackup else {
             return "记录只保存在本机。换设备前请先导出备份。"
@@ -163,6 +187,16 @@ struct SettingsView: View {
 
     // MARK: - 动作
 
+    private func refreshData() {
+        Task {
+            isRefreshing = true
+            await drawStore.refresh()
+            await drawStore.loadAllHistories()
+            isRefreshing = false
+            showToast("数据状态已更新")
+        }
+    }
+
     private func export() {
         let service = BackupService(context: context)
         guard let data = try? service.exportData(records: records) else {
@@ -173,22 +207,36 @@ struct SettingsView: View {
         isExporting = true
     }
 
+    /// 导入分两步：先落库，再核对。
+    /// 两步都可能很慢，中间让出主线程刷新一次界面，别让用户看到假死。
     private func handleImport(_ result: Result<URL, Error>) {
         guard case .success(let url) = result else {
             showToast("导入取消", symbol: "xmark.circle")
             return
         }
-        let needsRelease = url.startAccessingSecurityScopedResource()
-        defer { if needsRelease { url.stopAccessingSecurityScopedResource() } }
-        do {
-            let data = try Data(contentsOf: url)
-            let service = BackupService(context: context)
-            let outcome = try service.importData(data, existing: records)
-            // 导入后立刻按本地开奖数据重新核对一遍
-            _ = try? RecordService(context: context, drawStore: drawStore).checkAll()
-            showToast("已导入 \(outcome.inserted + outcome.updated) 条记录", symbol: "square.and.arrow.down")
-        } catch {
-            showToast(error.localizedDescription, symbol: "exclamationmark.triangle")
+        Task {
+            isBusy = true
+            busyLabel = "正在导入记录…"
+            defer { isBusy = false }
+
+            let needsRelease = url.startAccessingSecurityScopedResource()
+            defer { if needsRelease { url.stopAccessingSecurityScopedResource() } }
+
+            do {
+                let data = try Data(contentsOf: url)
+                let outcome = try BackupService(context: context).importData(data)
+                await Task.yield()
+
+                busyLabel = "正在核对开奖…"
+                await drawStore.loadAllHistories()
+                let service = RecordService(context: context, drawStore: drawStore)
+                _ = try? service.reconcileInferredTargets()
+                _ = try? service.checkAll()
+
+                showToast("已导入 \(outcome.inserted + outcome.updated) 条记录", symbol: "square.and.arrow.down")
+            } catch {
+                showToast(error.localizedDescription, symbol: "exclamationmark.triangle")
+            }
         }
     }
 
@@ -239,6 +287,7 @@ struct AboutView: View {
             .font(.subheadline)
             .padding(20)
         }
+        .background(Palette.canvas)
         .navigationTitle("关于")
         .navigationBarTitleDisplayMode(.inline)
     }

@@ -36,7 +36,7 @@ struct TicketScanView: View {
                 case .review: review
                 }
             }
-            .background { Palette.canvas(result?.game?.tint ?? .accentColor) }
+            .background(Palette.canvas)
             .navigationTitle("扫描彩票")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -147,7 +147,7 @@ struct TicketScanView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(14)
-                        .glassCard(cornerRadius: 18)
+                        .contentCard(cornerRadius: 18)
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
@@ -163,7 +163,7 @@ struct TicketScanView: View {
                         }
                     }
                     .padding(16)
-                    .glassCard(tint: game.tint)
+                    .contentCard()
 
                     VStack(alignment: .leading, spacing: 12) {
                         SectionHeader(title: "识别到 \(editedTickets.count) 注", subtitle: "左滑可以删除认错的一注")
@@ -193,7 +193,7 @@ struct TicketScanView: View {
                         }
                     }
                     .padding(16)
-                    .glassCard(tint: game.tint)
+                    .contentCard()
 
                     DisclosureGroup("查看识别原文") {
                         Text(result.rawText)
@@ -203,7 +203,7 @@ struct TicketScanView: View {
                             .padding(.top, 8)
                     }
                     .padding(16)
-                    .glassCard(cornerRadius: 18)
+                    .contentCard(cornerRadius: 18)
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 120)

@@ -76,6 +76,7 @@ struct BackupService {
             "status": record.statusRaw,
             "resultText": record.resultText,
             "prizeAmount": record.prizeAmount,
+            "prizeName": record.prizeName,
             "source": record.source,
             "createdAt": iso.string(from: record.createdAt),
             "updatedAt": iso.string(from: record.updatedAt)
@@ -97,8 +98,12 @@ struct BackupService {
     }
 
     /// 按 id 覆盖同名记录，其余追加。返回新增与覆盖的条数。
+    ///
+    /// 已有记录由这里自己查，不再让调用方把 `@Query` 的结果传进来 ——
+    /// 视图里的查询结果可能滞后，拿它去判重会插入重复 id 而在保存时抛错。
     @discardableResult
-    func importData(_ data: Data, existing: [TicketRecord]) throws -> (inserted: Int, updated: Int) {
+    func importData(_ data: Data) throws -> (inserted: Int, updated: Int) {
+        let existing = (try? context.fetch(FetchDescriptor<TicketRecord>())) ?? []
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let rows = root["records"] as? [[String: Any]] else {
             throw ImportError.malformed
@@ -171,6 +176,11 @@ struct BackupService {
             record.targetSource = target.source
             record.targetBasisIssue = target.basisIssue
             record.targetResolutionReason = target.resolutionReason
+            record.prizeName = string(row["prizeName"]) ?? ""
+            // 命中标记不从备份带入：口径可能和当前规则不一致，
+            // 导入后统一由核对流程重新算一遍。
+            record.matched = [:]
+            record.refreshProfitDay()
             record.updatedAt = DateText.parse(string(row["updatedAt"]) ?? "") ?? Date()
         }
 

@@ -1,7 +1,9 @@
 import Foundation
 import SwiftData
 
-/// 票据的保存、核对与期次校正。所有操作都在主线程的 ModelContext 上执行。
+/// 票据的保存、核对与期次校正。所有操作都在主线程的 ModelContext 上执行，
+/// 因此这里的每个循环都要保证是 O(记录数)：开奖走 DrawStore 的索引，
+/// 号码走 TicketRecord 的解码缓存，不做任何逐条的线性查找。
 @MainActor
 struct RecordService {
     let context: ModelContext
@@ -45,7 +47,8 @@ struct RecordService {
     }
 
     func delete(batchId: String) throws {
-        for record in allRecords() where record.batchId == batchId {
+        let descriptor = FetchDescriptor<TicketRecord>(predicate: #Predicate { $0.batchId == batchId })
+        for record in (try? context.fetch(descriptor)) ?? [] {
             context.delete(record)
         }
         try context.save()
@@ -63,12 +66,15 @@ struct RecordService {
 
     // MARK: - 核对
 
-    /// 对一注记录求值，不写库。
-    func evaluate(_ record: TicketRecord) -> (status: RecordStatus, resultText: String, amount: Double, prizeName: String, matched: [SectionKey: [Bool]], draw: Draw?) {
-        guard let draw = drawStore.draw(matching: record) else {
-            return (.pending, RecordStatus.pending.label, 0, "", [:], nil)
-        }
-        let result = PrizeRules.evaluate(gameKey: record.game, ticket: record.ticket, draw: draw, multiple: record.multiple)
+    /// 对一注记录求值并把结果写回记录本身。
+    /// 结果落库之后，票夹列表直接读字段渲染，不再在视图里重算。
+    @discardableResult
+    func apply(_ record: TicketRecord) -> Bool {
+        guard let draw = drawStore.draw(matching: record) else { return false }
+        let result = PrizeRules.evaluate(gameKey: record.game,
+                                         ticket: record.ticket,
+                                         draw: draw,
+                                         multiple: record.multiple)
         let status: RecordStatus = result.isFloating ? .prizeFloat : (result.amount > 0 ? .won : .lost)
         let text: String
         if result.isFloating {
@@ -78,30 +84,38 @@ struct RecordService {
         } else {
             text = "未中奖"
         }
-        return (status, text, result.amount, result.prizeName, result.matched, draw)
+
+        // 结论没变就不写库，避免无谓的脏数据和界面刷新
+        guard record.status != status
+                || record.prizeAmount != result.amount
+                || record.prizeName != result.prizeName
+                || record.matchedData.isEmpty else { return false }
+
+        record.status = status
+        record.resultText = text
+        record.prizeAmount = result.amount
+        record.prizeName = result.prizeName
+        record.matched = result.matched
+        if !draw.expect.isEmpty { record.targetExpect = draw.expect }
+        if !draw.openDate.isEmpty { record.targetOpenDate = draw.openDate }
+        record.targetSourceDrawId = draw.id
+        record.refreshProfitDay()
+        record.updatedAt = Date()
+        return true
     }
 
-    /// 批量核对，返回本次新确定的中奖注数。已经有最终结论的记录不再重复计算，
-    /// 但"奖金浮动"状态会一直复核，直到官方公布单注奖金。
+    /// 批量核对。已经有最终结论的记录不再重复计算，
+    /// 但"奖金浮动"会一直复核，直到官方公布单注奖金。
     @discardableResult
-    func checkAll() throws -> (checked: Int, won: Int) {
+    func checkAll(_ records: [TicketRecord]? = nil) throws -> (checked: Int, won: Int) {
+        let targets = records ?? allRecords()
         var checked = 0
         var won = 0
-        for record in allRecords() {
+        for record in targets {
             guard record.status == .pending || record.status == .prizeFloat else { continue }
-            let outcome = evaluate(record)
-            guard outcome.status != record.status || outcome.amount != record.prizeAmount else { continue }
-            record.status = outcome.status
-            record.resultText = outcome.resultText
-            record.prizeAmount = outcome.amount
-            if let draw = outcome.draw {
-                record.targetExpect = draw.expect.isEmpty ? record.targetExpect : draw.expect
-                record.targetOpenDate = draw.openDate.isEmpty ? record.targetOpenDate : draw.openDate
-                record.targetSourceDrawId = draw.id
-            }
-            record.updatedAt = Date()
+            guard apply(record) else { continue }
             checked += 1
-            if outcome.status == .won { won += 1 }
+            if record.status == .won { won += 1 }
         }
         if checked > 0 { try context.save() }
         return (checked, won)
@@ -118,15 +132,26 @@ struct RecordService {
 
     /// 录入时若下期还是"预计"值，官方日历确认后回填或纠正记录绑定的期号。
     @discardableResult
-    func reconcileInferredTargets() throws -> Reconciliation {
+    func reconcileInferredTargets(_ records: [TicketRecord]? = nil) throws -> Reconciliation {
         var summary = Reconciliation()
-        for record in allRecords() {
-            guard !record.status.isFinal, record.targetStatus == .inferred else { continue }
-            // 目标期已经有开奖数据了，直接交给核对流程。
-            if drawStore.draw(for: record.game, expect: record.targetExpect) != nil { continue }
-            guard let official = drawStore.nextDrawMetadata(for: record.game), official.status == .confirmed else { continue }
+        // 每个彩种的官方下期信息只查一次，不要在循环里反复算
+        var officialByGame: [GameKey: DrawTarget] = [:]
 
-            // 官方基准期号和录入时不一致，说明推算前提变了，交给用户确认。
+        for record in records ?? allRecords() {
+            guard !record.status.isFinal, record.targetStatus == .inferred else { continue }
+            if drawStore.draw(for: record.game, expect: record.targetExpect) != nil { continue }
+
+            let official: DrawTarget?
+            if let cached = officialByGame[record.game] {
+                official = cached
+            } else {
+                let resolved = drawStore.nextDrawMetadata(for: record.game)
+                if let resolved { officialByGame[record.game] = resolved }
+                official = resolved
+            }
+            guard let official, official.status == .confirmed else { continue }
+
+            // 官方基准期号和录入时不一致，说明推算前提变了，交给用户确认
             guard !record.targetBasisIssue.isEmpty,
                   !official.basisIssue.isEmpty,
                   record.targetBasisIssue == official.basisIssue else {
@@ -156,6 +181,7 @@ struct RecordService {
             record.targetSource = official.source
             record.targetBasisIssue = official.basisIssue
             record.targetResolutionReason = official.resolutionReason
+            record.refreshProfitDay()
             record.updatedAt = Date()
         }
         if summary.changed { try context.save() }
@@ -167,6 +193,7 @@ struct RecordService {
 struct TicketBatch: Identifiable, Hashable {
     let id: String
     let records: [TicketRecord]
+    let status: RecordStatus
 
     var first: TicketRecord? { records.first }
     var game: GameKey { first?.game ?? .ssq }
@@ -180,17 +207,26 @@ struct TicketBatch: Identifiable, Hashable {
     var netProfit: Double { prize - cost }
 
     /// 整张票的状态：有中奖即中奖，有浮动即浮动，全部核对完才算未中奖。
-    var status: RecordStatus {
+    private static func status(of records: [TicketRecord]) -> RecordStatus {
         if records.contains(where: { $0.status == .won }) { return .won }
         if records.contains(where: { $0.status == .prizeFloat }) { return .prizeFloat }
         if records.allSatisfy({ $0.status == .lost }) { return .lost }
         return .pending
     }
 
+    /// 分组只在记录变化时做一次，结果缓存在视图状态里，不要放进 body。
     static func group(_ records: [TicketRecord]) -> [TicketBatch] {
-        let grouped = Dictionary(grouping: records, by: \.batchId)
-        return grouped
-            .map { TicketBatch(id: $0.key, records: $0.value.sorted { $0.id < $1.id }) }
-            .sorted { $0.createdAt > $1.createdAt }
+        var order: [String] = []
+        var buckets: [String: [TicketRecord]] = [:]
+        for record in records {
+            if buckets[record.batchId] == nil { order.append(record.batchId) }
+            buckets[record.batchId, default: []].append(record)
+        }
+        return order.compactMap { key in
+            guard let items = buckets[key] else { return nil }
+            let sorted = items.sorted { $0.id < $1.id }
+            return TicketBatch(id: key, records: sorted, status: status(of: sorted))
+        }
+        .sorted { $0.createdAt > $1.createdAt }
     }
 }

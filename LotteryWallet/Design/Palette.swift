@@ -69,26 +69,13 @@ enum Palette {
         return neutral
     }
 
-    /// 页面底色。液态玻璃需要底下有内容才好看，
-    /// 所以背景用一层极淡的彩种辉光而不是纯色。
-    static func canvas(_ tint: Color) -> some View {
-        ZStack {
-            Color(.systemGroupedBackground)
-            RadialGradient(
-                colors: [tint.opacity(0.16), .clear],
-                center: .init(x: 0.85, y: 0.06),
-                startRadius: 0,
-                endRadius: 420
-            )
-            RadialGradient(
-                colors: [tint.opacity(0.10), .clear],
-                center: .init(x: 0.05, y: 0.98),
-                startRadius: 0,
-                endRadius: 380
-            )
-        }
-        .ignoresSafeArea()
-    }
+    /// 页面底色。就用系统默认的分组背景，浅色下是那层最淡的灰，
+    /// 深色下是接近纯黑的底 —— 和「设置」「邮件」这些系统 App 一致。
+    static let canvas = Color(.systemGroupedBackground)
+    /// 卡片底色。
+    static let card = Color(.secondarySystemGroupedBackground)
+    /// 分隔线。
+    static let separator = Color(.separator)
 }
 
 extension RecordStatus {

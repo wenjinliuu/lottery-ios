@@ -5,6 +5,7 @@ import SwiftData
 /// 标签栏用系统原生的液态玻璃，向下滚动时自动收起。
 struct RootView: View {
     @Environment(DrawStore.self) private var drawStore
+    @Environment(AppSettings.self) private var settings
     @Environment(\.modelContext) private var context
 
     @State private var selection: MainTab = .home
@@ -56,9 +57,16 @@ struct RootView: View {
     }
 
     /// 冷启动拿到开奖数据后：先按官方日历校正预测期号，再自动核对。
+    ///
+    /// 这一步必须发生在首帧之后。早期版本在 `.task` 里同步跑完全部核对，
+    /// 记录一多首帧就画不出来，被系统看门狗当成无响应 —— 表现就是"打不开"。
     private func runStartupChecks() async {
+        guard settings.autoCheck else { return }
+        // 让出一次主线程，确保界面已经画出来
+        await Task.yield()
         let service = RecordService(context: context, drawStore: drawStore)
         _ = try? service.reconcileInferredTargets()
+        await Task.yield()
         _ = try? service.checkAll()
     }
 }
