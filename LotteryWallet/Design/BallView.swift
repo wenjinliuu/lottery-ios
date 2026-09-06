@@ -49,9 +49,13 @@ struct BallView: View {
             }
             // 阴影只给命中的球。一屏几百个阴影图层是票夹卡顿的来源之一，
             // 而未命中的球本来就该退到后面去。
-            .shadow(color: isHit ? color.deep.opacity(0.5) : .clear,
-                    radius: isHit ? 8 : 0, y: isHit ? 3 : 0)
-            .scaleEffect(isHit ? 1.08 : 1)
+            //
+            // 半径刻意收得很紧：8pt 的光晕在票夹里会漫到相邻球上，
+            // 一行命中三四颗时整排糊成一片。命中要靠"亮一点、鼓一点"来读，
+            // 而不是靠一圈发光。
+            .shadow(color: isHit ? color.deep.opacity(0.34) : .clear,
+                    radius: isHit ? 3 : 0, y: isHit ? 1.5 : 0)
+            .scaleEffect(isHit ? 1.06 : 1)
             .animation(.spring(duration: 0.34, bounce: 0.25), value: isHit)
             .accessibilityLabel(Text(isHit ? "\(label) 已命中" : (isDimmed ? "\(label) 未命中" : label)))
     }
@@ -246,6 +250,35 @@ struct BallFlow: Layout {
                        proposal: ProposedViewSize(s))
             x += s.width
             lineHeight = Swift.max(lineHeight, s.height)
+        }
+    }
+}
+
+/// 一排同色号码球，排不下就换行。选号预览、扫描复核这些"只是把号码摆出来"
+/// 的地方用它，不用为了一排球去凑一个 `Ticket`。
+struct BallRowView: View {
+    let values: [Int]
+    var color: BallColor
+    var size: CGFloat = 26
+    var padded: Bool = true
+    /// 高亮其中某几个号（胆拖预览里的胆码、扫描复核里正在改的那颗）。
+    var highlighted: Set<Int> = []
+    var onTap: ((Int) -> Void)?
+
+    var body: some View {
+        BallFlow(spacing: size * 0.19, lineSpacing: size * 0.22) {
+            ForEach(Array(values.enumerated()), id: \.offset) { _, value in
+                if let onTap {
+                    Button { onTap(value) } label: {
+                        BallView(value: value, color: color, size: size,
+                                 isHit: highlighted.contains(value), padded: padded)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    BallView(value: value, color: color, size: size,
+                             isHit: highlighted.contains(value), padded: padded)
+                }
+            }
         }
     }
 }

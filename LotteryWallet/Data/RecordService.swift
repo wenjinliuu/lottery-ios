@@ -106,19 +106,40 @@ struct RecordService {
 
     /// 批量核对。已经有最终结论的记录不再重复计算，
     /// 但"奖金浮动"会一直复核，直到官方公布单注奖金。
+    ///
+    /// 还有第三种要复核的：**命中标记缺失的已结算记录**。
+    /// 备份恢复时 `statusRaw` 是照抄回来的（won / lost），`matchedData` 却是空的
+    /// —— 原本指望重新核对补上，但这里的 guard 又把已结算的记录跳过去了，
+    /// 于是那批票的命中标记永远补不回来。票面渲染拿"有没有命中标记"当
+    /// "有没有核对过"，结果导入的老票整排号码球全是满色，看起来像全中了。
     @discardableResult
     func checkAll(_ records: [TicketRecord]? = nil) throws -> (checked: Int, won: Int) {
         let targets = records ?? allRecords()
         var checked = 0
         var won = 0
         for record in targets {
-            guard record.status == .pending || record.status == .prizeFloat else { continue }
+            let needsMatchRepair = record.matchedData.isEmpty && record.status.isFinal
+            guard record.status == .pending || record.status == .prizeFloat || needsMatchRepair else { continue }
             guard apply(record) else { continue }
             checked += 1
             if record.status == .won { won += 1 }
         }
         if checked > 0 { try context.save() }
         return (checked, won)
+    }
+
+    /// 需要补命中标记的记录横跨哪些「彩种 × 年份」。
+    ///
+    /// 导入恢复的记录状态是 won / lost，命中标记却是空的。要把标记补回来
+    /// 就得先拿到那一期的开奖号，而它多半已经不在最近 50 期里了。
+    func archivesNeedingMatchRepair() -> [GameKey: Set<Int>] {
+        var wanted: [GameKey: Set<Int>] = [:]
+        for record in allRecords() where record.matchedData.isEmpty && record.status.isFinal {
+            let day = record.targetOpenDate.isEmpty ? DateText.day(record.createdAt) : record.targetOpenDate
+            guard let year = Int(day.prefix(4)) else { continue }
+            wanted[record.game, default: []].insert(year)
+        }
+        return wanted
     }
 
     // MARK: - 期次校正
@@ -208,8 +229,12 @@ struct TicketCard: Identifiable, Hashable {
         let matched: [SectionKey: [Bool]]
         let prizeAmount: Double
         let status: RecordStatus
-
-        var hasResult: Bool { !matched.isEmpty }
+        /// 这一注是否已经核对过。
+        ///
+        /// **不能**用 `!matched.isEmpty` 来判断。命中标记可能因为导入恢复
+        /// 而缺失，那时候整注号码会被当成"还没开奖"按满色画出来，
+        /// 用户看到的是一张假的全中票。状态才是事实来源。
+        let hasResult: Bool
     }
 
     let id: String
@@ -314,7 +339,8 @@ extension TicketCard {
                  numbers: record.ticket.numbers.values,
                  matched: record.matched,
                  prizeAmount: record.prizeAmount,
-                 status: record.status)
+                 status: record.status,
+                 hasResult: record.status.isFinal)
         }
 
         let body = records.enumerated().map { index, record -> String in

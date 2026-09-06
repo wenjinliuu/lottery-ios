@@ -1,9 +1,12 @@
 import Foundation
 
 /// 录入方式。
+///
+/// 早期有一个「随机」模式：进页面直接给几注机选号，用户只能重摇。
+/// 它和手选里的「随机填充」是同一件事，却多出一整套并行状态
+/// （randomTickets / randomCount / regenerate），已经删掉。
 enum EntryMode: String, CaseIterable, Identifiable {
-    case random     // 机选
-    case manual     // 手动单式
+    case manual     // 手选单式
     case system     // 复式
     case dantuo     // 胆拖
 
@@ -11,8 +14,7 @@ enum EntryMode: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .random: "随机"
-        case .manual: "普通"
+        case .manual: "手选"
         case .system: "复式"
         case .dantuo: "胆拖"
         }
@@ -20,7 +22,6 @@ enum EntryMode: String, CaseIterable, Identifiable {
 
     var kind: EntryKind {
         switch self {
-        case .random: .random
         case .manual: .manual
         case .system: .system
         case .dantuo: .dantuo
@@ -29,7 +30,7 @@ enum EntryMode: String, CaseIterable, Identifiable {
 
     /// 复式和胆拖目前只对双色球、大乐透开放，与 web 版一致。
     static func modes(for game: GameKey) -> [EntryMode] {
-        game.supportsSystemPlay ? [.random, .manual, .system, .dantuo] : [.random, .manual]
+        game.supportsSystemPlay ? [.manual, .system, .dantuo] : [.manual]
     }
 }
 
@@ -48,35 +49,37 @@ enum TicketBuilder {
     /// 复式/胆拖展开的注数上限，超过就不让保存。
     static let maxCombinations = 2000
 
-    // MARK: - 随机
-
-    static func randomTickets(game: GameKey, count: Int, playMode: String) -> [Ticket] {
-        (0..<max(count, 1)).map { _ in randomTicket(game: game, playMode: playMode) }
-    }
-
-    static func randomTicket(game: GameKey, playMode: String) -> Ticket {
-        var numbers = NumberSet()
-        for section in game.sections {
-            // 快乐8 选几个号由玩法决定，不是开奖的 20 个。
-            // 之前一律按 section.count 机选，选十的票上会出现 20 个球，判奖也对不上。
-            let need = game.pickCount(for: section, playMode: playMode)
-            if section.isPositional {
-                // 数字型玩法按位取值，允许重复
-                numbers[section.key] = (0..<need).map { _ in Int.random(in: section.range) }
-            } else {
-                numbers[section.key] = pickUnique(count: need, from: section.range).sorted()
-            }
-        }
-        var ticket = Ticket(numbers: numbers, playMode: playMode, entryLabel: EntryMode.random.label)
-        if game == .k8 { ticket.playCount = numbers[.nums].count }
-        ticket.addOn = game == .dlt && playMode == "add"
-        return ticket
-    }
+    // MARK: - 随机填充
 
     static func pickUnique(count: Int, from range: ClosedRange<Int>) -> [Int] {
         var pool = Array(range)
         pool.shuffle()
         return Array(pool.prefix(count))
+    }
+
+    /// 数字型号码区（3D、排列3/5、七星彩前六位）的随机一注。
+    ///
+    /// 3D 和排列3 的组选必须**按玩法出号**，否则随机填充给出来的号根本
+    /// 不属于用户选的玩法：组三是「两个号相同、第三个不同」，组六是三个全不同。
+    /// 早期一律 `Int.random` 三次，选着组三却随出 1-5-9，一辈子也随不出对子。
+    static func randomDigits(game: GameKey, count: Int, range: ClosedRange<Int>, playMode: String) -> [Int] {
+        guard game == .fc3d || game == .pl3, count == 3 else {
+            // 直选和其余数字型玩法按位取值，允许重复（豹子、对子都要随得出来）
+            return (0..<count).map { _ in Int.random(in: range) }
+        }
+        switch playMode {
+        case "group3":
+            // 两个相同 + 一个不同
+            let pair = Int.random(in: range)
+            var single = Int.random(in: range)
+            while single == pair { single = Int.random(in: range) }
+            return [pair, pair, single].shuffled()
+        case "group6":
+            // 三个互不相同
+            return pickUnique(count: 3, from: range)
+        default:
+            return (0..<count).map { _ in Int.random(in: range) }
+        }
     }
 
     // MARK: - 展开
@@ -94,7 +97,7 @@ enum TicketBuilder {
             let need = game.pickCount(for: section, playMode: playMode)
             let groups: [[Int]]
             switch mode {
-            case .manual, .random:
+            case .manual:
                 guard selection.selected.count == need else { return [] }
                 groups = [section.isPositional ? selection.selected : selection.selected.sorted()]
             case .system:
@@ -141,7 +144,7 @@ enum TicketBuilder {
             let selection = selections[section.key] ?? SectionSelection()
             let need = game.pickCount(for: section, playMode: playMode)
             switch mode {
-            case .manual, .random:
+            case .manual:
                 guard selection.selected.count == need else { return 0 }
             case .system:
                 guard selection.selected.count >= need else { return 0 }

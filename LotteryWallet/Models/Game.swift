@@ -80,8 +80,20 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         }
     }
 
-    /// 单注价格，八个彩种当前都是 2 元。
+    /// 单注基本价格，八个彩种都是 2 元。
     var unitPrice: Double { 2 }
+
+    /// 实际单注价格。
+    ///
+    /// 大乐透**追加投注是 3 元一注**（2 元基本 + 1 元追加），不是 2 元。
+    /// 之前一律按 2 元记账，追加票的投入被少记三分之一，
+    /// 连带盈亏、公益金、首页方格图全都偏。
+    ///
+    /// 这条可以用票面反推验证：样票里那张 11 个前区拖号的胆拖票展开是 10 注、
+    /// 合计 20 元 —— 正好 2 元一注，说明它**不是**追加票；追加的话应该是 30 元。
+    func unitPrice(addOn: Bool) -> Double {
+        self == .dlt && addOn ? 3 : 2
+    }
 
     /// 支持"注数"快捷选择的彩种，与 web 版 `COUNT_GAMES` 一致。
     var supportsMultiTicketCount: Bool {

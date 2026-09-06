@@ -10,6 +10,10 @@ struct NumberPadSection: View {
     let mode: EntryMode
     /// 胆拖模式下，当前点选的是胆码还是拖码。
     let danPicking: Bool
+    /// 点不动的时候（选满了、胆码到上限）说一句为什么。
+    /// 早期版本是静默 return，用户点第 5 个胆码时界面毫无反应，
+    /// 只会以为是按钮坏了。
+    var onReject: ((String) -> Void)?
 
     private var isDigitSection: Bool { section.isPositional }
 
@@ -48,7 +52,7 @@ struct NumberPadSection: View {
 
     private var hint: String {
         switch mode {
-        case .manual, .random:
+        case .manual:
             return "选 \(required) 个"
         case .system:
             return "至少 \(required) 个"
@@ -114,7 +118,12 @@ struct NumberPadSection: View {
                 next.dan.removeAll { $0 == value }
             } else {
                 // 胆码数量必须少于该区所需个数，否则就没有拖码可选了
-                guard next.dan.count < required - 1 else { return }
+                guard next.dan.count < required - 1 else {
+                    onReject?(required > 1
+                              ? "\(section.label)最多选 \(required - 1) 个胆码，再多就没有拖码的位置了"
+                              : "\(section.label)只选 1 个号，不设胆码")
+                    return
+                }
                 next.dan.append(value)
                 if !next.selected.contains(value) { next.selected.append(value) }
             }
@@ -123,8 +132,11 @@ struct NumberPadSection: View {
             next.dan.removeAll { $0 == value }
         } else {
             // 普通单式选满就不再加
-            if mode == .manual || mode == .random {
-                guard next.selected.count < required else { return }
+            if mode == .manual {
+                guard next.selected.count < required else {
+                    onReject?("\(section.label)已经选满 \(required) 个，先取消一个再选")
+                    return
+                }
             }
             next.selected.append(value)
         }
@@ -142,9 +154,18 @@ struct NumberPadSection: View {
     private var digitPickers: some View {
         HStack(spacing: 6) {
             ForEach(0..<required, id: \.self) { index in
+                let current = digitBinding(index).wrappedValue
                 Picker("第 \(index + 1) 位", selection: digitBinding(index)) {
                     ForEach(Array(section.range), id: \.self) { value in
-                        Text(String(value)).tag(value)
+                        // 滚轮停在中间的那个号就是选中的号，但系统的滚轮不会
+                        // 把它和上下两个区分开，一眼看过去三个数字长得一样。
+                        // 给中间那个上彩种色 + 加粗，和"随机填充"按钮同一套语言。
+                        Text(String(value))
+                            .font(value == current
+                                  ? .title3.weight(.heavy).monospacedDigit()
+                                  : .body.monospacedDigit())
+                            .foregroundStyle(value == current ? section.color.accentColor : Color.secondary)
+                            .tag(value)
                     }
                 }
                 .pickerStyle(.wheel)

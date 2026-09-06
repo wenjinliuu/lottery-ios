@@ -80,6 +80,9 @@ struct RootView: View {
         let service = RecordService(context: context, drawStore: drawStore)
         _ = try? service.reconcileInferredTargets()
         await Task.yield()
+        // 导入恢复的老票没有命中标记，补标记之前得先把那几年的开奖号取回来
+        await drawStore.loadArchives(service.archivesNeedingMatchRepair())
+        await Task.yield()
         // 冷启动自动核对出中奖，也应该看到烟花 —— 这正是用户最想被告知的一刻
         if let outcome = try? service.checkAll(), outcome.won > 0 {
             celebrationTrigger += 1

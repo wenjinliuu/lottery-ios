@@ -30,6 +30,9 @@ struct HomeView: View {
     @State private var series = ProfitSeries()
     @State private var monthStats = ProfitStats.PeriodStats()
     @State private var carouselIndex = 0
+    /// 自动轮播暂停到什么时候。用户一滑就往后推 12 秒。
+    @State private var autoScrollResumeAt = Date.distantPast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isDrawSheetPresented = false
     /// 点开奖卡片上的省略球时，把整期号码摊开给用户看。
     @State private var expandedDraw: Draw?
@@ -178,14 +181,22 @@ struct HomeView: View {
                              draw: drawStore.latestDraw(for: game),
                              opensToday: todayGames.contains(game),
                              onExpandNumbers: { expandedDraw = drawStore.latestDraw(for: game) })
+                        // 分页是整屏宽翻的，卡片自己不留边就会和下一张严丝合缝地
+                        // 贴在一起，滑动时看起来像一整条在动，分不出是两张卡。
+                        .padding(.horizontal, 5)
                         .tag(index)
                 }
             }
             // 系统自带的分页圆点画在 TabView 的画布里，会压在卡片下沿上。
             // 关掉它自己画一排放到卡片外面，既不重叠也能控制配色。
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: 146)
+            .frame(height: 140)
             .accessibilityHint("左右滑动查看其他彩种的最新开奖")
+            // 手一碰就停自动轮播。轮播抢走用户正在看的那张卡是很讨厌的事。
+            .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in
+                autoScrollResumeAt = Date().addingTimeInterval(12)
+            })
+            .task(id: carouselGames.count) { await runAutoScroll() }
 
             pageDots
         }
@@ -194,6 +205,21 @@ struct HomeView: View {
         }
         .sheet(item: $expandedDraw) { draw in
             DrawNumbersSheet(draw: draw)
+        }
+    }
+
+    /// 开奖卡片自动轮播。
+    ///
+    /// 减弱动效下**完全不转** —— 自动播放的轮播是无障碍里最经典的问题之一，
+    /// 对前庭敏感和阅读较慢的用户都是干扰。
+    private func runAutoScroll() async {
+        guard !reduceMotion, carouselGames.count > 1 else { return }
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled, Date() >= autoScrollResumeAt else { continue }
+            withAnimation(.easeInOut(duration: 0.45)) {
+                carouselIndex = (carouselIndex + 1) % carouselGames.count
+            }
         }
     }
 
@@ -548,33 +574,68 @@ struct DrawCard: View {
     }
 
     var body: some View {
-        // 三段整体在卡片里垂直居中。原来靠 Spacer 撑，一等奖那行没有的时候
-        // 下半部分会空出一大片。
-        VStack(alignment: .leading, spacing: 9) {
+        // 三段各归各位：标题顶格、号码居中、一等奖贴底。
+        // 早期版本把整组内容在卡片里垂直居中，结果标题浮在半空，
+        // 而且卡片高度一固定，号码一换行就会压到一等奖那一行上。
+        VStack(alignment: .leading, spacing: 8) {
             header
-
-            if let draw {
-                DrawNumbersView(draw: draw, size: ballSize, limit: ballLimit, onOverflow: onExpandNumbers)
-            } else {
-                Text("暂无开奖数据")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 6)
-            }
-
+            Spacer(minLength: 0)
+            numbersRow
+            Spacer(minLength: 0)
             if let firstPrize {
                 prizeStrip(firstPrize)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 13)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.vertical, 12)
         .padding(.horizontal, 14)
-        .frame(maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Palette.card)
         )
+    }
+
+    /// 号码那一行。
+    ///
+    /// **必须保证不换行。** 卡片高度是固定的（轮播要求各页等高），
+    /// 一旦号码排到第二行就会盖住一等奖那一行 —— 快乐8 尤其明显：
+    /// 8 颗球加一颗省略球，按 32pt 画出来正好比卡片可用宽度多十几个点。
+    /// 所以这里先量出可用宽度，再反推一个能把所有球放进一行的球径。
+    @ViewBuilder
+    private var numbersRow: some View {
+        if let draw {
+            GeometryReader { proxy in
+                let size = fittingBallSize(for: draw, width: proxy.size.width)
+                DrawNumbersView(draw: draw, size: size, limit: ballLimit, onOverflow: onExpandNumbers)
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
+            }
+            .frame(height: ballSize)
+        } else {
+            Text("暂无开奖数据")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .frame(height: ballSize)
+        }
+    }
+
+    /// 一行放得下的最大球径。系数和 `BallFlow` 里的间距一致：
+    /// 球间 0.19 倍球径，号码区之间再多 0.24 倍。
+    private func fittingBallSize(for draw: Draw, width: CGFloat) -> CGFloat {
+        var balls = 0
+        var sections = 0
+        for section in draw.gameKey.drawSections {
+            let all = draw.drawValues[section.key]
+            guard !all.isEmpty else { continue }
+            balls += Swift.min(all.count, ballLimit)
+            if all.count > ballLimit { balls += 1 }   // 省略球也占一颗的位置
+            sections += 1
+        }
+        guard balls > 0, width > 0 else { return ballSize }
+        let units = CGFloat(balls)
+            + CGFloat(balls - 1) * 0.19
+            + CGFloat(Swift.max(sections - 1, 0)) * 0.24
+        return Swift.min(ballSize, (width / units).rounded(.down))
     }
 
     private var header: some View {

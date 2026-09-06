@@ -14,33 +14,19 @@ struct DrawHistoryView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    gameTabs
-                    if !history.isEmpty {
-                        ForEach(history) { draw in
-                            DrawHistoryRow(draw: draw)
-                        }
-                    } else if isLoading {
-                        ProgressView("正在读取往期开奖")
-                            .padding(.top, 60)
-                    } else {
-                        // 拉取失败或该彩种确实没有数据时，原来会一直转圈，
-                        // 用户既不知道出了什么事，也没有重试的入口。
-                        ContentUnavailableView {
-                            Label("暂时没有往期数据", systemImage: "wifi.exclamationmark")
-                        } description: {
-                            Text("可能是网络没连上，或者数据仓库还没有这个彩种的往期记录。")
-                        } actions: {
-                            Button("重试") { Task { await reload() } }
-                                .buttonStyle(SecondaryGlassButton(tint: game.tint))
-                        }
-                        .padding(.top, 40)
+            VStack(spacing: 10) {
+                gameTabs
+                    .padding(.horizontal, 16)
+                // 彩种之间用分页 TabView 而不是只换内容：这样左右滑动就能切彩种，
+                // 不必每次都回到顶上的芯片条去点。竖向滚动仍然归各页自己。
+                TabView(selection: $game) {
+                    ForEach(GameKey.ordered) { item in
+                        page(for: item).tag(item)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 40)
+                .tabViewStyle(.page(indexDisplayMode: .never))
             }
+            .padding(.top, 8)
             .background(Palette.canvas)
             .navigationTitle("往期开奖")
             .navigationBarTitleDisplayMode(.inline)
@@ -50,6 +36,37 @@ struct DrawHistoryView: View {
                 }
             }
             .task(id: game) { await reload() }
+        }
+    }
+
+    @ViewBuilder
+    private func page(for item: GameKey) -> some View {
+        let rows = drawStore.draws(for: item)
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                if !rows.isEmpty {
+                    ForEach(rows) { draw in
+                        DrawHistoryRow(draw: draw)
+                    }
+                } else if isLoading && item == game {
+                    ProgressView("正在读取往期开奖")
+                        .padding(.top, 60)
+                } else {
+                    // 拉取失败或该彩种确实没有数据时，原来会一直转圈，
+                    // 用户既不知道出了什么事，也没有重试的入口。
+                    ContentUnavailableView {
+                        Label("暂时没有往期数据", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text("可能是网络没连上，或者数据仓库还没有这个彩种的往期记录。")
+                    } actions: {
+                        Button("重试") { Task { await reload() } }
+                            .buttonStyle(SecondaryGlassButton(tint: item.tint))
+                    }
+                    .padding(.top, 40)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 40)
         }
     }
 
@@ -89,6 +106,7 @@ struct DrawHistoryView: View {
             .padding(.vertical, 2)
         }
         .scrollClipDisabled()
+        .accessibilityHint("也可以在下方左右滑动切换彩种")
     }
 }
 

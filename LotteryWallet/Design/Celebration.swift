@@ -119,3 +119,67 @@ private struct BurstView: View {
         return Double(1 - (progress - 0.2) / 0.8)
     }
 }
+
+// MARK: - 中奖票上的常驻烟花
+
+/// 中奖彩票卡片上持续绽放的小烟花。
+///
+/// 和 `CelebrationView` 的区别是「一次性」对「常驻」：那个是核出中奖的
+/// 那一瞬间放一次的大场面，这个是留在票上的一点持续的光。
+///
+/// 预算控制得很紧，因为票夹里可能同时有十几张中奖票在画：
+/// 粒子位置是**固定的**（不是每帧随机），动画交给 CoreAnimation 的
+/// `repeatForever`，提交一次之后主线程就不再参与。
+struct TicketSparkleOverlay: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isAnimating = false
+
+    /// 固定的绽放点。避开卡片正中间 —— 那里压着号码。
+    private struct Spark: Identifiable {
+        let id: Int
+        let x: CGFloat
+        let y: CGFloat
+        let size: CGFloat
+        let delay: Double
+        let color: BallColor
+    }
+
+    private static let sparks: [Spark] = [
+        Spark(id: 0, x: 0.09, y: 0.16, size: 6, delay: 0.00, color: .red),
+        Spark(id: 1, x: 0.93, y: 0.24, size: 5, delay: 0.45, color: .yellow),
+        Spark(id: 2, x: 0.24, y: 0.86, size: 5, delay: 0.90, color: .blue),
+        Spark(id: 3, x: 0.78, y: 0.78, size: 7, delay: 1.35, color: .plum),
+        Spark(id: 4, x: 0.52, y: 0.07, size: 5, delay: 1.80, color: .k8orange),
+        Spark(id: 5, x: 0.05, y: 0.55, size: 5, delay: 2.25, color: .amber)
+    ]
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                ForEach(Self.sparks) { spark in
+                    Circle()
+                        .fill(spark.color.accentColor)
+                        .frame(width: spark.size, height: spark.size)
+                        .scaleEffect(isAnimating ? 1.9 : 0.35)
+                        .opacity(isAnimating ? 0 : 0.95)
+                        .position(x: proxy.size.width * spark.x,
+                                  y: proxy.size.height * spark.y)
+                        .animation(
+                            .easeOut(duration: 1.5)
+                                .repeatForever(autoreverses: false)
+                                .delay(spark.delay),
+                            value: isAnimating
+                        )
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        // 减弱动效下彻底不画 —— 常驻动画对前庭敏感的人是最难受的一类。
+        .opacity(reduceMotion ? 0 : 1)
+        .onAppear {
+            guard !reduceMotion else { return }
+            isAnimating = true
+        }
+    }
+}

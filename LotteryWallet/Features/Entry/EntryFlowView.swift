@@ -1,7 +1,12 @@
 import SwiftUI
 import SwiftData
 
-/// 添加彩票：随机 / 普通 / 复式 / 胆拖 四种录入方式共用一个工作台。
+/// 添加彩票：手选 / 复式 / 胆拖三种录入方式共用一个工作台。
+///
+/// 底部永远有一张**整票预览**。这是这一版最重要的改动：
+/// 早期版本选完一组号只能直接存成一张一注的票，用户看不到"我这张票长什么样"，
+/// 也没法像在彩票站那样把好几注打在同一张票上。现在手选可以攒候选注，
+/// 复式和胆拖则按真实票面的排版（红单/红复、前区胆/前区拖…）画出来。
 struct EntryFlowView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -10,40 +15,81 @@ struct EntryFlowView: View {
     @Environment(\.showToast) private var showToast
 
     @State private var game: GameKey = .ssq
-    @State private var mode: EntryMode = .random
+    @State private var mode: EntryMode = .manual
     @State private var playMode: String = GameKey.ssq.defaultPlayMode
     @State private var selections: [SectionKey: SectionSelection] = [:]
-    @State private var danPicking = false
-    @State private var randomTickets: [Ticket] = []
-    @State private var randomCount = 1
+    /// 胆拖模式下先选胆码 —— 票面上也是胆在前、拖在后。
+    @State private var danPicking = true
+    /// 手选攒下来的候选注，最后一起打成同一张票。
+    @State private var candidates: [NumberSet] = []
     @State private var multiple = 1
     @State private var isResponsibleAlertPresented = false
+    @State private var isIssuePickerPresented = false
     @State private var saveError: String?
+    /// 用户手动指定的期次。为空表示跟随"现在能买的那一期"。
+    @State private var pickedIssue: CalendarIssue?
     /// `onAppear` 会在每次视图重新出现时触发（比如退到后台再回来）。
     /// 早期版本无条件调 `resetForGame`，用户选了一半的号码会被清空。
     @State private var hasPrepared = false
 
-    private var target: DrawTarget { drawStore.nextDrawTarget(for: game) }
+    private var target: DrawTarget {
+        pickedIssue?.target(source: "manual_pick") ?? drawStore.nextDrawTarget(for: game)
+    }
+
+    /// 当前这一组选号是否已经凑齐一注（手选用）。
+    private var pendingLine: NumberSet? {
+        guard mode == .manual else { return nil }
+        var numbers = NumberSet()
+        for section in game.sections {
+            let selected = selections[section.key]?.selected ?? []
+            guard selected.count == game.pickCount(for: section, playMode: playMode) else { return nil }
+            numbers[section.key] = section.isPositional ? selected : selected.sorted()
+        }
+        return numbers
+    }
+
+    /// 保存时真正要写进票夹的号码。
+    private var lines: [NumberSet] {
+        guard mode == .manual else { return [] }
+        // 还没点"加入候选"就直接保存的那一注不能丢掉 —— 大多数人只买一注，
+        // 让他们为了一注去点一次"加入候选"是多余的一步。
+        if let pendingLine, !candidates.contains(pendingLine) { return candidates + [pendingLine] }
+        return candidates
+    }
 
     private var tickets: [Ticket] {
         switch mode {
-        case .random:
-            return randomTickets
-        case .manual, .system, .dantuo:
+        case .manual:
+            return lines.map { numbers in
+                var ticket = Ticket(numbers: numbers, playMode: playMode, entryLabel: mode.label)
+                if game == .k8 { ticket.playCount = numbers[.nums].count }
+                ticket.addOn = isAddOn
+                return ticket
+            }
+        case .system, .dantuo:
             return TicketBuilder.expand(game: game, selections: selections, mode: mode,
                                         playMode: playMode, addOn: isAddOn) ?? []
         }
     }
 
     private var combinationCount: Int {
-        mode == .random ? randomTickets.count
+        mode == .manual
+            ? lines.count
             : TicketBuilder.combinationCount(game: game, selections: selections, mode: mode, playMode: playMode)
     }
 
     private var isAddOn: Bool { game == .dlt && playMode == "add" }
-    private var totalCost: Double { Double(combinationCount) * game.unitPrice * Double(multiple) }
+    /// 追加是 3 元一注，见 `GameKey.unitPrice(addOn:)`。
+    private var unitPrice: Double { game.unitPrice(addOn: isAddOn) }
+    private var totalCost: Double { Double(combinationCount) * unitPrice * Double(multiple) }
     private var isOverLimit: Bool { combinationCount > TicketBuilder.maxCombinations }
     private var canSave: Bool { combinationCount > 0 && !isOverLimit && target.isAvailable }
+
+    private var preview: TicketPreview {
+        mode == .manual
+            ? TicketPreviewBuilder.make(game: game, lines: lines)
+            : TicketPreviewBuilder.make(game: game, mode: mode, playMode: playMode, selections: selections)
+    }
 
     var body: some View {
         NavigationStack {
@@ -51,16 +97,15 @@ struct EntryFlowView: View {
                 VStack(spacing: 16) {
                     gamePicker
                     if !game.playModes.isEmpty { playModePicker }
-                    modePicker
+                    if EntryMode.modes(for: game).count > 1 { modePicker }
                     targetCard
-                    if mode == .random { randomPanel } else { pickerPanel }
+                    pickerPanel
+                    previewSection
                     multipleRow
                 }
                 // 快乐8 换玩法就是换"选几个号"，已选的号码必须一起清掉，
                 // 否则选十的 10 个号会被当成选五的票留在那里。
-                .onChange(of: playMode) { _, _ in
-                    if mode == .random { regenerate() } else { resetSelections() }
-                }
+                .onChange(of: playMode) { _, _ in resetSelections(clearCandidates: true) }
                 .padding(.horizontal, 16)
                 // safeAreaInset 已经按底栏高度把内容顶上去了，
                 // 这里再垫 130 就是一大片滚不完的空白。
@@ -75,6 +120,11 @@ struct EntryFlowView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) { saveBar }
+            .sheet(isPresented: $isIssuePickerPresented) {
+                IssuePickerSheet(game: game, current: target.expect) { issue in
+                    pickedIssue = issue
+                }
+            }
             .alert("理性购彩", isPresented: $isResponsibleAlertPresented) {
                 Button("我已了解", action: { settings.responsibleAcknowledged = true; save() })
                 Button("取消", role: .cancel) {}
@@ -86,10 +136,11 @@ struct EntryFlowView: View {
             } message: {
                 Text(saveError ?? "")
             }
-            .onAppear {
+            .task {
                 guard !hasPrepared else { return }
                 hasPrepared = true
                 resetForGame(game)
+                await drawStore.loadYearCalendars()
             }
         }
     }
@@ -180,84 +231,73 @@ struct EntryFlowView: View {
             }
         }
         .pickerStyle(.segmented)
-        .onChange(of: mode) { _, newValue in
-            danPicking = false
-            if newValue == .random { regenerate() } else { resetSelections() }
+        .onChange(of: mode) { _, _ in
+            danPicking = true
+            resetSelections(clearCandidates: true)
         }
     }
 
     // MARK: - 绑定期次
 
+    /// 绑定期次卡片。整张卡可点，点开是整年开奖日历。
+    ///
+    /// 「无法绑定期次」这个死状态基本上不会再出现了：`nextDrawTarget` 现在
+    /// 优先走整年日历，过了当期停售时间就自动落到下一期。
     private var targetCard: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: target.isAvailable ? "calendar.badge.clock" : "exclamationmark.triangle")
-                .font(.title3)
-                .foregroundStyle(target.isAvailable ? game.tint : Palette.warning)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(target.isAvailable ? "绑定第 \(target.expect) 期" : "暂时无法绑定期次")
-                    .font(.subheadline.weight(.semibold))
-                Text(target.isAvailable
-                     ? "\(DateText.friendly(target.openTime)) 开奖 · \(target.status.label)"
-                     : target.message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-            Button {
-                Task { await drawStore.refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .accessibilityLabel("刷新开奖期次")
-        }
-        .contentCard()
-    }
-
-    // MARK: - 随机
-
-    private var randomPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                SectionHeader(title: "机选号码")
-                Spacer(minLength: 8)
-                Button("重新随机", systemImage: "shuffle") { regenerate() }
-                    .buttonStyle(SecondaryGlassButton(tint: game.tint))
-                    .fixedSize()
-            }
-
-            if game.supportsMultiTicketCount {
-                Picker("注数", selection: $randomCount) {
-                    ForEach([1, 5, 10], id: \.self) { Text("\($0) 注").tag($0) }
+        Button {
+            isIssuePickerPresented = true
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: target.isAvailable ? "calendar.badge.clock" : "exclamationmark.triangle")
+                    .font(.title3)
+                    .foregroundStyle(target.isAvailable ? game.tint : Palette.warning)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(target.isAvailable ? "绑定第 \(target.expect) 期" : "暂时无法绑定期次")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(target.isAvailable ? targetSubtitle : target.message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .pickerStyle(.segmented)
-                .onChange(of: randomCount) { _, _ in regenerate() }
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(randomTickets.enumerated()), id: \.offset) { index, ticket in
-                    HStack(spacing: 10) {
-                        Text("\(index + 1)")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 20)
-                        TicketNumbersView(game: game, ticket: ticket, size: 30)
+                Spacer(minLength: 0)
+                if pickedIssue != nil {
+                    Button("跟随最新") {
+                        pickedIssue = nil
                     }
+                    .buttonStyle(.plain)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(game.accent.accentColor)
                 }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tertiary)
             }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .contentCard()
+        .accessibilityHint("点按可以从整年开奖日历里改绑其他期次")
     }
 
-    // MARK: - 手动选号
+    private var targetSubtitle: String {
+        var text = "\(DateText.friendly(target.openTime)) 开奖"
+        if pickedIssue != nil {
+            text += " · 手动指定"
+        } else if !target.buyEndTime.isEmpty {
+            text += " · \(DateText.friendly(target.buyEndTime)) 停售"
+        }
+        return text
+    }
+
+    // MARK: - 选号
 
     private var pickerPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             if mode == .dantuo {
+                // 顺序跟着票面走：胆码在前，拖码在后。
                 Picker("选号类型", selection: $danPicking) {
-                    Text("选拖码").tag(false)
                     Text("选胆码").tag(true)
+                    Text("选拖码").tag(false)
                 }
                 .pickerStyle(.segmented)
             }
@@ -268,16 +308,22 @@ struct EntryFlowView: View {
                     selection: binding(for: section.key),
                     required: requiredCount(for: section),
                     mode: mode,
-                    danPicking: danPicking
+                    danPicking: danPicking,
+                    onReject: { showToast($0, symbol: "hand.raised") }
                 )
             }
 
-            HStack {
+            HStack(spacing: 10) {
                 Button("随机填充", systemImage: "wand.and.stars") { fillRandomSelection() }
                     .buttonStyle(SecondaryGlassButton(tint: game.tint))
+                if mode == .manual {
+                    Button("加入候选", systemImage: "plus.circle") { addCandidate() }
+                        .buttonStyle(SecondaryGlassButton(tint: game.tint))
+                        .disabled(pendingLine == nil)
+                }
                 Spacer(minLength: 8)
                 Button("清空", systemImage: "eraser") {
-                    withAnimation { resetSelections() }
+                    withAnimation { resetSelections(clearCandidates: false) }
                 }
                 .buttonStyle(.plain)
                 .font(.subheadline)
@@ -297,6 +343,28 @@ struct EntryFlowView: View {
             get: { selections[key] ?? SectionSelection() },
             set: { selections[key] = $0 }
         )
+    }
+
+    // MARK: - 整票预览
+
+    @ViewBuilder
+    private var previewSection: some View {
+        if !preview.isEmpty {
+            TicketPreviewCard(game: game,
+                              preview: preview,
+                              count: combinationCount,
+                              cost: totalCost,
+                              multiple: multiple,
+                              onRemoveLine: mode == .manual ? removeCandidate : nil)
+        } else {
+            Text(mode == .manual
+                 ? "选够号码后会在这里显示整张票的样子，可以一次攒好几注。"
+                 : "选够号码后会在这里按票面的排版显示整张票。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentCard()
+        }
     }
 
     // MARK: - 倍数
@@ -358,12 +426,11 @@ struct EntryFlowView: View {
 
     private func resetForGame(_ item: GameKey) {
         playMode = item.defaultPlayMode
-        danPicking = false
+        danPicking = true
         multiple = 1
-        randomCount = 1
-        if !EntryMode.modes(for: item).contains(mode) { mode = .random }
-        resetSelections(for: item)
-        if mode == .random { regenerate() }
+        pickedIssue = nil
+        if !EntryMode.modes(for: item).contains(mode) { mode = .manual }
+        resetSelections(for: item, clearCandidates: true)
     }
 
     /// 清空选号。
@@ -371,7 +438,7 @@ struct EntryFlowView: View {
     /// 数字型玩法（3D、排列3/5、七星彩前六位）用的是滚轮，滚轮**永远显示着一个值**。
     /// 如果 selections 是空的，界面上明明写着 0 0 0，底栏却是"共 0 注"、保存按钮是灰的。
     /// 所以位选号一开始就按滚轮当前显示的值填好。
-    private func resetSelections(for item: GameKey? = nil) {
+    private func resetSelections(for item: GameKey? = nil, clearCandidates: Bool) {
         let target = item ?? game
         var next: [SectionKey: SectionSelection] = [:]
         for section in target.sections where section.isPositional {
@@ -381,10 +448,30 @@ struct EntryFlowView: View {
             )
         }
         selections = next
+        if clearCandidates { candidates = [] }
     }
 
-    private func regenerate() {
-        randomTickets = TicketBuilder.randomTickets(game: game, count: randomCount, playMode: playMode)
+    private func addCandidate() {
+        guard let pendingLine else { return }
+        guard !candidates.contains(pendingLine) else {
+            showToast("这一注已经在候选里了", symbol: "exclamationmark.circle")
+            return
+        }
+        guard candidates.count < TicketBuilder.maxCombinations else {
+            showToast("一张票最多 \(TicketBuilder.maxCombinations) 注", symbol: "hand.raised")
+            return
+        }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+            candidates.append(pendingLine)
+            // 加入之后把选号盘清空，好接着选下一注。数字型的滚轮照旧填回初值。
+            resetSelections(clearCandidates: false)
+        }
+        showToast("已加入第 \(candidates.count) 注", symbol: "plus.circle.fill")
+    }
+
+    private func removeCandidate(_ index: Int) {
+        guard candidates.indices.contains(index) else { return }
+        candidates.remove(at: index)
     }
 
     private func fillRandomSelection() {
@@ -393,10 +480,9 @@ struct EntryFlowView: View {
             for section in game.sections {
                 let need = requiredCount(for: section)
                 if section.isPositional {
-                    // 按位取值，必须允许重复：pickUnique 永远给不出 5-5-3 这种号，
-                    // 3D 的豹子、对子用"随机填充"一辈子也随不出来。
                     next[section.key] = SectionSelection(
-                        selected: (0..<need).map { _ in Int.random(in: section.range) }
+                        selected: TicketBuilder.randomDigits(game: game, count: need,
+                                                             range: section.range, playMode: playMode)
                     )
                     continue
                 }
@@ -433,7 +519,7 @@ struct EntryFlowView: View {
             try service.save(tickets: built,
                              game: game,
                              entryKind: mode.kind,
-                             price: game.unitPrice,
+                             price: unitPrice,
                              multiple: multiple,
                              target: target,
                              source: mode.rawValue)

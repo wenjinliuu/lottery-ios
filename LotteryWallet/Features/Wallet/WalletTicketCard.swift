@@ -45,6 +45,11 @@ struct WalletTicketCard: View {
                 footer
             }
         }
+        // 中奖的票自己一直在放小烟花，不用等用户去点。
+        // 中奖是几个月才遇上一次的事，它值得一直亮着。
+        .overlay {
+            if card.status == .won { TicketSparkleOverlay() }
+        }
         .contentShape(Rectangle())
         // 烟花只在「刚核出中奖」那一瞬间放的话，基本没人看得到 ——
         // 票一旦结算就再也不会重新变成中奖。点开一张已中奖的票也放一次，
@@ -172,28 +177,28 @@ struct WalletTicketCard: View {
 
     // MARK: - 票尾
 
-    /// 票尾。
+    /// 票尾：左边开奖号码，右边盈亏，一行放完。
     ///
-    /// 开奖号码和盈亏改成上下两段而不是左右两段：横排时两列会抢宽度，
-    /// 开奖号码被挤到只剩一半，最后一颗球被推到第二行、甚至溢出票面。
+    /// 这里踩过一次坑。最早两列是横排的，开奖号码最后一颗球会被挤到第二行、
+    /// 甚至溢出票面 —— 原因是 `BallFlow` 在 `.unspecified` 提案下报的是
+    /// **单行摊开的宽度**，HStack 拿这个当理想宽度去和右边那列分配，
+    /// 号码列就被压掉一截。当时改成了上下两段，代价是白白多占一行高度。
+    ///
+    /// 正确的做法是把右边那列 `fixedSize` 掉：它先拿走自己真正需要的宽度，
+    /// 剩下的**全部**给号码列，号码列再在这个确定的宽度里排版。
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let draw {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("开奖号码")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    DrawNumbersView(draw: draw, size: 24)
+        HStack(alignment: .bottom, spacing: 10) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(draw == nil ? "等待开奖" : "开奖号码")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if let draw {
+                    DrawNumbersView(draw: draw, size: 22)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 6) {
-                if draw == nil {
-                    Text("等待开奖")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
+            VStack(alignment: .trailing, spacing: 2) {
                 Text("盈亏")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -201,9 +206,9 @@ struct WalletTicketCard: View {
                     .font(.subheadline.weight(.bold))
                     .monospacedDigit()
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
                     .foregroundStyle(card.status == .pending ? Color.secondary : Palette.profitColor(card.netProfit))
             }
+            .fixedSize()
         }
         .padding(.top, 10)
     }

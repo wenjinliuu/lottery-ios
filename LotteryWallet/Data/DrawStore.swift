@@ -32,6 +32,11 @@ final class DrawStore {
     private(set) var isLoading = false
     private(set) var loadFailed = false
     private(set) var loadedHistoryGames: Set<GameKey> = []
+    /// 整年开奖日历，按年缓存。文件是静态的，一年只需要取一次。
+    private(set) var yearCalendars: [Int: DrawCalendarYear] = [:]
+    private var loadedArchives: Set<ArchiveKey> = []
+
+    struct ArchiveKey: Hashable { let game: GameKey; let year: Int }
 
     /// 按彩种+期号建索引。核对成百上千条记录时，每条都去线性扫全部开奖
     /// 是 O(记录 × 开奖)，几百条就能让主线程停住。
@@ -50,6 +55,7 @@ final class DrawStore {
     /// 冷启动：先拿最新一期把首页点亮，再后台补齐各彩种近 50 期。
     func bootstrap() async {
         await refresh()
+        await loadYearCalendars()
         await loadAllHistories()
     }
 
@@ -71,6 +77,67 @@ final class DrawStore {
         } else {
             loadFailed = draws.isEmpty
         }
+    }
+
+    /// 整年开奖日历。跨年那几天要同时拿到今年和明年，否则 12 月 31 日
+    /// 之后就找不到"下一期"了。
+    func loadYearCalendars(_ now: Date = Date()) async {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = DateText.chinaTimeZone
+        let year = calendar.component(.year, from: now)
+        let client = self.client
+        for candidate in [year, year + 1] where yearCalendars[candidate] == nil {
+            // 明年的文件通常要到 12 月才生成，取不到是正常情况，静默跳过。
+            if let payload = try? await client.fetchDrawCalendar(year: candidate) {
+                yearCalendars[candidate] = payload
+            }
+        }
+    }
+
+    /// 按需补齐某几年的整年开奖记录。
+    ///
+    /// 补核对导入的老票要用：那些票绑定的期号可能是好几个月前的，
+    /// 不在最近 50 期里，光靠 `draws/{game}.json` 永远查不到对应开奖号。
+    func loadArchives(_ wanted: [GameKey: Set<Int>]) async {
+        let pending = wanted.flatMap { game, years in
+            years.filter { !loadedArchives.contains(ArchiveKey(game: game, year: $0)) }
+                .map { (game, $0) }
+        }
+        guard !pending.isEmpty else { return }
+        let client = self.client
+        let results = await withTaskGroup(of: (GameKey, Int, [Draw]?).self) { group in
+            for (game, year) in pending {
+                group.addTask { (game, year, try? await client.fetchYearDraws(for: game, year: year)) }
+            }
+            var collected: [(GameKey, Int, [Draw]?)] = []
+            for await item in group { collected.append(item) }
+            return collected
+        }
+        var merged: [Draw] = []
+        for (game, year, draws) in results {
+            loadedArchives.insert(ArchiveKey(game: game, year: year))
+            if let draws { merged.append(contentsOf: draws) }
+        }
+        if !merged.isEmpty { merge(merged) }
+    }
+
+    /// 某个彩种在日历里的全部期次，按开奖日期升序。
+    func calendarIssues(for game: GameKey, year: Int) -> [CalendarIssue] {
+        yearCalendars[year]?.entry(for: game)?.issues ?? []
+    }
+
+    /// 日历里现在还能买的最近一期。
+    ///
+    /// 这是"过了停售时间就自动落到下一期"的实现：不再去判断某一期能不能买，
+    /// 而是直接在全年期次里找第一期停售时刻还没到的。跨年时会顺着接到明年 001。
+    func calendarTarget(for game: GameKey, now: Date = Date()) -> DrawTarget? {
+        for year in yearCalendars.keys.sorted() {
+            guard let entry = yearCalendars[year]?.entry(for: game) else { continue }
+            if let issue = entry.issues.first(where: { $0.isOnSale(at: now) }) {
+                return issue.target()
+            }
+        }
+        return nil
     }
 
     func loadHistory(for game: GameKey) async {
@@ -244,11 +311,29 @@ final class DrawStore {
         )
     }
 
-    /// 录入票据时可以绑定的期次。数据不全或已截止时返回不可用并附带原因。
+    /// 录入票据时可以绑定的期次。
+    ///
+    /// 判断顺序刻意把整年日历放在最前面：仓库的 `latest.json` 只带"下一期"，
+    /// 一旦当期停售、开奖号又还没更新，它就只能回一句"本期已截止"，
+    /// 用户在录入页看到的是一个不能保存的死界面。而整年日历里每一期都带
+    /// `sale_close_time`，只要顺着往后找第一期还没停售的，永远能给出一个
+    /// 可以绑定的期次 —— 过了今天的截止时间就自动落到下一期。
     func nextDrawTarget(for game: GameKey, now: Date = Date()) -> DrawTarget {
-        guard var target = nextDrawMetadata(for: game) else {
-            return .unavailable("暂无下期开奖数据，请稍后刷新")
+        if let fromCalendar = calendarTarget(for: game, now: now) {
+            // 仓库的下期预测和日历指向同一期时，用仓库那份 —— 它带着
+            // confirmed / inferred 状态和推导依据，信息更全。
+            if let remote = remoteNextTarget(for: game, now: now),
+               remote.isAvailable, remote.expect == fromCalendar.expect {
+                return remote
+            }
+            return fromCalendar
         }
+        return remoteNextTarget(for: game, now: now) ?? .unavailable("暂无下期开奖数据，请稍后刷新")
+    }
+
+    /// 只看仓库 `latest.json` / `calendar.json` 的下期推算，日历兜底之前的老逻辑。
+    private func remoteNextTarget(for game: GameKey, now: Date) -> DrawTarget? {
+        guard var target = nextDrawMetadata(for: game) else { return nil }
         guard !target.expect.isEmpty, !target.openTime.isEmpty, !target.buyEndTime.isEmpty else {
             target.isAvailable = false
             target.message = "开奖仓库尚未生成下期预测，请稍后刷新"
