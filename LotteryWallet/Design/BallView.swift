@@ -31,7 +31,7 @@ struct BallView: View {
         Text(label)
             .font(.system(size: size * 0.44, weight: .heavy, design: .rounded))
             .monospacedDigit()
-            .foregroundStyle(isHollow ? color.accentColor : Color.white)
+            .foregroundStyle(isHollow ? color.accentColor : (isDimmed ? Palette.missInk : Color.white))
             .frame(width: size, height: size)
             .background {
                 if isHollow {
@@ -41,7 +41,7 @@ struct BallView: View {
                 } else {
                     Circle()
                         .fill(fill)
-                        .overlay(Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.8))
+                        .overlay(Circle().strokeBorder(.white.opacity(isDimmed ? 0 : 0.35), lineWidth: 0.8))
                         // 黄球、琥珀球本身很亮，压在浅色卡片上边缘会糊掉，
                         // 补一圈同色深端把轮廓勾出来。
                         .overlay(Circle().strokeBorder(isDimmed ? .clear : color.rimStroke, lineWidth: 0.8))

@@ -118,6 +118,25 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         }
     }
 
+    /// 票面上要显示的玩法标签。
+    ///
+    /// 大乐透的「追加」原来在票夹里完全看不见 —— 票面只显示录入方式
+    /// （随机/普通/复式/胆拖），玩法字段虽然存了却没有任何地方读它。
+    func playLabel(playMode: String, addOn: Bool) -> String {
+        switch self {
+        case .dlt: return addOn ? "追加" : "普通"
+        case .k8: return Int(playMode).map { "选\(ChineseNumber.text($0))" } ?? ""
+        case .fc3d, .pl3:
+            switch playMode {
+            case "single": return "直选"
+            case "group3": return "组三"
+            case "group6": return "组六"
+            default: return ""
+            }
+        default: return ""
+        }
+    }
+
     /// 投注时这个号码区实际要选几个号。
     ///
     /// 快乐8 的 `section.count` 是**开奖**开出的 20 个号，投注选几个由玩法决定

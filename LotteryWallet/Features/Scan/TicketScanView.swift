@@ -247,7 +247,7 @@ struct TicketScanView: View {
                             .buttonStyle(SecondaryGlassButton(tint: game.tint))
                             .fixedSize()
                         Button("加入票夹") { importTickets(game: game) }
-                            .buttonStyle(ProminentGlassButton(tint: game.tint, foreground: game.onTint))
+                            .buttonStyle(ProminentGlassButton(tint: game.tint, foreground: game.onTint, stroke: game.accent.solidStroke))
                             .disabled(editedTickets.isEmpty || editedIssue.isEmpty)
                     }
                     .padding(.horizontal, 16)

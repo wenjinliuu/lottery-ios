@@ -69,9 +69,12 @@ struct GlassGroup<Content: View>: View {
 struct ProminentGlassButton: ButtonStyle {
     var tint: Color
     var foreground: Color = Palette.onAccent
+    /// 亮色彩种（七乐彩黄、七星彩琥珀）需要一圈描边把按钮边缘勾出来，
+    /// 否则白字白边糊在浅色底上。
+    var stroke: Color = .clear
 
     func makeBody(configuration: Configuration) -> some View {
-        StyleBody(configuration: configuration, tint: tint, foreground: foreground)
+        StyleBody(configuration: configuration, tint: tint, foreground: foreground, stroke: stroke)
     }
 
     /// ButtonStyle 本身不是 View，读不到 `isEnabled`，只能套一层真正的 View。
@@ -82,6 +85,7 @@ struct ProminentGlassButton: ButtonStyle {
         let configuration: ButtonStyleConfiguration
         let tint: Color
         let foreground: Color
+        var stroke: Color = .clear
         @Environment(\.isEnabled) private var isEnabled
 
         var body: some View {
@@ -91,6 +95,7 @@ struct ProminentGlassButton: ButtonStyle {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 15)
                 .background(tint, in: Capsule())
+                .overlay(Capsule().strokeBorder(stroke, lineWidth: 1))
                 .opacity(isEnabled ? (configuration.isPressed ? 0.86 : 1) : 0.4)
                 .scaleEffect(configuration.isPressed ? 0.98 : 1)
                 .animation(.spring(response: 0.3, dampingFraction: 0.75), value: configuration.isPressed)

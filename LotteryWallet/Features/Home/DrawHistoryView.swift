@@ -80,6 +80,7 @@ struct DrawHistoryView: View {
                             .padding(.vertical, 8)
                             .background(isOn ? AnyShapeStyle(item.tint) : AnyShapeStyle(Palette.card),
                                         in: Capsule())
+                            .overlay(Capsule().strokeBorder(isOn ? item.accent.solidStroke : .clear, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)

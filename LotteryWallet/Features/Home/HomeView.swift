@@ -135,9 +135,11 @@ struct HomeView: View {
 
             Divider()
 
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
                 statPair("投入", MoneyText.format(series.costTotal))
                 statPair("奖金", MoneyText.format(series.prizeTotal))
+                // 公益金：彩票面额的 36% 计提，这部分钱是确定流向公益事业的
+                statPair("公益金", MoneyText.format(series.costTotal * 0.36))
                 statPair("已结算", "\(series.settledCount) 注")
             }
         }
@@ -182,7 +184,7 @@ struct HomeView: View {
             // 系统自带的分页圆点画在 TabView 的画布里，会压在卡片下沿上。
             // 关掉它自己画一排放到卡片外面，既不重叠也能控制配色。
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: 152)
+            .frame(height: 146)
             .accessibilityHint("左右滑动查看其他彩种的最新开奖")
 
             pageDots
@@ -316,30 +318,38 @@ struct ProfitHeatmap: View {
     private let cell: CGFloat = 13
     private let gap: CGFloat = 3
 
-    /// 有记录的那些天，按净额取色。
-    private var byDay: [String: Double] {
-        var map: [String: Double] = [:]
-        for day in days where day.count > 0 { map[day.date] = day.net }
+    /// 有记录的那些天。
+    private var byDay: [String: ProfitDay] {
+        var map: [String: ProfitDay] = [:]
+        for day in days where day.count > 0 { map[day.date] = day }
         return map
     }
 
-    /// 参与配色归一化的最大绝对净额。
-    private var scale: Double {
-        Swift.max(byDay.values.map(\.magnitude).max() ?? 0, 1)
+    /// 一天的颜色浓度，0…1。
+    ///
+    /// **不用全局最大值归一化。** 大多数人每天投入是差不多的，一年里偶尔
+    /// 一两天多买了几倍，用全局最大值当刻度就会把其余三百多天全压成浅色 ——
+    /// 图上只剩一两个深格子，其他全是几乎看不见的淡色。
+    ///
+    /// 改成按**当天自己的投入**归一化：
+    /// - 亏损侧：亏掉了当天投入的百分之多少。**全亏 = 满色**，这也是最常见的情况，
+    ///   所以「买了没中」的日子颜色是齐的，不会互相压。
+    /// - 盈利侧：赚了当天投入的几倍，走对数刻度 —— 小赚和大赚要能分出来，
+    ///   但小赚也不能一下就满色。赚到 9 倍投入封顶。
+    private func intensity(for day: ProfitDay) -> Double {
+        let base = Swift.max(day.cost, 1)
+        if day.net < 0 {
+            return Swift.min(abs(day.net) / base, 1)
+        }
+        if day.net == 0 { return 0.22 }
+        return Swift.min(log(1 + day.net / base) / log(10.0), 1)
     }
 
     /// 图上要画的日期区间，按周对齐（每列是完整一周，周一起头）。
     private var weeks: [[Date?]] {
         let calendar = Calendar.chinaCalendar
         let today = Date()
-        let span: Int
-        switch range {
-        case .week: span = 7
-        case .month: span = 31
-        case .quarter: span = 90
-        case .all: span = 182
-        }
-        guard let start = calendar.date(byAdding: .day, value: -(span - 1), to: today) else { return [] }
+        guard let start = calendar.date(byAdding: .day, value: -(range.gridSpan - 1), to: today) else { return [] }
 
         // 回退到那一周的周一，列才不会错位
         let weekdayIndex = (calendar.component(.weekday, from: start) + 5) % 7
@@ -386,9 +396,9 @@ struct ProfitHeatmap: View {
     @ViewBuilder
     private func cellView(for date: Date?) -> some View {
         let shape = RoundedRectangle(cornerRadius: 3, style: .continuous)
-        if let date, let net = byDay[DateText.day(date)] {
+        if let date, let day = byDay[DateText.day(date)] {
             shape
-                .fill(color(for: net))
+                .fill(color(for: day))
                 .frame(width: cell, height: cell)
         } else if date != nil {
             shape
@@ -399,21 +409,21 @@ struct ProfitHeatmap: View {
         }
     }
 
-    /// 赚的日子偏绿、亏的日子偏红，金额越大越浓。
-    /// 最低透明度留 0.28，否则小额那天几乎和空格子分不出来。
-    private func color(for net: Double) -> Color {
-        let intensity = 0.28 + 0.72 * Swift.min(abs(net) / scale, 1)
-        return (net >= 0 ? Palette.profit : Palette.loss).opacity(intensity)
+    /// 赚的日子偏红、亏的日子偏绿，浓度按 `intensity` 算。
+    /// 最低透明度留 0.30，否则小额那天几乎和空格子分不出来。
+    private func color(for day: ProfitDay) -> Color {
+        let level = 0.30 + 0.70 * intensity(for: day)
+        return (day.net >= 0 ? Palette.profit : Palette.loss).opacity(level)
     }
 
     private var legend: some View {
         HStack(spacing: 6) {
-            Text("亏")
+            Text("全亏")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             ForEach([1.0, 0.55, 0.25], id: \.self) { level in
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(Palette.loss.opacity(0.28 + 0.72 * level))
+                    .fill(Palette.loss.opacity(0.30 + 0.70 * level))
                     .frame(width: 9, height: 9)
             }
             RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -421,10 +431,10 @@ struct ProfitHeatmap: View {
                 .frame(width: 9, height: 9)
             ForEach([0.25, 0.55, 1.0], id: \.self) { level in
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(Palette.profit.opacity(0.28 + 0.72 * level))
+                    .fill(Palette.profit.opacity(0.30 + 0.70 * level))
                     .frame(width: 9, height: 9)
             }
-            Text("赚")
+            Text("大赚")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
@@ -530,6 +540,7 @@ struct DrawCard: View {
     /// 首页每个号码区最多画 8 颗球。快乐8 一期开 20 个，
     /// 全画出来要么撑爆卡片要么缩到看不清。
     private let ballLimit = 8
+    private let ballSize: CGFloat = 32
 
     private var firstPrize: PrizeEntry? {
         guard let entry = draw?.firstPrize, entry.winningCount > 0 || entry.amount > 0 else { return nil }
@@ -537,11 +548,13 @@ struct DrawCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        // 三段整体在卡片里垂直居中。原来靠 Spacer 撑，一等奖那行没有的时候
+        // 下半部分会空出一大片。
+        VStack(alignment: .leading, spacing: 9) {
             header
 
             if let draw {
-                DrawNumbersView(draw: draw, size: 28, limit: ballLimit, onOverflow: onExpandNumbers)
+                DrawNumbersView(draw: draw, size: ballSize, limit: ballLimit, onOverflow: onExpandNumbers)
             } else {
                 Text("暂无开奖数据")
                     .font(.subheadline)
@@ -550,25 +563,27 @@ struct DrawCard: View {
                     .padding(.vertical, 6)
             }
 
-            // 有一等奖信息就贴在号码下面；没有的（比如快乐8）让号码
-            // 在剩下的空间里居中，两种卡片切换时不会一高一低。
             if let firstPrize {
                 prizeStrip(firstPrize)
-            } else {
-                Spacer(minLength: 0)
             }
         }
-        .frame(maxHeight: .infinity, alignment: firstPrize == nil ? .center : .top)
-        .contentCard(padding: 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 13)
+        .padding(.horizontal, 14)
+        .frame(maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Palette.card)
+        )
     }
 
     private var header: some View {
         HStack(spacing: 7) {
             Circle()
                 .fill(game.tint)
-                .frame(width: 7, height: 7)
+                .frame(width: 8, height: 8)
             Text(game.label)
-                .font(.subheadline.weight(.semibold))
+                .font(.headline)
 
             if opensToday {
                 Text("今日开奖")

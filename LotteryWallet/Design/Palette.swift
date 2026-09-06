@@ -42,16 +42,21 @@ extension Color {
 /// - `accentColor` / `onAccentColor`：当作文字或实心底时用的自适应对。
 extension BallColor {
     /// 渐变上端（浅）。
+    ///
+    /// 采用「只齐渐变」方案：**八个深端色一个像素都不改**，只把浅端重算成
+    /// 统一的规则（亮度按剩余色域空间提，彩度尽量保住），让八个球的渐变强度一致。
+    /// 例外是七乐彩黄和七星彩琥珀 —— 这两个深端本来就在色域顶附近，
+    /// 再提亮会被洗成米白/桃色，所以保留它们原本的浅端。
     var lightHex: UInt32 {
         switch self {
-        case .red: 0xFF8E85
-        case .blue: 0x7EAFFF
-        case .yellow: 0xFFB879
-        case .k8orange: 0xFF9D7F
-        case .fc3d: 0x60C8ED
-        case .plum: 0xE888C9
-        case .indigo: 0x9DABF9
-        case .amber: 0xF7BB69
+        case .red: 0xFF9188
+        case .blue: 0x81B1FF
+        case .yellow: 0xFFC85C
+        case .k8orange: 0xFF9F82
+        case .fc3d: 0x5ACAF2
+        case .plum: 0xED88CC
+        case .indigo: 0x7883D3
+        case .amber: 0xEDBF73
         }
     }
 
@@ -60,12 +65,12 @@ extension BallColor {
         switch self {
         case .red: 0xEF4444
         case .blue: 0x3B82F6
-        case .yellow: 0xE68507
+        case .yellow: 0xFF9C34
         case .k8orange: 0xF05A28
         case .fc3d: 0x239FC5
         case .plum: 0xBF5EA1
-        case .indigo: 0x7682D1
-        case .amber: 0xCE9136
+        case .indigo: 0x525BA7
+        case .amber: 0xE0A24A
         }
     }
 
@@ -92,10 +97,16 @@ extension BallColor {
     /// 深色模式下改用浅端，否则深端压在近黑底上只有 2.x:1。
     var accentColor: Color { Color(light: deepHex, dark: lightHex) }
 
-    /// 压在 `accentColor` 实心底上的可读前景色。
-    /// 深色模式下底色是浅端，一律用深墨。
-    var onAccentColor: Color {
-        Color(light: isBright ? 0x2A1E04 : 0xFFFFFF, dark: 0x101014)
+    /// 压在 `accentColor` 实心底上的前景色。
+    ///
+    /// 八个彩种**统一用白字** —— 之前给黄和琥珀换深墨是为了对比度，
+    /// 但那让七乐彩的按钮在一堆白字按钮里显得像另一个 App。
+    /// 亮色底靠 `solidStroke` 描一圈同色深端来补边缘可辨识度。
+    var onAccentColor: Color { Color(light: 0xFFFFFF, dark: 0x101014) }
+
+    /// 亮色彩种当实心底时补的一圈描边。深色彩种不需要。
+    var solidStroke: Color {
+        isBright ? Color(light: deepHex, dark: 0x000000).opacity(0.28) : .clear
     }
 
     /// 庆祝烟花用的一整套亮色，比球面色更跳。
@@ -130,9 +141,17 @@ enum Palette {
     static let live = Color(light: 0x00B884, dark: 0x3DE0A6)
     /// 危险 / 删除 / 胆码标记。和「盈利红」分开，避免语义打架。
     static let danger = Color(light: 0xE0322F, dark: 0xFF6A64)
-    /// 未命中号码球的中性灰。实心、有体积，不是把彩色球调透明。
-    static let missLight = Color(light: 0xC7C9CE, dark: 0x6E727A)
-    static let missDeep = Color(light: 0x9DA1A9, dark: 0x4A4E56)
+    /// 未命中号码球。
+    ///
+    /// 第一版用「整颗压到 34% 透明」——白字跟着变淡，整张票像褪了色。
+    /// 第二版用「实心中性灰 + 白字」——不褪色了，但灰球太实，
+    /// 和命中的彩球抢注意力。
+    /// 这一版让它真正退到后面：很淡的灰底配深灰数字，号码依然清晰，
+    /// 但视觉重量明显低于彩色球。
+    static let missLight = Color(light: 0xEDEEF1, dark: 0x2E3238)
+    static let missDeep = Color(light: 0xDFE1E6, dark: 0x24272C)
+    /// 未命中球上的数字色。
+    static let missInk = Color(light: 0x8A8F98, dark: 0x8C929B)
     /// 中性/待定。
     static let neutral = Color.secondary
     /// 压在系统强调色实心底上的前景色。

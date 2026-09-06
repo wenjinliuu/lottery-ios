@@ -220,6 +220,8 @@ struct TicketCard: Identifiable, Hashable {
     let targetStatus: NextDrawStatus
     let multiple: Int
     let entryLabel: String
+    /// 玩法：大乐透的追加、快乐8 的选几、3D 的直选组三组六。
+    let playLabel: String
     let count: Int
     let cost: Double
     let prize: Double
@@ -292,6 +294,8 @@ extension TicketCard {
         targetStatus = first?.targetStatus ?? .confirmed
         multiple = batch.multiple
         entryLabel = batch.entryLabel
+        playLabel = batch.game.playLabel(playMode: first?.playMode ?? "",
+                                         addOn: first?.ticket.addOn ?? false)
         count = records.count
         createdAt = batch.createdAt
 

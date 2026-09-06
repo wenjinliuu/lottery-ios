@@ -12,6 +12,7 @@ struct StatsView: View {
     @State private var stats = ProfitStats.PeriodStats()
     @State private var years: [Int] = []
     @State private var isShowingAllDays = false
+    @State private var isPeriodPickerPresented = false
 
     var body: some View {
         ScrollView {
@@ -43,56 +44,47 @@ struct StatsView: View {
     private func recompute() {
         stats = ProfitStats.period(entries: entries, year: year, month: month)
         // 换年 / 换月之后重新收起，否则从"全年"切到某个月还留着展开状态
-        isShowingAllDays = false
+        if isShowingAllDays { isShowingAllDays = false }
     }
 
     // MARK: - 年月选择
 
     /// 年月选择。
     ///
-    /// 原来是两个 `.menu` 样式的 Picker —— 点一下弹一个菜单，选完再弹一次，
-    /// 两级弹窗看着很碎。改成直接点的芯片条：年份一排、月份一排，一次点中。
+    /// 第一版是两个 `.menu` Picker —— 点一下弹菜单、选完再弹一次，两级弹窗很碎。
+    /// 第二版改成横滑芯片条 —— 月份要滑好几屏才够到，而且切月时崩过。
+    /// 这一版按系统日历的做法：一行摘要，点开是一个年份左右翻 + 12 个月的网格，
+    /// 一眼看全，一次点中。
     private var selector: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 7) {
-                    ForEach(years, id: \.self) { item in
-                        chip("\(item) 年", isOn: year == item) { year = item }
-                    }
-                }
-                .padding(.vertical, 1)
-            }
-            .scrollClipDisabled()
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 7) {
-                    chip("全年", isOn: month == nil) { month = nil }
-                    ForEach(1...12, id: \.self) { item in
-                        chip("\(item) 月", isOn: month == item) { month = item }
-                    }
-                }
-                .padding(.vertical, 1)
-            }
-            .scrollClipDisabled()
-        }
-        .contentCard(padding: 12)
-    }
-
-    private func chip(_ title: String, isOn: Bool, action: @escaping () -> Void) -> some View {
         Button {
-            withAnimation(.easeOut(duration: 0.16)) { action() }
+            isPeriodPickerPresented = true
         } label: {
-            Text(title)
-                .font(.footnote.weight(isOn ? .semibold : .regular))
-                .monospacedDigit()
-                .foregroundStyle(isOn ? Palette.onAccent : Color.primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary.opacity(0.06)),
-                            in: Capsule())
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text(periodTitle)
+                    .font(.headline)
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                Text("更改")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentCard(padding: 14)
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+        .sheet(isPresented: $isPeriodPickerPresented) {
+            PeriodPicker(year: $year, month: $month, years: years)
+        }
+    }
+
+    private var periodTitle: String {
+        month.map { "\(year) 年 \($0) 月" } ?? "\(year) 年 全年"
     }
 
     private var kpiGrid: some View {
@@ -137,6 +129,8 @@ struct StatsView: View {
                         .foregroundStyle(by: .value("彩种", item.game.label))
                         .cornerRadius(4)
                 }
+                // domain 和 range 必须等长且非空，否则 Swift Charts 会直接崩。
+                // 上面的 isEmpty 分支保证了非空，这里保证等长。
                 .chartForegroundStyleScale(domain: stats.byGame.map(\.game.label),
                                            range: stats.byGame.map(\.game.tint))
                 .chartLegend(.hidden)
@@ -345,5 +339,83 @@ struct DayProportionBar: View {
                 .fill(tint)
                 .frame(width: Swift.max(width * CGFloat(count) / CGFloat(total) - 2, 3))
         }
+    }
+}
+
+
+/// 年月选择面板。年份左右翻，月份一个 3×4 的网格，外加一个「全年」。
+struct PeriodPicker: View {
+    @Binding var year: Int
+    @Binding var month: Int?
+    let years: [Int]
+
+    @Environment(\.dismiss) private var dismiss
+
+    private var minYear: Int { years.min() ?? year }
+    private var maxYear: Int { years.max() ?? year }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 18) {
+                HStack {
+                    stepButton("chevron.left", enabled: year > minYear) { year -= 1 }
+                    Spacer()
+                    Text("\(year) 年")
+                        .font(.title2.weight(.bold))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                    Spacer()
+                    stepButton("chevron.right", enabled: year < maxYear) { year += 1 }
+                }
+                .padding(.horizontal, 4)
+
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
+                    ForEach(1...12, id: \.self) { item in
+                        monthCell("\(item) 月", isOn: month == item) { month = item }
+                    }
+                }
+
+                monthCell("全年", isOn: month == nil, wide: true) { month = nil }
+
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .background(Palette.canvas)
+            .navigationTitle("选择统计区间")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.height(360)])
+    }
+
+    private func stepButton(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.headline)
+                .frame(width: 40, height: 40)
+                .background(Palette.card, in: Circle())
+        }
+        .buttonStyle(PressableIcon())
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.35)
+    }
+
+    private func monthCell(_ title: String, isOn: Bool, wide: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(isOn ? .bold : .regular))
+                .monospacedDigit()
+                .foregroundStyle(isOn ? Palette.onAccent : Color.primary)
+                .frame(maxWidth: .infinity)
+                .frame(height: wide ? 44 : 40)
+                .background(isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Palette.card),
+                            in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
     }
 }

@@ -1,20 +1,32 @@
 import Foundation
 
-/// 折线图的时间范围。
+/// 盈亏图的时间范围。
+///
+/// 近 7 天对买彩票这件事来说太短了 —— 一周可能就一两次开奖，图上没东西可看。
 enum ProfitRange: String, CaseIterable, Identifiable {
-    case week = "7"
     case month = "month"
-    case quarter = "90"
+    case half = "183"
+    case year = "365"
     case all
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .week: "近7天"
         case .month: "本月"
-        case .quarter: "近90天"
+        case .half: "近半年"
+        case .year: "近一年"
         case .all: "全部"
+        }
+    }
+
+    /// 方格图要铺多少天。
+    var gridSpan: Int {
+        switch self {
+        case .month: 31
+        case .half: 183
+        case .year: 365
+        case .all: 365
         }
     }
 }
@@ -184,8 +196,8 @@ enum ProfitStats {
             return firstDay
         case .month:
             return String(DateText.day(now).prefix(7)) + "-01"
-        case .week, .quarter:
-            let span = Int(range.rawValue) ?? 7
+        case .half, .year:
+            let span = Int(range.rawValue) ?? 183
             guard let end = DateText.parse(lastDay),
                   let shifted = Calendar.chinaCalendar.date(byAdding: .day, value: -(max(span, 1) - 1), to: end) else {
                 return firstDay

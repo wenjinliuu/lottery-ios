@@ -114,6 +114,7 @@ struct WalletTicketCard: View {
         TicketMetaText(items: [
             "\(card.count) 注",
             card.multiple > 1 ? "\(card.multiple) 倍" : "",
+            card.playLabel,
             card.entryLabel,
             "投入 \(MoneyText.format(card.cost))"
         ])
@@ -171,31 +172,37 @@ struct WalletTicketCard: View {
 
     // MARK: - 票尾
 
+    /// 票尾。
+    ///
+    /// 开奖号码和盈亏改成上下两段而不是左右两段：横排时两列会抢宽度，
+    /// 开奖号码被挤到只剩一半，最后一颗球被推到第二行、甚至溢出票面。
     private var footer: some View {
-        HStack(alignment: .bottom) {
+        VStack(alignment: .leading, spacing: 8) {
             if let draw {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("开奖号码")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    DrawNumbersView(draw: draw, size: 23)
+                    DrawNumbersView(draw: draw, size: 24)
                 }
-            } else {
-                Text("等待开奖")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-            Spacer(minLength: 12)
-            VStack(alignment: .trailing, spacing: 1) {
+
+            HStack(spacing: 6) {
+                if draw == nil {
+                    Text("等待开奖")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Text("盈亏")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 Text(card.status == .pending ? "待核对" : MoneyText.format(card.netProfit))
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .foregroundStyle(card.status == .pending ? Color.secondary : Palette.profitColor(card.netProfit))
-                Text("盈亏")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
         }
         .padding(.top, 10)

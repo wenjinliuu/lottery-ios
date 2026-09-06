@@ -132,6 +132,8 @@ struct EntryFlowView: View {
                     if game == item {
                         RoundedRectangle(cornerRadius: 13, style: .continuous)
                             .fill(item.tint)
+                            .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                .strokeBorder(item.accent.solidStroke, lineWidth: 1))
                             .shadow(color: item.tint.opacity(0.32), radius: 7, y: 3)
                     } else {
                         RoundedRectangle(cornerRadius: 13, style: .continuous)
@@ -344,7 +346,7 @@ struct EntryFlowView: View {
                 }
             }
             // 禁用态的淡化交给按钮样式统一处理，不再各页面自己叠 opacity
-            .buttonStyle(ProminentGlassButton(tint: game.tint, foreground: game.onTint))
+            .buttonStyle(ProminentGlassButton(tint: game.tint, foreground: game.onTint, stroke: game.accent.solidStroke))
             .disabled(!canSave)
             .padding(.horizontal, 16)
         }
