@@ -71,11 +71,14 @@ struct ProminentGlassButton: ButtonStyle {
     var foreground: Color = Palette.onAccent
 
     func makeBody(configuration: Configuration) -> some View {
-        Body(configuration: configuration, tint: tint, foreground: foreground)
+        StyleBody(configuration: configuration, tint: tint, foreground: foreground)
     }
 
     /// ButtonStyle 本身不是 View，读不到 `isEnabled`，只能套一层真正的 View。
-    struct Body: View {
+    ///
+    /// 名字不能叫 `Body`：`ButtonStyle` 有个同名的关联类型，嵌套类型会被
+    /// 当成它的见证类型，和 `makeBody` 的不透明返回类型冲突，协议直接不成立。
+    struct StyleBody: View {
         let configuration: ButtonStyleConfiguration
         let tint: Color
         let foreground: Color
@@ -100,10 +103,11 @@ struct SecondaryGlassButton: ButtonStyle {
     var tint: Color
 
     func makeBody(configuration: Configuration) -> some View {
-        Body(configuration: configuration, tint: tint)
+        StyleBody(configuration: configuration, tint: tint)
     }
 
-    struct Body: View {
+    /// 同上，不能叫 `Body`。
+    struct StyleBody: View {
         let configuration: ButtonStyleConfiguration
         let tint: Color
         @Environment(\.isEnabled) private var isEnabled
