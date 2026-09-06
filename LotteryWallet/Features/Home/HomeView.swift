@@ -31,6 +31,8 @@ struct HomeView: View {
     @State private var monthStats = ProfitStats.PeriodStats()
     @State private var carouselIndex = 0
     @State private var isDrawSheetPresented = false
+    /// 点开奖卡片上的省略球时，把整期号码摊开给用户看。
+    @State private var expandedDraw: Draw?
 
     /// 开奖日程也不能在 body 里算。`todayOpenGames` / `pendingDrawUpdates` /
     /// `carouselOrder` 每次都要取一遍东八区时间、过一遍八个彩种，
@@ -172,21 +174,40 @@ struct HomeView: View {
                 ForEach(Array(carouselGames.enumerated()), id: \.element) { index, game in
                     DrawCard(game: game,
                              draw: drawStore.latestDraw(for: game),
-                             opensToday: todayGames.contains(game))
-                        .padding(.bottom, 30)
+                             opensToday: todayGames.contains(game),
+                             onExpandNumbers: { expandedDraw = drawStore.latestDraw(for: game) })
                         .tag(index)
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: .always))
-            // 分页圆点默认是半透明的，压在浅色分组底上几乎看不见，
-            // 用户根本不知道这里可以左右滑。加一层背景把它衬出来。
-            .indexViewStyle(.page(backgroundDisplayMode: .always))
-            .frame(height: 196)
+            // 系统自带的分页圆点画在 TabView 的画布里，会压在卡片下沿上。
+            // 关掉它自己画一排放到卡片外面，既不重叠也能控制配色。
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(height: 152)
             .accessibilityHint("左右滑动查看其他彩种的最新开奖")
+
+            pageDots
         }
         .sheet(isPresented: $isDrawSheetPresented) {
             DrawHistoryView()
         }
+        .sheet(item: $expandedDraw) { draw in
+            DrawNumbersSheet(draw: draw)
+        }
+    }
+
+    /// 自己画的分页指示器。
+    private var pageDots: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(carouselGames.enumerated()), id: \.element) { index, game in
+                Capsule()
+                    .fill(index == carouselIndex ? game.tint : Color.primary.opacity(0.18))
+                    .frame(width: index == carouselIndex ? 16 : 6, height: 6)
+                    .animation(.spring(duration: 0.3, bounce: 0), value: carouselIndex)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 2)
+        .accessibilityHidden(true)
     }
 
     /// 今天到点了但号码还没更新的彩种。原来这条挤在页面最顶上，
@@ -495,12 +516,16 @@ struct SpendBreakdown: View {
 // MARK: - 开奖卡
 
 /// 首页轮播里的一张开奖卡。
+///
+/// 高度是抠出来的：标题、号码、一等奖三块之间原来各留了一大段空白，
+/// 卡片被撑到近 200pt。现在固定成紧凑的三段式。
 struct DrawCard: View {
     let game: GameKey
     let draw: Draw?
     /// 这个彩种今天开奖。原来「今日开奖」是页面顶部单独一行标签，
     /// 和它描述的卡片隔得很远；写进卡片里既更省地方也更好懂。
     var opensToday: Bool = false
+    var onExpandNumbers: (() -> Void)?
 
     /// 首页每个号码区最多画 8 颗球。快乐8 一期开 20 个，
     /// 全画出来要么撑爆卡片要么缩到看不清。
@@ -512,53 +537,53 @@ struct DrawCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 10) {
             header
 
-            // 有一等奖信息的卡片下方多一行；没有的（比如快乐8）就让号码球
-            // 在剩下的空间里上下居中，两种卡片切换时才不会一高一低。
-            Spacer(minLength: 8)
-
             if let draw {
-                DrawNumbersView(draw: draw, size: 33, limit: ballLimit)
+                DrawNumbersView(draw: draw, size: 28, limit: ballLimit, onOverflow: onExpandNumbers)
             } else {
                 Text("暂无开奖数据")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 6)
             }
 
-            Spacer(minLength: 8)
-
+            // 有一等奖信息就贴在号码下面；没有的（比如快乐8）让号码
+            // 在剩下的空间里居中，两种卡片切换时不会一高一低。
             if let firstPrize {
                 prizeStrip(firstPrize)
+            } else {
+                Spacer(minLength: 0)
             }
         }
-        .frame(maxHeight: .infinity)
-        .contentCard()
+        .frame(maxHeight: .infinity, alignment: firstPrize == nil ? .center : .top)
+        .contentCard(padding: 14)
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             Circle()
                 .fill(game.tint)
-                .frame(width: 8, height: 8)
+                .frame(width: 7, height: 7)
             Text(game.label)
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
 
             if opensToday {
                 Text("今日开奖")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(Palette.live)
                     .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
+                    .padding(.vertical, 2)
                     .background(Palette.live.opacity(0.14), in: Capsule())
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 6)
             if let draw {
-                Text("第 \(draw.expect) 期 · \(DateText.monthDay(draw.openDate))")
-                    .font(.caption)
+                Text("\(draw.expect) · \(DateText.monthDay(draw.openDate))")
+                    .font(.caption2)
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -566,32 +591,79 @@ struct DrawCard: View {
         }
     }
 
-    /// 一等奖那一行。原来是两段灰色小字，信息密度最高的「单注奖金」
-    /// 完全没有被强调出来。
+    /// 一等奖那一行。信息密度最高的「单注奖金」要被强调出来。
     private func prizeStrip(_ entry: PrizeEntry) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Image(systemName: "trophy.fill")
-                .font(.caption2)
+                .font(.system(size: 10))
                 .foregroundStyle(game.tint)
-            Text("一等奖")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text("\(entry.winningCount) 注")
-                .font(.caption.weight(.medium))
+            Text("一等奖 \(entry.winningCount) 注")
+                .font(.caption2)
                 .monospacedDigit()
-            Spacer(minLength: 8)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 6)
             if entry.amount > 0 {
                 Text(MoneyText.compactYuan(entry.amount))
-                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .font(.system(.footnote, design: .rounded, weight: .bold))
                     .monospacedDigit()
                     .foregroundStyle(game.tint)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                 Text("/注")
-                    .font(.caption2)
+                    .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.top, 10)
+    }
+}
+
+/// 展开一期的全部开奖号码。快乐8 那 20 个号在卡片上放不下，
+/// 点省略球就弹这个。
+struct DrawNumbersSheet: View {
+    let draw: Draw
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    ForEach(draw.gameKey.drawSections) { section in
+                        let values = draw.drawValues[section.key]
+                        if !values.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 6) {
+                                    Text(section.label)
+                                        .font(.subheadline.weight(.bold))
+                                        .foregroundStyle(section.color.accentColor)
+                                    Text("\(values.count) 个")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                // 球径和其他彩种一致，放不下就换行
+                                BallFlow(spacing: 7, lineSpacing: 9) {
+                                    ForEach(Array(values.enumerated()), id: \.offset) { _, value in
+                                        BallView(value: value, color: section.color, size: 34,
+                                                 padded: section.range.upperBound > 9)
+                                    }
+                                }
+                            }
+                            .contentCard()
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 30)
+            }
+            .background(Palette.canvas)
+            .navigationTitle("\(draw.gameKey.label) 第 \(draw.expect) 期")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }

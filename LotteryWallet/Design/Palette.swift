@@ -44,14 +44,14 @@ extension BallColor {
     /// 渐变上端（浅）。
     var lightHex: UInt32 {
         switch self {
-        case .red: 0xFF8793
-        case .blue: 0x7CBCFF
-        case .yellow: 0xFFC85C
-        case .k8orange: 0xFFB184
-        case .fc3d: 0x69D1EA
-        case .plum: 0xDE97C7
-        case .indigo: 0x858BCF
-        case .amber: 0xEDBF73
+        case .red: 0xFF8E85
+        case .blue: 0x7EAFFF
+        case .yellow: 0xFFB879
+        case .k8orange: 0xFF9D7F
+        case .fc3d: 0x60C8ED
+        case .plum: 0xE888C9
+        case .indigo: 0x9DABF9
+        case .amber: 0xF7BB69
         }
     }
 
@@ -60,12 +60,12 @@ extension BallColor {
         switch self {
         case .red: 0xEF4444
         case .blue: 0x3B82F6
-        case .yellow: 0xFF9C34
+        case .yellow: 0xE68507
         case .k8orange: 0xF05A28
         case .fc3d: 0x239FC5
         case .plum: 0xBF5EA1
-        case .indigo: 0x525BA7
-        case .amber: 0xE0A24A
+        case .indigo: 0x7682D1
+        case .amber: 0xCE9136
         }
     }
 
@@ -116,19 +116,23 @@ extension GameKey {
 
 /// 语义色。
 ///
-/// 这一版刻意选**鲜亮**的取值而不是压暗到 WCAG 4.5:1 —— 上一版为了对比度
-/// 把绿和橙压成了墨绿、赭石，整个界面显得发闷。这几个色只出现在
-/// semibold 及以上的数字和图标上（大号粗体的阈值是 3:1），所以取
-/// 「亮到还能读」的那一档，深色模式再整体提亮。
+/// **红涨绿跌**：按中文市场习惯，红色代表盈利、绿色代表亏损 —— 和欧美相反。
+/// 这里刻意选鲜亮的取值而不是压暗到 WCAG 4.5:1：这几个色只出现在
+/// semibold 及以上的数字和图标上（大号粗体的阈值是 3:1）。
 enum Palette {
-    /// 盈利。
-    static let profit = Color(light: 0x00B884, dark: 0x3DE0A6)
-    /// 亏损。
-    static let loss = Color(light: 0xFF3B4E, dark: 0xFF7085)
-    /// 提醒 / 待公布。
+    /// 盈利 —— 红。
+    static let profit = Color(light: 0xF5333F, dark: 0xFF6B76)
+    /// 亏损 —— 绿。
+    static let loss = Color(light: 0x00A651, dark: 0x43DD84)
+    /// 提醒 / 待核对 / 奖金待公布。
     static let warning = Color(light: 0xFF9500, dark: 0xFFB340)
     /// 「今日开奖」这类正向状态标记。
     static let live = Color(light: 0x00B884, dark: 0x3DE0A6)
+    /// 危险 / 删除 / 胆码标记。和「盈利红」分开，避免语义打架。
+    static let danger = Color(light: 0xE0322F, dark: 0xFF6A64)
+    /// 未命中号码球的中性灰。实心、有体积，不是把彩色球调透明。
+    static let missLight = Color(light: 0xC7C9CE, dark: 0x6E727A)
+    static let missDeep = Color(light: 0x9DA1A9, dark: 0x4A4E56)
     /// 中性/待定。
     static let neutral = Color.secondary
     /// 压在系统强调色实心底上的前景色。
@@ -153,7 +157,7 @@ enum Palette {
 extension RecordStatus {
     var tint: Color {
         switch self {
-        case .pending: Color.secondary
+        case .pending: Palette.warning
         case .won: Palette.profit
         case .lost: Color.secondary
         case .prizeFloat: Palette.warning

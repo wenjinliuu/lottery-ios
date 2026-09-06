@@ -189,6 +189,53 @@ struct RecordService {
     }
 }
 
+/// 一张电子票的**渲染快照**。
+///
+/// 票夹卡顿的根因是这里：早期版本让视图直接持有 `[TicketRecord]`（SwiftData
+/// 托管对象），号码、命中标记、金额全在 `body` 里现取现解码。三个后果：
+/// 1. 每次渲染都在遍历托管对象，复式票 2000 注就是几千次托管属性访问；
+/// 2. `record.ticket` 的 getter 会写 `@Transient` 缓存 —— 那是个**被 Observation
+///    追踪的属性**，等于「渲染时修改被观察状态」，直接触发额外的失效重绘；
+/// 3. JSONDecoder 在滚动过程中被反复调用。
+///
+/// 现在全部提前算成纯值，渲染时一个 SwiftData 属性都不碰。
+/// 这和 `ProfitStats` 里 `SettledEntry` 是同一个原则。
+struct TicketCard: Identifiable, Hashable {
+    /// 一次购买展开成的一注。
+    struct Line: Identifiable, Hashable {
+        let id: String
+        let numbers: [SectionKey: [Int]]
+        let matched: [SectionKey: [Bool]]
+        let prizeAmount: Double
+        let status: RecordStatus
+
+        var hasResult: Bool { !matched.isEmpty }
+    }
+
+    let id: String
+    let game: GameKey
+    let status: RecordStatus
+    let expect: String
+    let openDate: String
+    let targetStatus: NextDrawStatus
+    let multiple: Int
+    let entryLabel: String
+    let count: Int
+    let cost: Double
+    let prize: Double
+    let createdAt: Date
+    /// 只快照要画的前几注。复式一张票可以到 2000 注，全快照没有意义。
+    let lines: [Line]
+    /// 复制号码用的全文，同样提前拼好。
+    let copyText: String
+
+    var netProfit: Double { prize - cost }
+
+    /// 快照时最多留几注。收起看 5 注、展开看 50 注，再多也不画。
+    static let lineLimit = 50
+}
+
+/// 一张电子票 = 同一次购买的一组记录。
 /// 一张电子票 = 同一次购买的一组记录。
 struct TicketBatch: Identifiable, Hashable {
     let id: String
@@ -228,5 +275,58 @@ struct TicketBatch: Identifiable, Hashable {
             return TicketBatch(id: key, records: sorted, status: status(of: sorted))
         }
         .sorted { $0.createdAt > $1.createdAt }
+    }
+}
+
+
+extension TicketCard {
+    /// 把一批记录抽成渲染快照。只在记录变化时跑一次。
+    init(batch: TicketBatch) {
+        let records = batch.records
+        let first = records.first
+        id = batch.id
+        game = batch.game
+        status = batch.status
+        expect = batch.expect
+        openDate = batch.openDate
+        targetStatus = first?.targetStatus ?? .confirmed
+        multiple = batch.multiple
+        entryLabel = batch.entryLabel
+        count = records.count
+        createdAt = batch.createdAt
+
+        var costSum = 0.0
+        var prizeSum = 0.0
+        for record in records {
+            costSum += record.cost
+            prizeSum += record.prizeAmount
+        }
+        cost = costSum
+        prize = prizeSum
+
+        let key = batch.game
+        lines = records.prefix(TicketCard.lineLimit).map { record in
+            Line(id: record.id,
+                 numbers: record.ticket.numbers.values,
+                 matched: record.matched,
+                 prizeAmount: record.prizeAmount,
+                 status: record.status)
+        }
+
+        let body = records.enumerated().map { index, record -> String in
+            let numbers = key.sections.compactMap { section -> String? in
+                let values = record.ticket[section.key]
+                guard !values.isEmpty else { return nil }
+                return values.map { String(format: section.range.upperBound > 9 ? "%02d" : "%d", $0) }
+                    .joined(separator: " ")
+            }.joined(separator: " + ")
+            return "\(index + 1). \(numbers)"
+        }.joined(separator: "\n")
+        copyText = "\(key.label) 第\(batch.expect)期\n\(body)"
+    }
+
+    /// 记录变化时一次性把全部电子票抽成快照。
+    static func snapshot(_ records: [TicketRecord]) -> [TicketCard] {
+        TicketBatch.group(records).map(TicketCard.init(batch:))
     }
 }

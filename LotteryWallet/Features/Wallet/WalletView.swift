@@ -15,22 +15,22 @@ struct WalletView: View {
     @State private var filter: WalletFilter = .all
     @State private var expandedBatches: Set<String> = []
     @State private var isChecking = false
-    /// 分组结果和各状态计数只在记录变化时算一次，不放进 body。
-    @State private var batches: [TicketBatch] = []
+    /// 渲染快照。记录变化时算一次，之后渲染完全不碰 SwiftData 对象。
+    @State private var cards: [TicketCard] = []
     @State private var counts: [WalletFilter: Int] = [:]
     /// 筛选结果也存下来。放在 body 里当计算属性的话，每帧都要把全部电子票过一遍。
-    @State private var visibleBatches: [TicketBatch] = []
+    @State private var visibleCards: [TicketCard] = []
 
     /// 首屏只画这么多张。一张电子票是一整块带号码球的卡片，
     /// 几十上百张一次性铺开，进票夹那一下明显要卡。
     static let previewLimit = 10
 
-    private var previewBatches: [TicketBatch] {
-        Array(visibleBatches.prefix(Self.previewLimit))
+    private var previewCards: [TicketCard] {
+        Array(visibleCards.prefix(Self.previewLimit))
     }
 
     private var overflowCount: Int {
-        Swift.max(visibleBatches.count - Self.previewLimit, 0)
+        Swift.max(visibleCards.count - Self.previewLimit, 0)
     }
 
     var body: some View {
@@ -38,11 +38,11 @@ struct WalletView: View {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     filterBar
-                    if visibleBatches.isEmpty {
+                    if visibleCards.isEmpty {
                         emptyState
                     } else {
-                        ForEach(previewBatches) { batch in
-                            card(for: batch)
+                        ForEach(previewCards) { item in
+                            ticketCard(item)
                         }
                         if overflowCount > 0 { moreButton }
                     }
@@ -80,12 +80,14 @@ struct WalletView: View {
         }
     }
 
-    private func card(for batch: TicketBatch) -> some View {
+    private func ticketCard(_ item: TicketCard) -> some View {
         WalletTicketCard(
-            batch: batch,
-            isExpanded: expandedBatches.contains(batch.id),
-            onToggle: { toggle(batch) },
-            onDelete: { delete(batch) }
+            card: item,
+            isExpanded: expandedBatches.contains(item.id),
+            onToggle: { toggle(item.id) },
+            onDelete: { delete(item) },
+            onCelebrate: { celebrate() },
+            draw: drawStore.draw(for: item.game, expect: item.expect)
         )
     }
 
@@ -93,14 +95,15 @@ struct WalletView: View {
     private var moreButton: some View {
         NavigationLink {
             WalletAllTicketsView(
-                batches: visibleBatches,
+                cards: visibleCards,
                 title: filter == .all ? "全部电子票" : filter.label,
                 expandedBatches: $expandedBatches,
-                onDelete: delete
+                onDelete: delete,
+                onCelebrate: { celebrate() }
             )
         } label: {
             HStack(spacing: 6) {
-                Text("查看全部 \(visibleBatches.count) 张")
+                Text("查看全部 \(visibleCards.count) 张")
                     .font(.subheadline.weight(.semibold))
                 Text("还有 \(overflowCount) 张")
                     .font(.caption)
@@ -120,18 +123,18 @@ struct WalletView: View {
     }
 
     private func rebuild() {
-        let grouped = TicketBatch.group(records)
-        batches = grouped
+        let snapshot = TicketCard.snapshot(records)
+        cards = snapshot
         var tally: [WalletFilter: Int] = [:]
         for item in WalletFilter.allCases {
-            tally[item] = item == .all ? grouped.count : grouped.reduce(0) { $0 + (item.matches($1.status) ? 1 : 0) }
+            tally[item] = item == .all ? snapshot.count : snapshot.reduce(0) { $0 + (item.matches($1.status) ? 1 : 0) }
         }
         counts = tally
         applyFilter()
     }
 
     private func applyFilter() {
-        visibleBatches = filter == .all ? batches : batches.filter { filter.matches($0.status) }
+        visibleCards = filter == .all ? cards : cards.filter { filter.matches($0.status) }
     }
 
     // MARK: - 筛选
@@ -147,12 +150,10 @@ struct WalletView: View {
                         Text("\(item.label) \(counts[item] ?? 0)")
                             .font(.subheadline.weight(.medium))
                             .monospacedDigit()
-                            // 深色模式下 AccentColor 是浅蓝，白字压上去只有 1.9:1
-                            .foregroundStyle(isOn ? Palette.onAccent : Color.primary)
+                            .foregroundStyle(chipForeground(item, isOn: isOn))
                             .padding(.horizontal, 14)
                             .padding(.vertical, 7)
-                            .background(isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Palette.card),
-                                        in: Capsule())
+                            .background(chipBackground(item, isOn: isOn), in: Capsule())
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
@@ -163,11 +164,28 @@ struct WalletView: View {
         .scrollClipDisabled()
     }
 
+    /// 「待核对」是唯一一个需要用户动手的状态，给它黄色提示色，
+    /// 其余筛选沿用强调色。
+    private func chipForeground(_ item: WalletFilter, isOn: Bool) -> Color {
+        if item == .pending {
+            return isOn ? Palette.onAccent : Palette.warning
+        }
+        // 深色模式下 AccentColor 是浅蓝，白字压上去只有 1.9:1
+        return isOn ? Palette.onAccent : Color.primary
+    }
+
+    private func chipBackground(_ item: WalletFilter, isOn: Bool) -> AnyShapeStyle {
+        if item == .pending {
+            return isOn ? AnyShapeStyle(Palette.warning) : AnyShapeStyle(Palette.warning.opacity(0.15))
+        }
+        return isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Palette.card)
+    }
+
     /// 空状态要分清是「一张票都没有」还是「筛选之后没有」。
     /// 原来两种情况都说"票夹是空的 / 添加彩票"，用户会以为记录丢了。
     @ViewBuilder
     private var emptyState: some View {
-        if batches.isEmpty {
+        if cards.isEmpty {
             ContentUnavailableView {
                 Label("票夹是空的", systemImage: "wallet.bifold")
             } description: {
@@ -181,7 +199,7 @@ struct WalletView: View {
             ContentUnavailableView {
                 Label("没有\(filter.label)的票", systemImage: "line.3.horizontal.decrease.circle")
             } description: {
-                Text("这里只显示\(filter.label)的电子票，切回「全部」可以看到其余 \(batches.count) 张。")
+                Text("这里只显示\(filter.label)的电子票，切回「全部」可以看到其余 \(cards.count) 张。")
             } actions: {
                 Button("查看全部") {
                     withAnimation(.easeOut(duration: 0.18)) { filter = .all }
@@ -194,19 +212,19 @@ struct WalletView: View {
 
     // MARK: - 动作
 
-    private func toggle(_ batch: TicketBatch) {
+    private func toggle(_ id: String) {
         withAnimation(.spring(duration: 0.28, bounce: 0)) {
-            if expandedBatches.contains(batch.id) {
-                expandedBatches.remove(batch.id)
+            if expandedBatches.contains(id) {
+                expandedBatches.remove(id)
             } else {
-                expandedBatches.insert(batch.id)
+                expandedBatches.insert(id)
             }
         }
     }
 
-    private func delete(_ batch: TicketBatch) {
+    private func delete(_ item: TicketCard) {
         do {
-            try RecordService(context: context, drawStore: drawStore).delete(batchId: batch.id)
+            try RecordService(context: context, drawStore: drawStore).delete(batchId: item.id)
             showToast("已删除这张票", symbol: "trash")
         } catch {
             showToast("删除失败", symbol: "exclamationmark.triangle")
@@ -237,28 +255,33 @@ struct WalletView: View {
 
 /// 完整电子票列表。票夹首屏只放前 10 张，其余在这里翻。
 struct WalletAllTicketsView: View {
-    let batches: [TicketBatch]
+    let cards: [TicketCard]
     let title: String
     @Binding var expandedBatches: Set<String>
-    let onDelete: (TicketBatch) -> Void
+    let onDelete: (TicketCard) -> Void
+    var onCelebrate: (() -> Void)?
+
+    @Environment(DrawStore.self) private var drawStore
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                ForEach(batches) { batch in
+                ForEach(cards) { item in
                     WalletTicketCard(
-                        batch: batch,
-                        isExpanded: expandedBatches.contains(batch.id),
+                        card: item,
+                        isExpanded: expandedBatches.contains(item.id),
                         onToggle: {
                             withAnimation(.spring(duration: 0.28, bounce: 0)) {
-                                if expandedBatches.contains(batch.id) {
-                                    expandedBatches.remove(batch.id)
+                                if expandedBatches.contains(item.id) {
+                                    expandedBatches.remove(item.id)
                                 } else {
-                                    expandedBatches.insert(batch.id)
+                                    expandedBatches.insert(item.id)
                                 }
                             }
                         },
-                        onDelete: { onDelete(batch) }
+                        onDelete: { onDelete(item) },
+                        onCelebrate: onCelebrate,
+                        draw: drawStore.draw(for: item.game, expect: item.expect)
                     )
                 }
             }

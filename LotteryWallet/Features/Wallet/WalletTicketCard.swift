@@ -1,45 +1,37 @@
 import SwiftUI
-import SwiftData
 import UIKit
 
-/// 一张电子票。收起时只显示前两注，展开显示全部。
+/// 一张电子票。5 注以内全展开，更多才折叠。
 ///
-/// 这里刻意不做任何计算：命中标记、奖级、奖金都是核对时就写进记录的字段，
-/// 视图只负责画。早期版本在 body 里对每条记录现算一遍判奖，
-/// 列表一长每帧都要跑几百次规则判定。
+/// 这里**只读 `TicketCard` 这个纯值快照**，一个 SwiftData 属性都不碰 ——
+/// 号码、命中标记、金额都是分组时算好的。早期版本直接持有托管对象，
+/// 每次渲染都要遍历 + 解码，是票夹卡顿的根因。
 struct WalletTicketCard: View {
-    let batch: TicketBatch
+    let card: TicketCard
     let isExpanded: Bool
     var onToggle: () -> Void
     var onDelete: () -> Void
+    /// 点开一张已中奖的票时放烟花。
+    var onCelebrate: (() -> Void)?
+    /// 这张票绑定期次的开奖号码，同样由外部提前取好。
+    var draw: Draw?
 
-    @Environment(DrawStore.self) private var drawStore
+    @Environment(\.showToast) private var showToast
     @State private var isDeleteConfirmPresented = false
 
     /// 收起时画几注。5 注以内的票**一律全展开** —— 大多数票就是 1–5 注，
-    /// 为了它们做一次折叠交互纯属多余，用户还得多点一下才能看全自己的号码。
+    /// 为了它们做一次折叠交互纯属多余。
     private static let collapsedLineLimit = 5
-    /// 展开时最多画这么多注。复式一张票可以到 2000 注，
-    /// 全画出来就是 2000 行，点开的一瞬间主线程直接停住。
-    private static let expandedLineLimit = 50
 
-    private var game: GameKey { batch.game }
-    private var draw: Draw? {
-        guard let first = batch.first else { return nil }
-        return drawStore.draw(for: game, expect: first.targetExpect)
+    private var game: GameKey { card.game }
+    private var isCollapsible: Bool { card.count > Self.collapsedLineLimit }
+
+    private var visibleLines: [TicketCard.Line] {
+        Array(card.lines.prefix(isExpanded ? TicketCard.lineLimit : Self.collapsedLineLimit))
     }
 
-    /// 5 注以内没有「折叠」这个状态，点按也不做任何事。
-    private var isCollapsible: Bool { batch.records.count > Self.collapsedLineLimit }
-
-    private var visibleRecords: [TicketRecord] {
-        let limit = isExpanded ? Self.expandedLineLimit : Self.collapsedLineLimit
-        return Array(batch.records.prefix(limit))
-    }
-
-    /// 收起 / 展开状态下没画出来的注数。
     private var hiddenCount: Int {
-        Swift.max(batch.records.count - visibleRecords.count, 0)
+        Swift.max(card.count - visibleLines.count, 0)
     }
 
     var body: some View {
@@ -54,13 +46,22 @@ struct WalletTicketCard: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { if isCollapsible { onToggle() } }
+        // 烟花只在「刚核出中奖」那一瞬间放的话，基本没人看得到 ——
+        // 票一旦结算就再也不会重新变成中奖。点开一张已中奖的票也放一次，
+        // 这才是用户真正想看到它的时刻。
+        .onTapGesture {
+            if card.status == .won { onCelebrate?() }
+            if isCollapsible { onToggle() }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: isExpanded ? "收起" : "展开") {
             if isCollapsible { onToggle() }
         }
         .contextMenu {
-            Button("复制号码", systemImage: "doc.on.doc") { copyNumbers() }
+            Button("复制号码", systemImage: "doc.on.doc") {
+                UIPasteboard.general.string = card.copyText
+                showToast("号码已复制", symbol: "doc.on.doc")
+            }
             Button("删除这张票", systemImage: "trash", role: .destructive) {
                 isDeleteConfirmPresented = true
             }
@@ -69,7 +70,7 @@ struct WalletTicketCard: View {
             Button("删除", role: .destructive, action: onDelete)
             Button("取消", role: .cancel) {}
         } message: {
-            Text("这张票的 \(batch.records.count) 注记录会一起删除，且无法恢复。")
+            Text("这张票的 \(card.count) 注记录会一起删除，且无法恢复。")
         }
     }
 
@@ -85,9 +86,8 @@ struct WalletTicketCard: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
-            StatusChip(status: batch.status)
-            // 只有真的能折叠的票才给箭头。5 注以内的票本来就全展开，
-            // 挂个点不动的箭头反而是误导。
+            StatusChip(status: card.status)
+            // 只有真的能折叠的票才给箭头。
             if isCollapsible {
                 Image(systemName: "chevron.down")
                     .font(.caption2.weight(.bold))
@@ -100,9 +100,9 @@ struct WalletTicketCard: View {
     }
 
     private var issueText: String {
-        var text = batch.expect.isEmpty ? "期号待定" : "第 \(batch.expect) 期"
-        if !batch.openDate.isEmpty { text += " · \(DateText.monthDay(batch.openDate)) 开奖" }
-        switch batch.first?.targetStatus {
+        var text = card.expect.isEmpty ? "期号待定" : "第 \(card.expect) 期"
+        if !card.openDate.isEmpty { text += " · \(DateText.monthDay(card.openDate)) 开奖" }
+        switch card.targetStatus {
         case .inferred: text += " · 预计"
         case .review: text += " · 待确认"
         default: break
@@ -112,10 +112,10 @@ struct WalletTicketCard: View {
 
     private var meta: some View {
         TicketMetaText(items: [
-            "\(batch.records.count) 注",
-            batch.multiple > 1 ? "\(batch.multiple) 倍" : "",
-            batch.entryLabel,
-            "投入 \(MoneyText.format(batch.cost))"
+            "\(card.count) 注",
+            card.multiple > 1 ? "\(card.multiple) 倍" : "",
+            card.entryLabel,
+            "投入 \(MoneyText.format(card.cost))"
         ])
         .padding(.top, 8)
     }
@@ -124,8 +124,8 @@ struct WalletTicketCard: View {
 
     private var lines: some View {
         VStack(alignment: .leading, spacing: 7) {
-            ForEach(Array(visibleRecords.enumerated()), id: \.element.id) { index, record in
-                lineRow(index: index, record: record)
+            ForEach(Array(visibleLines.enumerated()), id: \.element.id) { index, line in
+                lineRow(index: index, line: line)
             }
             if hiddenCount > 0 {
                 Text(isExpanded
@@ -138,33 +138,30 @@ struct WalletTicketCard: View {
         .padding(.vertical, 10)
     }
 
-    private func lineRow(index: Int, record: TicketRecord) -> some View {
-        let matched = record.matched
-        return HStack(spacing: 9) {
+    private func lineRow(index: Int, line: TicketCard.Line) -> some View {
+        HStack(spacing: 9) {
             Text("\(index + 1)")
                 .font(.caption2.weight(.medium))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
 
-            // 不再套横向 ScrollView：号码放不下就自动缩小球径，
-            // 一行一个滚动视图既卡又让人以为号码被裁了。
-            TicketNumbersView(
+            TicketNumbersSnapshotView(
                 game: game,
-                ticket: record.ticket,
-                matched: matched,
+                numbers: line.numbers,
+                matched: line.matched,
                 size: 27,
-                dimUnmatched: !matched.isEmpty
+                dimUnmatched: line.hasResult
             )
 
             Spacer(minLength: 0)
 
-            if record.prizeAmount > 0 {
-                Text("+\(MoneyText.compactYuan(record.prizeAmount))")
+            if line.prizeAmount > 0 {
+                Text("+\(MoneyText.compactYuan(line.prizeAmount))")
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(Palette.profit)
-            } else if record.status == .prizeFloat {
+            } else if line.status == .prizeFloat {
                 Text("待公布")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(RecordStatus.prizeFloat.tint)
@@ -190,30 +187,17 @@ struct WalletTicketCard: View {
             }
             Spacer(minLength: 12)
             VStack(alignment: .trailing, spacing: 1) {
-                Text(batch.status == .pending ? "待核对" : MoneyText.format(batch.netProfit))
+                Text(card.status == .pending ? "待核对" : MoneyText.format(card.netProfit))
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .foregroundStyle(batch.status == .pending ? Color.secondary : Palette.profitColor(batch.netProfit))
+                    .foregroundStyle(card.status == .pending ? Color.secondary : Palette.profitColor(card.netProfit))
                 Text("盈亏")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
         .padding(.top, 10)
-    }
-
-    private func copyNumbers() {
-        let text = batch.records.enumerated().map { index, record in
-            let numbers = game.sections.compactMap { section -> String? in
-                let values = record.ticket[section.key]
-                guard !values.isEmpty else { return nil }
-                return values.map { String(format: section.range.upperBound > 9 ? "%02d" : "%d", $0) }
-                    .joined(separator: " ")
-            }.joined(separator: " + ")
-            return "\(index + 1). \(numbers)"
-        }.joined(separator: "\n")
-        UIPasteboard.general.string = "\(game.label) 第\(batch.expect)期\n\(text)"
     }
 }

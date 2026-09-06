@@ -48,25 +48,51 @@ struct StatsView: View {
 
     // MARK: - 年月选择
 
+    /// 年月选择。
+    ///
+    /// 原来是两个 `.menu` 样式的 Picker —— 点一下弹一个菜单，选完再弹一次，
+    /// 两级弹窗看着很碎。改成直接点的芯片条：年份一排、月份一排，一次点中。
     private var selector: some View {
-        HStack(spacing: 10) {
-            Picker("年份", selection: $year) {
-                ForEach(years, id: \.self) { Text("\($0) 年").tag($0) }
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    ForEach(years, id: \.self) { item in
+                        chip("\(item) 年", isOn: year == item) { year = item }
+                    }
+                }
+                .padding(.vertical, 1)
             }
-            .pickerStyle(.menu)
+            .scrollClipDisabled()
 
-            Picker("月份", selection: Binding(
-                get: { month ?? 0 },
-                set: { month = $0 == 0 ? nil : $0 }
-            )) {
-                Text("全年").tag(0)
-                ForEach(1...12, id: \.self) { Text("\($0) 月").tag($0) }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    chip("全年", isOn: month == nil) { month = nil }
+                    ForEach(1...12, id: \.self) { item in
+                        chip("\(item) 月", isOn: month == item) { month = item }
+                    }
+                }
+                .padding(.vertical, 1)
             }
-            .pickerStyle(.menu)
-
-            Spacer()
+            .scrollClipDisabled()
         }
-        .contentCard(padding: 8)
+        .contentCard(padding: 12)
+    }
+
+    private func chip(_ title: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.16)) { action() }
+        } label: {
+            Text(title)
+                .font(.footnote.weight(isOn ? .semibold : .regular))
+                .monospacedDigit()
+                .foregroundStyle(isOn ? Palette.onAccent : Color.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary.opacity(0.06)),
+                            in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
     }
 
     private var kpiGrid: some View {
@@ -207,8 +233,10 @@ struct StatsView: View {
                 }
             }
 
-            // 一条按天排开的迷你柱，能看出节奏但不占地方
-            DayRhythmStrip(days: stats.byDay)
+            // 一条赚 / 亏 / 平的比例条。原来是一整排按天排开的小柱子，
+            // 密密麻麻又没有刻度，读者读不出任何具体信息，只剩视觉噪音。
+            DayProportionBar(win: winning.count, lose: losing.count,
+                             flat: stats.byDay.count - winning.count - losing.count)
         }
     }
 
@@ -283,48 +311,39 @@ struct StatsView: View {
     }
 }
 
-/// 按天排开的迷你柱条。零轴在中间，往上是赚往下是亏。
-/// 只表达节奏和幅度，具体数字看上面的概览或展开清单。
-struct DayRhythmStrip: View {
-    let days: [ProfitDay]
+/// 赚 / 亏 / 平三段比例条。只回答一个问题：这段时间里赚钱的日子占多少。
+struct DayProportionBar: View {
+    let win: Int
+    let lose: Int
+    let flat: Int
 
-    private var scale: Double {
-        Swift.max(days.map(\.net.magnitude).max() ?? 0, 1)
-    }
+    private var total: Int { Swift.max(win + lose + flat, 1) }
 
     var body: some View {
-        GeometryReader { proxy in
-            let count = Swift.max(days.count, 1)
-            let width = Swift.max((proxy.size.width - Double(count - 1) * 2) / Double(count), 1.5)
-            let half = proxy.size.height / 2
-            HStack(alignment: .center, spacing: 2) {
-                ForEach(days) { day in
-                    let ratio = Swift.min(abs(day.net) / scale, 1)
-                    // 留 2pt 的最小高度，打平的那天也要看得见
-                    let height = Swift.max(half * ratio, 2)
-                    VStack(spacing: 0) {
-                        Spacer(minLength: 0)
-                        if day.net >= 0 {
-                            Capsule().fill(Palette.profit).frame(height: height)
-                            Color.clear.frame(height: half)
-                        } else {
-                            Color.clear.frame(height: half)
-                            Capsule().fill(Palette.loss).frame(height: height)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .frame(width: width)
+        VStack(alignment: .leading, spacing: 6) {
+            GeometryReader { proxy in
+                HStack(spacing: 2) {
+                    segment(win, Palette.profit, proxy.size.width)
+                    segment(lose, Palette.loss, proxy.size.width)
+                    segment(flat, Color.secondary.opacity(0.35), proxy.size.width)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .center) {
-                Rectangle()
-                    .fill(Color.primary.opacity(0.12))
-                    .frame(height: 0.5)
-            }
+            .frame(height: 8)
+
+            Text("赚钱的日子占 \(Int((Double(win) / Double(total) * 100).rounded()))%")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
-        .frame(height: 52)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("每日盈亏节奏图，共 \(days.count) 天")
+        .accessibilityLabel("赚钱 \(win) 天，亏钱 \(lose) 天，打平 \(flat) 天")
+    }
+
+    @ViewBuilder
+    private func segment(_ count: Int, _ tint: Color, _ width: CGFloat) -> some View {
+        if count > 0 {
+            Capsule()
+                .fill(tint)
+                .frame(width: Swift.max(width * CGFloat(count) / CGFloat(total) - 2, 3))
+        }
     }
 }

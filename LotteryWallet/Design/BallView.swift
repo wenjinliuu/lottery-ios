@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// 一颗号码球。命中时放大高亮，未命中在核对结果里压暗。
+/// 一颗号码球。命中时放大高亮，未命中在核对结果里换成中性灰。
 struct BallView: View {
     let value: Int
     var color: BallColor
     var size: CGFloat = 32
     /// 是否命中开奖号。
     var isHit: Bool = false
-    /// 核对结果里未命中的球压暗，让命中的更跳。
+    /// 核对结果里未命中的球。
     var isDimmed: Bool = false
     /// 空心球用于选号盘上的未选中状态。
     var isHollow: Bool = false
@@ -18,11 +18,20 @@ struct BallView: View {
         padded && value < 10 ? String(format: "%02d", value) : String(value)
     }
 
+    /// 未命中的球换成实心中性灰，而不是把彩色球调透明。
+    /// 半透明的做法会连白字一起变淡，整张票看起来像褪了色；
+    /// 灰球是「设计成这样」，透明球是「没加载完」。
+    private var fill: LinearGradient {
+        isDimmed
+            ? LinearGradient(colors: [Palette.missLight, Palette.missDeep], startPoint: .top, endPoint: .bottom)
+            : color.gradient
+    }
+
     var body: some View {
         Text(label)
             .font(.system(size: size * 0.44, weight: .heavy, design: .rounded))
             .monospacedDigit()
-            .foregroundStyle(isHollow ? color.accentColor : color.ink)
+            .foregroundStyle(isHollow ? color.accentColor : Color.white)
             .frame(width: size, height: size)
             .background {
                 if isHollow {
@@ -31,71 +40,107 @@ struct BallView: View {
                         .overlay(Circle().strokeBorder(color.accentColor.opacity(0.38), lineWidth: 1))
                 } else {
                     Circle()
-                        .fill(color.gradient)
-                        .overlay(
-                            // 顶部高光，让球有体积。这里刻意不用 plusLighter：
-                            // 没有 compositingGroup 的加色混合会连页面底色一起提亮，
-                            // 在浅色模式下球周围会糊出一圈。
-                            Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.8)
-                        )
+                        .fill(fill)
+                        .overlay(Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.8))
                         // 黄球、琥珀球本身很亮，压在浅色卡片上边缘会糊掉，
                         // 补一圈同色深端把轮廓勾出来。
-                        .overlay(Circle().strokeBorder(color.rimStroke, lineWidth: 0.8))
+                        .overlay(Circle().strokeBorder(isDimmed ? .clear : color.rimStroke, lineWidth: 0.8))
                 }
             }
-            // 命中就是放大 + 更重的辉光。原来还叠了一圈白描边，
-            // 在小尺寸下反而把数字挤得发糊。
-            .shadow(color: isHollow ? .clear : color.deep.opacity(isHit ? 0.55 : 0.28),
-                    radius: isHit ? 9 : 4, y: isHit ? 3 : 2)
-            .opacity(isDimmed ? 0.34 : 1)
-            .scaleEffect(isHit ? 1.1 : 1)
-            // Apple 的说法是「阻尼比 + 响应时间」。命中是一次带冲量的状态变化，
-            // 给一点点回弹（bounce 0.25）比临界阻尼更贴合。
+            // 阴影只给命中的球。一屏几百个阴影图层是票夹卡顿的来源之一，
+            // 而未命中的球本来就该退到后面去。
+            .shadow(color: isHit ? color.deep.opacity(0.5) : .clear,
+                    radius: isHit ? 8 : 0, y: isHit ? 3 : 0)
+            .scaleEffect(isHit ? 1.08 : 1)
             .animation(.spring(duration: 0.34, bounce: 0.25), value: isHit)
-            .accessibilityLabel(Text(isHit ? "\(label) 已命中" : label))
+            .accessibilityLabel(Text(isHit ? "\(label) 已命中" : (isDimmed ? "\(label) 未命中" : label)))
     }
 }
 
-/// 一个号码区（红球、前区……）的一行球。
-struct BallRow: View {
-    let section: GameSection
-    let values: [Int]
-    /// 逐球命中标记，来自核对结果。
-    var matched: [Bool] = []
-    var size: CGFloat = 32
-    /// 有核对结果时，未命中的球压暗。
-    var dimUnmatched: Bool = false
-    /// 最多画几颗，超出的用省略号代替。0 表示不限制。
-    var limit: Int = 0
-
-    private var shown: [Int] {
-        limit > 0 ? Array(values.prefix(limit)) : values
-    }
-
-    private var hidden: Int {
-        Swift.max(values.count - shown.count, 0)
-    }
+/// 「还有 N 个」的省略球。点一下展开全部号码。
+struct OverflowBall: View {
+    let hidden: Int
+    var color: BallColor
+    var size: CGFloat
+    var action: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: size * 0.19) {
-            ForEach(Array(shown.enumerated()), id: \.offset) { index, value in
-                let hit = index < matched.count && matched[index]
-                BallView(value: value,
-                         color: section.color,
-                         size: size,
-                         isHit: hit,
-                         isDimmed: dimUnmatched && !hit,
-                         padded: section.range.upperBound > 9)
-            }
-            if hidden > 0 {
-                // 快乐8 一期开 20 个号，全画出来会把卡片撑爆。
-                // 用一颗「省略球」收尾，形状和号码球一致，读者一眼知道后面还有。
-                Text("···")
-                    .font(.system(size: size * 0.5, weight: .black))
-                    .foregroundStyle(section.color.accentColor)
-                    .frame(width: size, height: size)
-                    .background(Circle().fill(section.color.accentColor.opacity(0.14)))
-                    .accessibilityLabel("另有 \(hidden) 个号码")
+        Button { action?() } label: {
+            Text("···")
+                .font(.system(size: size * 0.5, weight: .black))
+                .foregroundStyle(color.accentColor)
+                .frame(width: size, height: size)
+                .background(Circle().fill(color.accentColor.opacity(0.14)))
+                .overlay(Circle().strokeBorder(color.accentColor.opacity(0.28), lineWidth: 1))
+        }
+        .buttonStyle(PressableIcon())
+        .disabled(action == nil)
+        .accessibilityLabel("展开其余 \(hidden) 个号码")
+    }
+}
+
+/// 流式布局里的一颗球。
+///
+/// 必须把球摊平成 `Layout` 的直接子视图 —— `Layout` 只会展开 `ForEach`，
+/// 不会拆开自定义 View。要是把「一个号码区」包成一个 View 塞进去，
+/// 快乐8 的 20 颗球就是一整块，永远换不了行。
+private struct BallItem: Identifiable {
+    let id: Int
+    let value: Int
+    let color: BallColor
+    let isHit: Bool
+    let isDimmed: Bool
+    let padded: Bool
+    /// 号码区之间的额外间隙，加在该区首颗球的左边。
+    let leadingGap: CGFloat
+    /// 大于 0 表示这是一颗省略球，代表还有这么多号码没画。
+    let overflow: Int
+}
+
+/// 把若干号码区摊平成一串球。
+private func flatten(sections: [GameSection],
+                     values: (GameSection) -> [Int],
+                     matched: (GameSection) -> [Bool],
+                     size: CGFloat,
+                     dimUnmatched: Bool,
+                     limit: Int) -> [BallItem] {
+    var items: [BallItem] = []
+    var isFirstSection = true
+    for section in sections {
+        let all = values(section)
+        guard !all.isEmpty else { continue }
+        let flags = matched(section)
+        let shown = limit > 0 ? Array(all.prefix(limit)) : all
+        let gap = isFirstSection ? 0 : size * 0.24
+        for (index, value) in shown.enumerated() {
+            let hit = index < flags.count && flags[index]
+            items.append(BallItem(id: items.count, value: value, color: section.color,
+                                  isHit: hit, isDimmed: dimUnmatched && !hit,
+                                  padded: section.range.upperBound > 9,
+                                  leadingGap: index == 0 ? gap : 0, overflow: 0))
+        }
+        let hidden = all.count - shown.count
+        if hidden > 0 {
+            items.append(BallItem(id: items.count, value: 0, color: section.color,
+                                  isHit: false, isDimmed: false, padded: false,
+                                  leadingGap: 0, overflow: hidden))
+        }
+        isFirstSection = false
+    }
+    return items
+}
+
+@ViewBuilder
+private func ballFlow(_ items: [BallItem], size: CGFloat, onOverflow: (() -> Void)?) -> some View {
+    BallFlow(spacing: size * 0.19, lineSpacing: size * 0.22) {
+        ForEach(items) { item in
+            if item.overflow > 0 {
+                OverflowBall(hidden: item.overflow, color: item.color, size: size, action: onOverflow)
+                    .padding(.leading, item.leadingGap)
+            } else {
+                BallView(value: item.value, color: item.color, size: size,
+                         isHit: item.isHit, isDimmed: item.isDimmed, padded: item.padded)
+                    .padding(.leading, item.leadingGap)
             }
         }
     }
@@ -103,76 +148,104 @@ struct BallRow: View {
 
 /// 一整注号码（可能有多个号码区）。
 ///
-/// **不滚动。** 早期版本给每一行号码套一个横向 ScrollView，既让列表里
-/// 出现几十个嵌套滚动视图，也让用户以为号码是被裁掉的。现在改成
-/// 在几档球径里挑一个装得下的，装不下再靠 `limit` 收省略号。
+/// **不滚动、不缩放。** 球径是固定的，装不下就换行 —— 这是最不容易出错的做法。
+/// 早期版本先是给每行套横向 ScrollView（列表里几十个嵌套滚动视图），
+/// 后来改成 ViewThatFits 在五档球径里挑（每行号码的视图树被构造五遍），
+/// 两种都是票夹卡顿的直接原因。
 struct TicketNumbersView: View {
     let game: GameKey
     let ticket: Ticket
     var matched: [SectionKey: [Bool]] = [:]
-    /// 期望球径。装不下时会自动往下降档。
     var size: CGFloat = 30
     var dimUnmatched: Bool = false
 
     var body: some View {
-        FittedBallLayout(preferred: size) { resolved in
-            HStack(spacing: resolved * 0.33) {
-                ForEach(game.sections) { section in
-                    let values = ticket[section.key]
-                    if !values.isEmpty {
-                        BallRow(section: section,
-                                values: values,
-                                matched: matched[section.key] ?? [],
-                                size: resolved,
-                                dimUnmatched: dimUnmatched)
-                    }
-                }
-            }
-        }
+        ballFlow(flatten(sections: game.sections,
+                         values: { ticket[$0.key] },
+                         matched: { matched[$0.key] ?? [] },
+                         size: size, dimUnmatched: dimUnmatched, limit: 0),
+                 size: size, onOverflow: nil)
     }
 }
 
-/// 开奖号码的一行球。同样不滚动。
+/// 一整注号码，但号码直接给纯数组 —— 票夹的渲染快照走这条路，
+/// 全程不碰 SwiftData 对象。
+struct TicketNumbersSnapshotView: View {
+    let game: GameKey
+    let numbers: [SectionKey: [Int]]
+    var matched: [SectionKey: [Bool]] = [:]
+    var size: CGFloat = 30
+    var dimUnmatched: Bool = false
+
+    var body: some View {
+        ballFlow(flatten(sections: game.sections,
+                         values: { numbers[$0.key] ?? [] },
+                         matched: { matched[$0.key] ?? [] },
+                         size: size, dimUnmatched: dimUnmatched, limit: 0),
+                 size: size, onOverflow: nil)
+    }
+}
+
+/// 开奖号码。同样固定球径、超宽换行。
 struct DrawNumbersView: View {
     let draw: Draw
     var size: CGFloat = 30
-    /// 每个号码区最多画几颗。快乐8 在首页只画 8 颗。
+    /// 每个号码区最多画几颗。首页卡片限 8 颗，往期页不限。
     var limit: Int = 0
+    var onOverflow: (() -> Void)?
 
     var body: some View {
-        FittedBallLayout(preferred: size) { resolved in
-            HStack(spacing: resolved * 0.33) {
-                ForEach(draw.gameKey.drawSections) { section in
-                    let values = draw.drawValues[section.key]
-                    if !values.isEmpty {
-                        BallRow(section: section, values: values, size: resolved, limit: limit)
-                    }
-                }
-            }
-        }
+        ballFlow(flatten(sections: draw.gameKey.drawSections,
+                         values: { draw.drawValues[$0.key] },
+                         matched: { _ in [] },
+                         size: size, dimUnmatched: false, limit: limit),
+                 size: size, onOverflow: onOverflow)
     }
 }
 
-/// 在几档球径里挑第一个装得下的。
-///
-/// `ViewThatFits` 会按顺序量一遍候选项，选第一个不溢出的 —— 正好是
-/// 「能大就大，装不下就缩」这个需求，而且不需要 GeometryReader 那一层
-/// 读尺寸再回写状态的循环。
-struct FittedBallLayout<Content: View>: View {
-    var preferred: CGFloat
-    @ViewBuilder var content: (CGFloat) -> Content
+// MARK: - 流式布局
 
-    var body: some View {
-        // 候选项写死成五个，不要用 ForEach —— ViewThatFits 需要的是一组
-        // 静态子视图，按顺序量到第一个不溢出的为止。
-        // 最小到 62%，再小数字就看不清了，那种情况交给 `limit` 收省略号。
-        ViewThatFits(in: .horizontal) {
-            content(preferred)
-            content(preferred * 0.88)
-            content(preferred * 0.78)
-            content(preferred * 0.70)
-            content(preferred * 0.62)
+/// 从左到右排，排不下就换行。
+///
+/// 用 `Layout` 而不是 `ViewThatFits`：这里只量一遍，
+/// 而 `ViewThatFits` 要把整组候选视图各构造一遍再挑。
+struct BallFlow: Layout {
+    var spacing: CGFloat = 6
+    var lineSpacing: CGFloat = 7
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0, widest: CGFloat = 0
+        for view in subviews {
+            let s = view.sizeThatFits(.unspecified)
+            if x > 0, x + spacing + s.width > maxWidth {
+                widest = Swift.max(widest, x)
+                x = 0
+                y += lineHeight + lineSpacing
+                lineHeight = 0
+            }
+            x += (x > 0 ? spacing : 0) + s.width
+            lineHeight = Swift.max(lineHeight, s.height)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        widest = Swift.max(widest, x)
+        return CGSize(width: min(widest, maxWidth), height: y + lineHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+        let maxWidth = bounds.width
+        var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0
+        for view in subviews {
+            let s = view.sizeThatFits(.unspecified)
+            if x > 0, x + spacing + s.width > maxWidth {
+                x = 0
+                y += lineHeight + lineSpacing
+                lineHeight = 0
+            }
+            if x > 0 { x += spacing }
+            view.place(at: CGPoint(x: bounds.minX + x, y: bounds.minY + y),
+                       proposal: ProposedViewSize(s))
+            x += s.width
+            lineHeight = Swift.max(lineHeight, s.height)
+        }
     }
 }

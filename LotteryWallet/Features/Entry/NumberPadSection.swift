@@ -94,7 +94,7 @@ struct NumberPadSection: View {
                             .font(.system(size: 8, weight: .black))
                             .foregroundStyle(.white)
                             .padding(2)
-                            .background(Circle().fill(Palette.loss))
+                            .background(Circle().fill(Palette.danger))
                             .offset(x: 3, y: -3)
                             .accessibilityHidden(true)
                     }
