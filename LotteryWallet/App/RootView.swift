@@ -35,7 +35,9 @@ struct RootView: View {
         .sheet(isPresented: $isEntryPresented) {
             EntryFlowView()
         }
-        .fullScreenCover(isPresented: $isScanPresented) {
+        // 扫描入口是个半屏抽屉，认出票之后自己长到整屏（见 TicketScanView 里的
+        // presentationDetents）。选张照片而已，不必一上来就占满整个屏幕。
+        .sheet(isPresented: $isScanPresented) {
             TicketScanView()
         }
         .environment(\.showToast, ShowToastAction { message in

@@ -126,6 +126,16 @@ final class DrawStore {
         yearCalendars[year]?.entry(for: game)?.issues ?? []
     }
 
+    /// 从某一期开始往后数 `count` 期（含这一期本身）。
+    ///
+    /// 大乐透可以「追加 3 期」：同一组号码往后连打三期，票面上只印第一期的期号。
+    /// 拆票的时候要把后面两期的期号和开奖日一起找出来，才能各自绑定、各自核对。
+    func issuesFollowing(game: GameKey, from issue: String, count: Int) -> [CalendarIssue] {
+        let all = yearCalendars.keys.sorted().flatMap { calendarIssues(for: game, year: $0) }
+        guard let start = all.firstIndex(where: { $0.issue == issue }) else { return [] }
+        return Array(all[start...].prefix(count))
+    }
+
     /// 日历里现在还能买的最近一期。
     ///
     /// 这是"过了停售时间就自动落到下一期"的实现：不再去判断某一期能不能买，
