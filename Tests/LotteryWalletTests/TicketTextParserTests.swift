@@ -458,6 +458,82 @@ final class TicketTextParserTests: XCTestCase {
         assertMatchesPrintedTotal(ticket, 2)
     }
 
+    // MARK: - 追加连打多期
+
+    /// 「追加投注3期2倍」：同一组号码往后连打三期，票面合计是三期总额。
+    ///
+    /// 3 注 × 3 元（追加）× 2 倍 × 3 期 = 54 元，和票面「合计54元」对上；
+    /// 公益金 54 × 36% = 19.44 元，也和票面印的一致。
+    func testDLTAddOnThreePeriods() {
+        let text = """
+        wen
+        体彩 超级大乐透
+        第 26099期 2026年08月31日开奖
+        110310-290261-111954-115593 472728 NxxmsQ
+        单式票 追加投注3期2倍 合计54元
+        ① 07 08 12 22 26 + 05 09
+        ② 04 12 13 23 31 + 05 07
+        ③ 01 03 11 14 34 + 04 12
+        扫码参与"迈开步 动出彩"
+        线上活动赢好礼
+        感谢您为公益事业贡献 19.44元
+        20-020689-101 00251 26/08/31 11:49:00
+        """
+        guard let ticket = TicketTextParser.parse(text).tickets.first else { return XCTFail("没解析出票") }
+        XCTAssertEqual(ticket.game, .dlt)
+        XCTAssertEqual(ticket.issue, "26099")
+        XCTAssertEqual(ticket.count, 3)
+        XCTAssertEqual(ticket.lines[0][.front], [7, 8, 12, 22, 26])
+        XCTAssertEqual(ticket.lines[0][.back], [5, 9])
+        XCTAssertEqual(ticket.lines[1][.front], [4, 12, 13, 23, 31])
+        XCTAssertEqual(ticket.lines[2][.front], [1, 3, 11, 14, 34])
+        XCTAssertEqual(ticket.lines[2][.back], [4, 12])
+        XCTAssertTrue(ticket.addOn)
+        XCTAssertEqual(ticket.periods, 3, "「3期」是期数")
+        XCTAssertEqual(ticket.multiple, 2, "「2倍」是倍数，别和期数搞反")
+        XCTAssertEqual(ticket.costPerPeriod, 18, accuracy: 0.01, "每期 3 注 × 3 元 × 2 倍")
+        assertMatchesPrintedTotal(ticket, 54)
+        // 票面印的公益金 19.44 元 = 54 × 36%
+        XCTAssertEqual(ticket.totalCost * 0.36, 19.44, accuracy: 0.01)
+    }
+
+    /// 「追加投注2期2倍」：3 注 × 3 元 × 2 倍 × 2 期 = 36 元，公益金 12.96 元。
+    func testDLTAddOnTwoPeriods() {
+        let text = """
+        wenjin
+        体彩 超级大乐透
+        第 26097期 2026年08月26日开奖
+        110310-289061-111943-846513 259907 w/iScg
+        单式票 追加投注2期2倍 合计36元
+        ① 03 12 13 26 29 + 04 05
+        ② 04 15 16 26 29 + 02 04
+        ③ 01 16 23 33 35 + 05 06
+        感谢您为公益事业贡献 12.96元
+        20-020689-101 00311 26/08/25 11:49:28
+        """
+        guard let ticket = TicketTextParser.parse(text).tickets.first else { return XCTFail("没解析出票") }
+        XCTAssertEqual(ticket.issue, "26097")
+        XCTAssertEqual(ticket.count, 3)
+        XCTAssertEqual(ticket.lines[0][.front], [3, 12, 13, 26, 29])
+        XCTAssertEqual(ticket.lines[2][.back], [5, 6])
+        XCTAssertTrue(ticket.addOn)
+        XCTAssertEqual(ticket.periods, 2)
+        XCTAssertEqual(ticket.multiple, 2)
+        assertMatchesPrintedTotal(ticket, 36)
+        XCTAssertEqual(ticket.totalCost * 0.36, 12.96, accuracy: 0.01)
+    }
+
+    /// 期数和倍数写在同一段里（`3期2倍`），不能互相串。
+    func testPeriodsAndMultipleAreNotConfused() {
+        XCTAssertEqual(TicketTextParser.extractPeriods("单式票 追加投注3期2倍 合计54元"), 3)
+        XCTAssertEqual(TicketTextParser.extractMultiple("单式票 追加投注3期2倍 合计54元"), 2)
+        XCTAssertEqual(TicketTextParser.extractPeriods("单式票 追加投注2期2倍 合计36元"), 2)
+        XCTAssertEqual(TicketTextParser.extractMultiple("单式票 追加投注2期2倍 合计36元"), 2)
+        // 没写期数的追加票就是一期
+        XCTAssertEqual(TicketTextParser.extractPeriods("单式票 追加投注2倍 合计18元"), 1)
+        XCTAssertEqual(TicketTextParser.extractMultiple("单式票 追加投注2倍 合计18元"), 2)
+    }
+
     // MARK: - 号码抽取本身
 
     /// 一位数的号码不能被吞掉 —— 蓝球复式经常印成 `1 2 3 … 9 10`。
