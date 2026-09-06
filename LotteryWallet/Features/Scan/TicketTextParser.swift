@@ -157,11 +157,20 @@ enum TicketTextParser {
         return runs
     }
 
+    /// 一串数字最长能有几位还算「一排号码」。
+    ///
+    /// 真实的号码行是空格分开的一位或两位数，即使热敏票把相邻两个号糊在一起
+    /// 也就四位。再长就不是号码了 —— 机号 `32030192`、条码、销售期流水号
+    /// 都是这种一长串。这个上限是把它们挡在外面的关键：`32030192` 按两位一组
+    /// 拆出来是 32、03、01，全都落在红球的 1–33 里，光靠取值范围根本拦不住。
+    private static let maximumDigitRun = 4
+
     /// 这一行是不是「只有号码」——用来判断它是上一行标签的续行。
     ///
     /// 样票里 `蓝复` 和 `前区拖` 的号码经常排不下，第二行**没有标签**，
     /// 只有一排号码。但票尾的 `028期开奖号码:02 06 09 17 25 28+15` 同样是
-    /// 一行号码，绝不能当成续行 —— 所以要求整行除了数字和空格之外什么都没有。
+    /// 一行号码，绝不能当成续行 —— 所以要求整行除了数字和空格之外什么都没有，
+    /// 并且没有任何一串数字长得不像号码（见 `maximumDigitRun`）。
     static func isNumberOnlyLine(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return false }
@@ -171,7 +180,8 @@ enum TicketTextParser {
             if character.isNumber { sawDigit = true; continue }
             return false
         }
-        return sawDigit
+        guard sawDigit else { return false }
+        return digitRuns(trimmed).allSatisfy { $0.count <= maximumDigitRun }
     }
 
     static func isAscendingUnique(_ values: [Int]) -> Bool {

@@ -229,11 +229,13 @@ struct TicketCard: Identifiable, Hashable {
         let matched: [SectionKey: [Bool]]
         let prizeAmount: Double
         let status: RecordStatus
-        /// 这一注是否已经核对过。
+        /// 这一注是否已经核对过 —— 也就是**有没有命中标记可以拿来渲染**。
         ///
-        /// **不能**用 `!matched.isEmpty` 来判断。命中标记可能因为导入恢复
-        /// 而缺失，那时候整注号码会被当成"还没开奖"按满色画出来，
-        /// 用户看到的是一张假的全中票。状态才是事实来源。
+        /// 导入恢复的老票状态是 won / lost，命中标记却是空的，
+        /// 那时候整注号码会被当成"还没开奖"按满色画出来，看着像全中了。
+        /// 这个问题的正解是把标记补回来（见 `checkAll` 里的
+        /// `needsMatchRepair`），而不是在这里拿状态硬当"已核对"——
+        /// 那样只会在标记补上之前把整注画成全灰，中奖票尤其离谱。
         let hasResult: Bool
     }
 
@@ -340,7 +342,7 @@ extension TicketCard {
                  matched: record.matched,
                  prizeAmount: record.prizeAmount,
                  status: record.status,
-                 hasResult: record.status.isFinal)
+                 hasResult: !record.matched.isEmpty)
         }
 
         let body = records.enumerated().map { index, record -> String in

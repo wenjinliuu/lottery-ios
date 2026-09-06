@@ -315,9 +315,34 @@ final class TicketTextParserTests: XCTestCase {
                        [1, 5, 12, 18, 22, 30])
     }
 
-    /// 超出取值范围的数字（机号、条码）不会混进号码里。
-    func testNumbersFiltersOutOfRange() {
-        XCTAssertEqual(TicketTextParser.numbers(in: "机号:32030192", range: 1...33), [])
+    /// `numbers` 只按取值范围过滤，**挡不住**机号这种长数字串 ——
+    /// `32030192` 拆成两位是 32、03、01，全都落在红球的 1–33 里。
+    /// 这正是为什么续行判断不能只看「这一行是不是只有数字」。
+    func testNumbersOnlyFiltersByRange() {
+        XCTAssertEqual(TicketTextParser.numbers(in: "32030192", range: 1...33), [32, 3, 1])
+    }
+
+    /// 机号、条码、销售期流水号都是一长串数字，不能被当成号码续行吞进来。
+    func testRejectsLongDigitRunAsContinuation() {
+        XCTAssertFalse(TicketTextParser.isNumberOnlyLine("32030192"))
+        XCTAssertFalse(TicketTextParser.isNumberOnlyLine("2026029 2470"))
+        XCTAssertTrue(TicketTextParser.isNumberOnlyLine("27 33"))
+    }
+
+    /// OCR 把「机号:」几个字漏掉时，那一行不能接到上一行的号码后面。
+    func testMachineNumberLineDoesNotExtendPreviousZone() {
+        let text = """
+        玩法:双色球-复式
+        红复: 4 8 12 15 19 23 29
+        32030192
+        蓝复: 9 11
+        开奖期:2025039
+        合计28元
+        """
+        guard let ticket = TicketTextParser.parse(text).tickets.first else { return XCTFail("没解析出票") }
+        XCTAssertEqual(ticket.selections[.red]?.selected, [4, 8, 12, 15, 19, 23, 29],
+                       "机号那一行不能并进红球")
+        XCTAssertEqual(ticket.count, 14)
     }
 
     /// 只有数字和空格的行才算续行。
