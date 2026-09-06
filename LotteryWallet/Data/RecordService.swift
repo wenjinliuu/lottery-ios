@@ -345,7 +345,11 @@ extension TicketCard {
                  hasResult: !record.matched.isEmpty)
         }
 
-        let body = records.enumerated().map { index, record -> String in
+        // 复制文本同样只取前 `lineLimit` 注。这里是主线程上重建快照的路径，
+        // 一张 2000 注的复式票要是全拼出来，正是这次重构想干掉的那种开销 ——
+        // 而且没人会去读一份两千行的号码。
+        let copyRecords = Array(records.prefix(TicketCard.lineLimit))
+        let body = copyRecords.enumerated().map { index, record -> String in
             let numbers = key.sections.compactMap { section -> String? in
                 let values = record.ticket[section.key]
                 guard !values.isEmpty else { return nil }
@@ -354,7 +358,9 @@ extension TicketCard {
             }.joined(separator: " + ")
             return "\(index + 1). \(numbers)"
         }.joined(separator: "\n")
+        let omitted = records.count - copyRecords.count
         copyText = "\(key.label) 第\(batch.expect)期\n\(body)"
+            + (omitted > 0 ? "\n…另有 \(omitted) 注未列出" : "")
     }
 
     /// 记录变化时一次性把全部电子票抽成快照。

@@ -545,34 +545,35 @@ enum TicketTextParser {
 
         if abs(ticket.totalCost - total) < 0.5 { return warnings }
 
-        // 大乐透追加是 3 元一注。票面上「追加」两个字经常糊掉，
-        // 但只要合计除以（注数 × 倍数 × 期数）等于 3，它就一定是追加票。
-        if ticket.game == .dlt {
-            let units = Double(ticket.count * ticket.multiple * ticket.periods)
-            if units > 0 {
-                let unit = total / units
-                if abs(unit - 3) < 0.01 && !ticket.addOn {
-                    warnings.append("合计 \(MoneyText.format(total)) 折算下来是 3 元一注，这应该是**追加**票，已自动勾上。")
-                    return warnings
-                }
-                if abs(unit - 2) < 0.01 && ticket.addOn {
-                    warnings.append("合计 \(MoneyText.format(total)) 折算下来是 2 元一注，这不是追加票，已自动取消。")
-                    return warnings
-                }
-            }
-        }
+        // 追加与否已经在 `reconcileAddOn` 里按单价校正过、也告诉用户了，
+        // 走到这里还对不上，就是号码真的读错了。
         warnings.append("票面合计 \(MoneyText.format(total))，按识别结果算是 \(MoneyText.format(ticket.totalCost))（\(ticket.count) 注 × \(ticket.multiple) 倍\(ticket.periods > 1 ? " × \(ticket.periods) 期" : "")），请核对号码。")
         return warnings
     }
 
-    /// 校验发现单价对不上时，把追加标志纠正过来。
-    static func reconcileAddOn(_ ticket: inout ScannedTicket) {
-        guard ticket.game == .dlt, let total = ticket.totalAmount, ticket.count > 0 else { return }
+    /// 用票面合计反推单价，把追加标志纠正过来。返回一句给用户看的说明。
+    ///
+    /// 大乐透追加是 3 元一注（2 元基本 + 1 元追加）。票面上「追加」两个字
+    /// 经常被折痕或兑奖章盖掉，但合计金额是白纸黑字印着的：
+    /// 合计 ÷（注数 × 倍数 × 期数）等于 3 就一定是追加票。
+    ///
+    /// **必须把说明显示出来** —— 这一步会把单注价格从 2 元改成 3 元，
+    /// 是记账口径的变化，悄悄改掉的话用户对不上账也不知道是哪一步动的。
+    @discardableResult
+    static func reconcileAddOn(_ ticket: inout ScannedTicket) -> String? {
+        guard ticket.game == .dlt, let total = ticket.totalAmount, ticket.count > 0 else { return nil }
         let units = Double(ticket.count * ticket.multiple * ticket.periods)
-        guard units > 0 else { return }
+        guard units > 0 else { return nil }
         let unit = total / units
-        if abs(unit - 3) < 0.01 { ticket.addOn = true }
-        else if abs(unit - 2) < 0.01 { ticket.addOn = false }
+        if abs(unit - 3) < 0.01, !ticket.addOn {
+            ticket.addOn = true
+            return "票面合计 \(MoneyText.format(total)) 折下来是 3 元一注，按追加票记（已自动勾上「追加投注」）。"
+        }
+        if abs(unit - 2) < 0.01, ticket.addOn {
+            ticket.addOn = false
+            return "票面合计 \(MoneyText.format(total)) 折下来是 2 元一注，不是追加票（已自动取消「追加投注」）。"
+        }
+        return nil
     }
 
     private static func summarize(_ tickets: [ScannedTicket]) -> [String] {

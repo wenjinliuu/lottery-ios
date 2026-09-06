@@ -22,6 +22,13 @@ struct EntryFlowView: View {
     @State private var danPicking = true
     /// 手选攒下来的候选注，最后一起打成同一张票。
     @State private var candidates: [NumberSet] = []
+    /// 攒过候选之后，用户又动过选号盘没有。
+    ///
+    /// 数字型玩法（3D、排列3/5、七星彩）的滚轮**永远显示着一注完整的号**，
+    /// 0 0 0 也是合法的一注。所以「当前选号凑齐了没有」这个条件在那些彩种上
+    /// 恒为真：每点一次「加入候选」，滚轮复位成 000，这个 000 又会被当成
+    /// 一注跟着存进去 —— 用户平白多买一注、多付两块钱。
+    @State private var hasPendingEdit = false
     @State private var multiple = 1
     @State private var isResponsibleAlertPresented = false
     @State private var isIssuePickerPresented = false
@@ -51,10 +58,13 @@ struct EntryFlowView: View {
     /// 保存时真正要写进票夹的号码。
     private var lines: [NumberSet] {
         guard mode == .manual else { return [] }
+        guard let pendingLine else { return candidates }
         // 还没点"加入候选"就直接保存的那一注不能丢掉 —— 大多数人只买一注，
         // 让他们为了一注去点一次"加入候选"是多余的一步。
-        if let pendingLine, !candidates.contains(pendingLine) { return candidates + [pendingLine] }
-        return candidates
+        // 但攒过候选之后就必须是用户**又动过号码**才算数，理由见 `hasPendingEdit`。
+        guard candidates.isEmpty || hasPendingEdit else { return candidates }
+        guard !candidates.contains(pendingLine) else { return candidates }
+        return candidates + [pendingLine]
     }
 
     private var tickets: [Ticket] {
@@ -341,7 +351,10 @@ struct EntryFlowView: View {
     private func binding(for key: SectionKey) -> Binding<SectionSelection> {
         Binding(
             get: { selections[key] ?? SectionSelection() },
-            set: { selections[key] = $0 }
+            set: {
+                selections[key] = $0
+                hasPendingEdit = true
+            }
         )
     }
 
@@ -355,6 +368,9 @@ struct EntryFlowView: View {
                               count: combinationCount,
                               cost: totalCost,
                               multiple: multiple,
+                              // 末尾那条可能是还没加入候选的当前选号，它不在
+                              // `candidates` 里，给它一个减号只会点了没反应
+                              removableCount: mode == .manual ? candidates.count : 0,
                               onRemoveLine: mode == .manual ? removeCandidate : nil)
         } else {
             Text(mode == .manual
@@ -448,6 +464,7 @@ struct EntryFlowView: View {
             )
         }
         selections = next
+        hasPendingEdit = false
         if clearCandidates { candidates = [] }
     }
 
@@ -497,6 +514,7 @@ struct EntryFlowView: View {
                 next[section.key] = selection
             }
             selections = next
+            hasPendingEdit = true
         }
     }
 

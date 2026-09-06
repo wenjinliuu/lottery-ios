@@ -26,8 +26,16 @@ struct CelebrationView: View {
         .task(id: trigger) {
             guard trigger > 0 else { return }
             bursts = Burst.random()
-            // 动画本身 1.5s 左右，留一点余量再清场，避免视图树里挂着死粒子
-            try? await Task.sleep(for: .seconds(2))
+            // 动画本身 1.5s 左右，留一点余量再清场，避免视图树里挂着死粒子。
+            //
+            // 这里**不能**用 `try?` 把取消吞掉：两秒内连放两次烟花时，
+            // 第一个任务会被取消，但 `try?` 之后它照样往下跑一句 `bursts = []`，
+            // 把第二个任务刚摆好的粒子清空 —— 表现就是第二次点了什么都没有。
+            do {
+                try await Task.sleep(for: .seconds(2))
+            } catch {
+                return
+            }
             bursts = []
         }
     }

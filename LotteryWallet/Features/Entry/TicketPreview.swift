@@ -125,6 +125,9 @@ struct TicketPreviewCard: View {
     let count: Int
     let cost: Double
     var multiple: Int = 1
+    /// 前几注是真正加进候选的、可以删。末尾那条可能是「当前选号」，
+    /// 它还不在候选里，给它一个减号只会点了没反应。
+    var removableCount: Int = 0
     /// 手选模式下逐注删除。
     var onRemoveLine: ((Int) -> Void)?
 
@@ -203,7 +206,8 @@ struct TicketPreviewCard: View {
     /// 手选预览里行首是「3.」这样的注序号，从它反推是第几注。
     private func lineIndex(of row: TicketPreview.Row) -> Int? {
         guard row.label.hasSuffix("."), let number = Int(row.label.dropLast()) else { return nil }
-        return number - 1
+        let index = number - 1
+        return index < removableCount ? index : nil
     }
 
     private var footer: some View {

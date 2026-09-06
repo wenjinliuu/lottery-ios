@@ -212,7 +212,12 @@ final class DrawStore {
     /// 开奖日程（今日开奖、轮播顺序、待更新）的变化指纹。
     /// 这几项算一次要过一遍八个彩种，页面拿它当 `task(id:)`，避免放进 body 每帧重算。
     var scheduleToken: String {
-        "\(latestUpdatedAt)|\(calendar == nil ? 0 : 1)|\(draws.count)"
+        // 必须带上时间维度。「今日开奖」「尚未更新」「轮播顺序」算的都是
+        // **此刻**的状态，可 App 挂在后台一整夜再回到前台时，数据一个字节没变，
+        // 光靠数据指纹这几项就永远停在昨天。按小时分桶，跨过开奖时刻或午夜
+        // 都会换一个 token。
+        let now = ChinaClock.now()
+        return "\(latestUpdatedAt)|\(calendar == nil ? 0 : 1)|\(draws.count)|\(now.date)|\(now.clock.prefix(2))"
     }
 
     func draws(for game: GameKey) -> [Draw] {

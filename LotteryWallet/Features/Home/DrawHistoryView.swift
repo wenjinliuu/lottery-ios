@@ -6,11 +6,6 @@ struct DrawHistoryView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var game: GameKey = .ssq
-    @State private var isLoading = false
-
-    private var history: [Draw] {
-        drawStore.draws(for: game)
-    }
 
     var body: some View {
         NavigationStack {
@@ -35,20 +30,23 @@ struct DrawHistoryView: View {
                     Button("完成") { dismiss() }
                 }
             }
-            .task(id: game) { await reload() }
         }
     }
 
     @ViewBuilder
     private func page(for item: GameKey) -> some View {
         let rows = drawStore.draws(for: item)
+        // 「还没拉过」和「拉过但是空的」是两回事。只按当前选中的彩种判断
+        // 是否在加载，滑到还没加载的那一页会直接看到「网络没连上」的空状态 ——
+        // 明明只是还没轮到它。
+        let hasLoaded = drawStore.loadedHistoryGames.contains(item)
         ScrollView {
             LazyVStack(spacing: 12) {
                 if !rows.isEmpty {
                     ForEach(rows) { draw in
                         DrawHistoryRow(draw: draw)
                     }
-                } else if isLoading && item == game {
+                } else if !hasLoaded {
                     ProgressView("正在读取往期开奖")
                         .padding(.top, 60)
                 } else {
@@ -59,7 +57,7 @@ struct DrawHistoryView: View {
                     } description: {
                         Text("可能是网络没连上，或者数据仓库还没有这个彩种的往期记录。")
                     } actions: {
-                        Button("重试") { Task { await reload() } }
+                        Button("重试") { Task { await drawStore.loadHistory(for: item) } }
                             .buttonStyle(SecondaryGlassButton(tint: item.tint))
                     }
                     .padding(.top, 40)
@@ -68,13 +66,8 @@ struct DrawHistoryView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 40)
         }
-    }
-
-    private func reload() async {
-        guard history.isEmpty else { return }
-        isLoading = true
-        await drawStore.loadHistory(for: game)
-        isLoading = false
+        // 每一页管自己那份数据，滑过去就开始拉
+        .task(id: item) { await drawStore.loadHistory(for: item) }
     }
 
     /// 彩种切换条。

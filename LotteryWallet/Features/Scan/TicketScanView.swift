@@ -39,10 +39,17 @@ struct TicketScanView: View {
         var id: ScannedTicket.ID { ticketID }
     }
 
+    /// 要改哪一块号码。
+    ///
+    /// 单式票一张可以有好几注（票面上的 A/B/C 行），所以必须带上是**第几注**；
+    /// 只带号码区的话，改完只会落到第一注上，其余几注的修正静默丢掉。
     struct ZoneEditorTarget: Identifiable {
         let ticketID: ScannedTicket.ID
-        let key: SectionKey
-        var id: String { "\(ticketID)-\(key.rawValue)" }
+        /// 单式票：第几注。复式/胆拖为 nil。
+        var lineIndex: Int?
+        /// 复式/胆拖：哪个号码区。单式为 nil（一次改一整注）。
+        var key: SectionKey?
+        var id: String { "\(ticketID)-\(lineIndex.map(String.init) ?? "-")-\(key?.rawValue ?? "-")" }
     }
 
     var body: some View {
@@ -321,16 +328,26 @@ struct TicketScanView: View {
             switch ticket.play {
             case .single:
                 ForEach(Array(ticket.lines.enumerated()), id: \.offset) { index, numbers in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text("\(index + 1).")
-                            .font(.caption.weight(.bold))
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, alignment: .leading)
-                            .padding(.top, 3)
-                        TicketNumbersSnapshotView(game: ticket.game, numbers: numbers.values, size: 26)
-                        Spacer(minLength: 0)
+                    Button {
+                        zoneEditorTarget = ZoneEditorTarget(ticketID: ticket.id, lineIndex: index)
+                    } label: {
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("\(index + 1).")
+                                .font(.caption.weight(.bold))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24, alignment: .leading)
+                                .padding(.top, 3)
+                            TicketNumbersSnapshotView(game: ticket.game, numbers: numbers.values, size: 26)
+                            Spacer(minLength: 0)
+                            Image(systemName: "square.and.pencil")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .padding(.top, 4)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
             case .system, .dantuo:
                 ForEach(zoneRows(ticket), id: \.label) { row in
@@ -351,15 +368,9 @@ struct TicketScanView: View {
                     }
                 }
             }
-            Text(ticket.play == .single ? "点号码球可以修改这一注" : "点号码球可以修改这一区")
+            Text(ticket.play == .single ? "点一注可以改这一注的号码" : "点号码球可以改这一区")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
-        }
-        // 单式票的号码也要能点开改
-        .contentShape(Rectangle())
-        .onTapGesture {
-            guard ticket.play == .single, let key = ticket.game.sections.first?.key else { return }
-            zoneEditorTarget = ZoneEditorTarget(ticketID: ticket.id, key: key)
         }
     }
 
@@ -479,7 +490,11 @@ struct TicketScanView: View {
     @ViewBuilder
     private func zoneEditor(_ target: ZoneEditorTarget) -> some View {
         if let index = tickets.firstIndex(where: { $0.id == target.ticketID }) {
-            ScanZoneEditor(ticket: $tickets[index], key: target.key)
+            if let lineIndex = target.lineIndex {
+                ScanLineEditor(ticket: $tickets[index], lineIndex: lineIndex)
+            } else if let key = target.key {
+                ScanZoneEditor(ticket: $tickets[index], key: key)
+            }
         }
     }
 
@@ -523,10 +538,13 @@ struct TicketScanView: View {
         errorText = nil
         do {
             var scanned = try await TicketVisionScanner.scan(image)
-            // 单价对不上时把追加标志纠正过来，再把提示重算一遍
+            // 单价对不上时把追加标志纠正过来，再把提示重算一遍。
+            // 纠正本身必须说出来 —— 单注价格从 2 元变成 3 元是记账口径的变化，
+            // 悄悄改掉的话用户看到金额对不上也不知道是哪一步动的。
             for index in scanned.tickets.indices {
-                TicketTextParser.reconcileAddOn(&scanned.tickets[index])
-                scanned.tickets[index].warnings = TicketTextParser.validate(scanned.tickets[index])
+                let note = TicketTextParser.reconcileAddOn(&scanned.tickets[index])
+                scanned.tickets[index].warnings =
+                    (note.map { [$0] } ?? []) + TicketTextParser.validate(scanned.tickets[index])
             }
             rawText = scanned.rawText
             tickets = scanned.tickets
@@ -608,7 +626,7 @@ struct TicketScanView: View {
 
 // MARK: - 号码区编辑
 
-/// 改一个号码区。直接复用录入页那套选号盘，不另造一套。
+/// 改复式 / 胆拖的一个号码区。直接复用录入页那套选号盘，不另造一套。
 private struct ScanZoneEditor: View {
     @Binding var ticket: ScannedTicket
     let key: SectionKey
@@ -651,22 +669,77 @@ private struct ScanZoneEditor: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") {
                         ticket.selections[key] = selection
-                        // 单式票改完号也要落回 lines
-                        if ticket.play == .single, ticket.lines.count == 1 {
-                            ticket.lines[0][key] = selection.selected
-                        }
                         dismiss()
                     }
                 }
             }
-            .onAppear {
-                if ticket.play == .single, let first = ticket.lines.first {
-                    selection = SectionSelection(selected: first[key])
-                } else {
-                    selection = ticket.selections[key] ?? SectionSelection()
+            .onAppear { selection = ticket.selections[key] ?? SectionSelection() }
+        }
+    }
+}
+
+/// 改单式票里的一注。一注跨两个号码区（红+蓝、前区+后区），一起改完再落回。
+private struct ScanLineEditor: View {
+    @Binding var ticket: ScannedTicket
+    let lineIndex: Int
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.showToast) private var showToast
+    @State private var selections: [SectionKey: SectionSelection] = [:]
+
+    private var isComplete: Bool {
+        ticket.game.sections.allSatisfy {
+            (selections[$0.key]?.selected.count ?? 0) == $0.count
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(ticket.game.sections) { section in
+                        NumberPadSection(section: section,
+                                         selection: binding(for: section.key),
+                                         required: section.count,
+                                         mode: .manual,
+                                         danPicking: false,
+                                         onReject: { showToast($0, symbol: "hand.raised") })
+                    }
+                }
+                .contentCard()
+                .padding(.horizontal, 16)
+                .padding(.bottom, 24)
+            }
+            .background(Palette.canvas)
+            .navigationTitle("修改第 \(lineIndex + 1) 注")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") {
+                        guard ticket.lines.indices.contains(lineIndex) else { return dismiss() }
+                        for section in ticket.game.sections {
+                            ticket.lines[lineIndex][section.key] =
+                                (selections[section.key]?.selected ?? []).sorted()
+                        }
+                        dismiss()
+                    }
+                    .disabled(!isComplete)
                 }
             }
+            .onAppear {
+                guard ticket.lines.indices.contains(lineIndex) else { return }
+                let numbers = ticket.lines[lineIndex]
+                selections = Dictionary(uniqueKeysWithValues: ticket.game.sections.map {
+                    ($0.key, SectionSelection(selected: numbers[$0.key]))
+                })
+            }
         }
+    }
+
+    private func binding(for key: SectionKey) -> Binding<SectionSelection> {
+        Binding(get: { selections[key] ?? SectionSelection() },
+                set: { selections[key] = $0 })
     }
 }
 
