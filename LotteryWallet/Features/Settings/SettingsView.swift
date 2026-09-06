@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.modelContext) private var context
     @Environment(\.showToast) private var showToast
+    @Environment(\.celebrate) private var celebrate
     @Query private var records: [TicketRecord]
 
     @State private var isExporting = false
@@ -237,9 +238,11 @@ struct SettingsView: View {
                 await drawStore.loadAllHistories()
                 let service = RecordService(context: context, drawStore: drawStore)
                 _ = try? service.reconcileInferredTargets()
-                _ = try? service.checkAll()
+                let checked = try? service.checkAll()
 
                 showToast("已导入 \(outcome.inserted + outcome.updated) 条记录", symbol: "square.and.arrow.down")
+                // 导入一份旧备份常常一次核出好几注中奖，值得放一次烟花
+                if let checked, checked.won > 0 { celebrate() }
             } catch {
                 showToast(error.localizedDescription, symbol: "exclamationmark.triangle")
             }

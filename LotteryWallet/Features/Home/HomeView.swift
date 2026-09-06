@@ -35,7 +35,7 @@ struct HomeView: View {
     /// 开奖日程也不能在 body 里算。`todayOpenGames` / `pendingDrawUpdates` /
     /// `carouselOrder` 每次都要取一遍东八区时间、过一遍八个彩种，
     /// 而 body 在滚动时一秒会跑很多次。统一在数据变化时算好存下来。
-    @State private var todayGames: [GameKey] = []
+    @State private var todayGames: Set<GameKey> = []
     @State private var pendingGames: [GameKey] = []
     @State private var carouselGames: [GameKey] = GameKey.ordered
 
@@ -43,17 +43,17 @@ struct HomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    todayStrip
                     profitCard
                     latestDrawSection
                     monthlyCard
+                    if !pendingGames.isEmpty { pendingNotice }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
                 .padding(.bottom, 120)
             }
             .background(Palette.canvas)
-            .navigationTitle("彩票夹")
+            .navigationTitle("首页")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
@@ -92,50 +92,13 @@ struct HomeView: View {
     }
 
     private func refreshSchedule() {
-        todayGames = drawStore.todayOpenGames()
+        todayGames = Set(drawStore.todayOpenGames())
         pendingGames = drawStore.pendingDrawUpdates()
         let order = drawStore.carouselOrder()
         carouselGames = order
         // 轮播顺序会随「今天开哪个彩种」变化，旧的下标可能越界，
         // 越界后 TabView 会白屏一页。
         if carouselIndex >= order.count { carouselIndex = 0 }
-    }
-
-    // MARK: - 今日开奖
-
-    private var todayStrip: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 5) {
-                Image(systemName: "calendar")
-                Text(todayGames.isEmpty ? "今日无开奖" : "今日开奖")
-            }
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
-
-            if !todayGames.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 7) {
-                        ForEach(todayGames) { game in
-                            Text(game.label)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(game.tint)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(game.tint.opacity(0.13), in: Capsule())
-                        }
-                    }
-                }
-                .scrollClipDisabled()
-            }
-
-            if !pendingGames.isEmpty {
-                Label("今日\(pendingGames.map(\.label).joined(separator: "、"))开奖号码尚未更新",
-                      systemImage: "clock.badge.exclamationmark")
-                    .font(.caption2)
-                    .foregroundStyle(Palette.warning)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - 累计盈亏
@@ -148,9 +111,9 @@ struct HomeView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Text(MoneyText.format(series.netTotal))
-                        // 用 .title 而不是写死 32pt，跟着动态字体走；
-                        // 同时限制成一行、可缩放，金额上百万也不会撑破卡片。
-                        .font(.system(.largeTitle, design: .rounded, weight: .semibold))
+                        // 大号字要收紧字距 —— 字号越大，字母间那点默认间隙看着越松。
+                        .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                        .tracking(-0.8)
                         .monospacedDigit()
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
@@ -166,15 +129,10 @@ struct HomeView: View {
                 .fixedSize()
             }
 
-            if series.isEmpty {
-                emptyChart
-            } else {
-                profitChart
-            }
+            ProfitHeatmap(days: series.days, range: range)
 
             Divider()
 
-            // 三列等宽。原来用 Spacer 分隔，金额一长就把后面两列挤没了。
             HStack(alignment: .top, spacing: 10) {
                 statPair("投入", MoneyText.format(series.costTotal))
                 statPair("奖金", MoneyText.format(series.prizeTotal))
@@ -184,67 +142,13 @@ struct HomeView: View {
         .contentCard()
     }
 
-    private var profitChart: some View {
-        Chart {
-            // 盈亏曲线没有零基线就看不出在赚还是在亏。
-            // 注意画在 ForEach 外面：写在数据循环里会按点数重复画上百条。
-            RuleMark(y: .value("盈亏平衡", 0.0))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                .foregroundStyle(.quaternary)
-
-            ForEach(series.days) { day in
-                AreaMark(x: .value("日期", day.day), y: .value("累计", day.close))
-                    .foregroundStyle(
-                        LinearGradient(colors: [Palette.profitColor(series.netTotal).opacity(0.22), .clear],
-                                       startPoint: .top, endPoint: .bottom)
-                    )
-                    .interpolationMethod(.monotone)
-
-                LineMark(x: .value("日期", day.day), y: .value("累计", day.close))
-                    .foregroundStyle(Palette.profitColor(series.netTotal))
-                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
-                    .interpolationMethod(.monotone)
-            }
-        }
-        .chartYAxis {
-            AxisMarks(position: .trailing) { value in
-                AxisGridLine().foregroundStyle(.quaternary)
-                AxisValueLabel {
-                    if let number = value.as(Double.self) {
-                        Text(MoneyText.compact(number)).font(.caption2)
-                    }
-                }
-            }
-        }
-        .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 4)) { _ in
-                AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
-                    .font(.caption2)
-            }
-        }
-        .frame(height: 160)
-    }
-
-    private var emptyChart: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "chart.line.flattrend.xyaxis")
-                .font(.title2)
-                .foregroundStyle(.tertiary)
-            Text("还没有已结算的记录")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 160)
-    }
-
     private func statPair(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.subheadline.weight(.medium))
+                .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -266,7 +170,9 @@ struct HomeView: View {
 
             TabView(selection: $carouselIndex) {
                 ForEach(Array(carouselGames.enumerated()), id: \.element) { index, game in
-                    DrawCard(game: game, draw: drawStore.latestDraw(for: game))
+                    DrawCard(game: game,
+                             draw: drawStore.latestDraw(for: game),
+                             opensToday: todayGames.contains(game))
                         .padding(.bottom, 30)
                         .tag(index)
                 }
@@ -275,7 +181,7 @@ struct HomeView: View {
             // 分页圆点默认是半透明的，压在浅色分组底上几乎看不见，
             // 用户根本不知道这里可以左右滑。加一层背景把它衬出来。
             .indexViewStyle(.page(backgroundDisplayMode: .always))
-            .frame(height: 212)
+            .frame(height: 196)
             .accessibilityHint("左右滑动查看其他彩种的最新开奖")
         }
         .sheet(isPresented: $isDrawSheetPresented) {
@@ -283,112 +189,409 @@ struct HomeView: View {
         }
     }
 
+    /// 今天到点了但号码还没更新的彩种。原来这条挤在页面最顶上，
+    /// 大多数时候是空的却仍占着位置；挪到页尾当一条轻提示。
+    private var pendingNotice: some View {
+        Label("今日\(pendingGames.map(\.label).joined(separator: "、"))的开奖号码尚未更新",
+              systemImage: "clock.badge.exclamationmark")
+            .font(.caption)
+            .foregroundStyle(Palette.warning)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+    }
+
     // MARK: - 本月概览
 
     private var monthlyCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionHeader(title: "本月概览", subtitle: "统计本机保存的记录")
+        let month = Calendar.chinaCalendar.component(.month, from: Date())
+        return VStack(alignment: .leading, spacing: 14) {
+            SectionHeader(title: "\(month) 月概览", subtitle: "本机记录 · \(monthStats.ticketCount) 注")
 
-            HStack(spacing: 12) {
-                kpi("投入", MoneyText.format(monthStats.cost), .primary)
-                kpi("奖金", MoneyText.format(monthStats.prize), Palette.profit)
-                kpi("盈亏", MoneyText.format(monthStats.net), Palette.profitColor(monthStats.net))
+            // 盈亏是这张卡的主角，单独占一行给足字号；
+            // 投入和奖金退到下面一行当支撑数据。
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(MoneyText.format(monthStats.net))
+                    .font(.system(.title, design: .rounded, weight: .bold))
+                    .tracking(-0.5)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .foregroundStyle(Palette.profitColor(monthStats.net))
+                if monthStats.ticketCount > 0 {
+                    Text(monthStats.net >= 0 ? "盈利" : "亏损")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                if monthStats.ticketCount > 0 {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("中奖率")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(String(format: "%.0f%%", monthStats.winRate))
+                            .font(.subheadline.weight(.bold))
+                            .monospacedDigit()
+                    }
+                }
+            }
+
+            HStack(spacing: 10) {
+                miniStat("投入", MoneyText.format(monthStats.cost), "arrow.down.circle.fill", .secondary)
+                miniStat("奖金", MoneyText.format(monthStats.prize), "trophy.fill", Palette.profit)
             }
 
             if monthStats.byGame.isEmpty {
-                Text("本月还没有记录")
+                Text("这个月还没有记录")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 12)
             } else {
-                Chart(monthStats.byGame) { item in
-                    BarMark(x: .value("花费", item.cost), y: .value("彩种", item.game.label))
-                        .foregroundStyle(item.game.tint)
-                        .cornerRadius(5)
-                        // X 轴是隐藏的，柱子上不标数值就只剩长短，读不出金额
-                        .annotation(position: .trailing, alignment: .leading) {
-                            Text(MoneyText.format(item.cost))
-                                .font(.caption2)
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                        }
-                }
-                .chartXAxis(.hidden)
-                // 留出右侧标注的位置，否则最长的那根柱子的金额会被裁掉
-                .chartXScale(domain: 0...Swift.max((monthStats.byGame.map(\.cost).max() ?? 0) * 1.35, 1))
-                .frame(height: CGFloat(monthStats.byGame.count) * 30 + 10)
+                Divider()
+                // 原来是一张横向柱状图，只能看出长短。换成一条占比色带
+                // 加一份明细，金额和比例都直接写出来。
+                SpendBreakdown(items: monthStats.byGame, total: monthStats.cost)
             }
         }
         .contentCard()
     }
 
-    private func kpi(_ title: String, _ value: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(color)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+    private func miniStat(_ title: String, _ value: String, _ symbol: String, _ tint: Color) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: symbol)
+                .font(.caption)
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.footnote.weight(.semibold))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+// MARK: - 盈亏热力图
+
+/// 逐日盈亏方格图。
+///
+/// 换掉原来的折线图：买彩票长期期望为负，折线永远是一条从左上到右下的
+/// 45° 斜坡，看一次就没有信息量了。方格图把「哪天买了、那天是赚是亏、
+/// 亏了多少」摊开成一张图，密度和节奏本身就是信息。
+struct ProfitHeatmap: View {
+    let days: [ProfitDay]
+    let range: ProfitRange
+
+    /// 一格的边长和间距。7 行（一周七天）纵向排，按周横向铺开。
+    private let cell: CGFloat = 13
+    private let gap: CGFloat = 3
+
+    /// 有记录的那些天，按净额取色。
+    private var byDay: [String: Double] {
+        var map: [String: Double] = [:]
+        for day in days where day.count > 0 { map[day.date] = day.net }
+        return map
     }
 
+    /// 参与配色归一化的最大绝对净额。
+    private var scale: Double {
+        Swift.max(byDay.values.map(\.magnitude).max() ?? 0, 1)
+    }
+
+    /// 图上要画的日期区间，按周对齐（每列是完整一周，周一起头）。
+    private var weeks: [[Date?]] {
+        let calendar = Calendar.chinaCalendar
+        let today = Date()
+        let span: Int
+        switch range {
+        case .week: span = 7
+        case .month: span = 31
+        case .quarter: span = 90
+        case .all: span = 182
+        }
+        guard let start = calendar.date(byAdding: .day, value: -(span - 1), to: today) else { return [] }
+
+        // 回退到那一周的周一，列才不会错位
+        let weekdayIndex = (calendar.component(.weekday, from: start) + 5) % 7
+        guard let gridStart = calendar.date(byAdding: .day, value: -weekdayIndex, to: start) else { return [] }
+
+        var columns: [[Date?]] = []
+        var cursor = gridStart
+        while cursor <= today {
+            var column: [Date?] = []
+            for _ in 0..<7 {
+                column.append(cursor <= today ? cursor : nil)
+                guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+                cursor = next
+            }
+            columns.append(column)
+        }
+        return columns
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: gap) {
+                    ForEach(Array(weeks.enumerated()), id: \.offset) { _, column in
+                        VStack(spacing: gap) {
+                            ForEach(Array(column.enumerated()), id: \.offset) { _, date in
+                                cellView(for: date)
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+            // 从右往左看更符合「最近的在手边」，默认停在最新的一周
+            .defaultScrollAnchor(.trailing)
+
+            legend
+        }
+        .frame(height: cell * 7 + gap * 6 + 30)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("逐日盈亏方格图，共 \(byDay.count) 天有记录")
+    }
+
+    @ViewBuilder
+    private func cellView(for date: Date?) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 3, style: .continuous)
+        if let date, let net = byDay[DateText.day(date)] {
+            shape
+                .fill(color(for: net))
+                .frame(width: cell, height: cell)
+        } else if date != nil {
+            shape
+                .fill(Color.primary.opacity(0.06))
+                .frame(width: cell, height: cell)
+        } else {
+            Color.clear.frame(width: cell, height: cell)
+        }
+    }
+
+    /// 赚的日子偏绿、亏的日子偏红，金额越大越浓。
+    /// 最低透明度留 0.28，否则小额那天几乎和空格子分不出来。
+    private func color(for net: Double) -> Color {
+        let intensity = 0.28 + 0.72 * Swift.min(abs(net) / scale, 1)
+        return (net >= 0 ? Palette.profit : Palette.loss).opacity(intensity)
+    }
+
+    private var legend: some View {
+        HStack(spacing: 6) {
+            Text("亏")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            ForEach([1.0, 0.55, 0.25], id: \.self) { level in
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(Palette.loss.opacity(0.28 + 0.72 * level))
+                    .frame(width: 9, height: 9)
+            }
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+                .frame(width: 9, height: 9)
+            ForEach([0.25, 0.55, 1.0], id: \.self) { level in
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(Palette.profit.opacity(0.28 + 0.72 * level))
+                    .frame(width: 9, height: 9)
+            }
+            Text("赚")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            if let best = days.filter({ $0.count > 0 }).max(by: { $0.net < $1.net }), best.net > 0 {
+                Text("最好的一天 \(MoneyText.format(best.net))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
 }
+
+// MARK: - 花费占比
+
+/// 一条占比色带 + 明细。金额和百分比都直接写出来，不用去比柱子长短。
+struct SpendBreakdown: View {
+    let items: [GameSpend]
+    let total: Double
+    /// 明细最多列几行，其余并进「其他」。
+    var limit: Int = 4
+
+    private var visible: [GameSpend] { Array(items.prefix(limit)) }
+    private var otherCost: Double {
+        items.dropFirst(limit).reduce(0) { $0 + $1.cost }
+    }
+
+    private func share(_ cost: Double) -> Double {
+        total > 0 ? cost / total : 0
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            GeometryReader { proxy in
+                HStack(spacing: 2) {
+                    ForEach(items) { item in
+                        Capsule()
+                            .fill(item.game.tint)
+                            .frame(width: Swift.max(proxy.size.width * share(item.cost) - 2, 3))
+                    }
+                }
+            }
+            .frame(height: 8)
+
+            VStack(spacing: 7) {
+                ForEach(visible) { item in
+                    row(color: item.game.tint,
+                        label: item.game.label,
+                        detail: "\(item.count) 注",
+                        cost: item.cost)
+                }
+                if otherCost > 0 {
+                    row(color: .secondary,
+                        label: "其他 \(items.count - limit) 个彩种",
+                        detail: "",
+                        cost: otherCost)
+                }
+            }
+        }
+    }
+
+    private func row(color: Color, label: String, detail: String, cost: Double) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            Text(label)
+                .font(.footnote)
+                .lineLimit(1)
+            if !detail.isEmpty {
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Text(String(format: "%.0f%%", share(cost) * 100))
+                .font(.caption2.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            Text(MoneyText.format(cost))
+                .font(.footnote.weight(.semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .frame(minWidth: 62, alignment: .trailing)
+        }
+    }
+}
+
+// MARK: - 开奖卡
 
 /// 首页轮播里的一张开奖卡。
 struct DrawCard: View {
     let game: GameKey
     let draw: Draw?
+    /// 这个彩种今天开奖。原来「今日开奖」是页面顶部单独一行标签，
+    /// 和它描述的卡片隔得很远；写进卡片里既更省地方也更好懂。
+    var opensToday: Bool = false
+
+    /// 首页每个号码区最多画 8 颗球。快乐8 一期开 20 个，
+    /// 全画出来要么撑爆卡片要么缩到看不清。
+    private let ballLimit = 8
+
+    private var firstPrize: PrizeEntry? {
+        guard let entry = draw?.firstPrize, entry.winningCount > 0 || entry.amount > 0 else { return nil }
+        return entry
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(game.tint)
-                    .frame(width: 8, height: 8)
-                Text(game.label)
-                    .font(.headline)
-                Spacer(minLength: 8)
-                if let draw {
-                    Text("第 \(draw.expect) 期 · \(DateText.monthDay(draw.openDate))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            header
+
+            // 有一等奖信息的卡片下方多一行；没有的（比如快乐8）就让号码球
+            // 在剩下的空间里上下居中，两种卡片切换时才不会一高一低。
+            Spacer(minLength: 8)
 
             if let draw {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    DrawNumbersView(draw: draw, size: 32)
-                }
-                .scrollClipDisabled()
-
-                if let first = draw.firstPrize {
-                    HStack(spacing: 8) {
-                        Text("一等奖 \(first.winningCount) 注")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if first.amount > 0 {
-                            Text(MoneyText.compactYuan(first.amount) + "/注")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(game.tint)
-                        }
-                    }
-                }
+                DrawNumbersView(draw: draw, size: 33, limit: ballLimit)
             } else {
                 Text("暂无开奖数据")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 64)
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
-            Spacer(minLength: 0)
+
+            Spacer(minLength: 8)
+
+            if let firstPrize {
+                prizeStrip(firstPrize)
+            }
         }
+        .frame(maxHeight: .infinity)
         .contentCard()
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(game.tint)
+                .frame(width: 8, height: 8)
+            Text(game.label)
+                .font(.headline)
+
+            if opensToday {
+                Text("今日开奖")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Palette.live)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Palette.live.opacity(0.14), in: Capsule())
+            }
+
+            Spacer(minLength: 8)
+            if let draw {
+                Text("第 \(draw.expect) 期 · \(DateText.monthDay(draw.openDate))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+        }
+    }
+
+    /// 一等奖那一行。原来是两段灰色小字，信息密度最高的「单注奖金」
+    /// 完全没有被强调出来。
+    private func prizeStrip(_ entry: PrizeEntry) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "trophy.fill")
+                .font(.caption2)
+                .foregroundStyle(game.tint)
+            Text("一等奖")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("\(entry.winningCount) 注")
+                .font(.caption.weight(.medium))
+                .monospacedDigit()
+            Spacer(minLength: 8)
+            if entry.amount > 0 {
+                Text(MoneyText.compactYuan(entry.amount))
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .monospacedDigit()
+                    .foregroundStyle(game.tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text("/注")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, 10)
     }
 }

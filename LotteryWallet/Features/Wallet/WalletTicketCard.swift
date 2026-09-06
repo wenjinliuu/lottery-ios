@@ -16,8 +16,11 @@ struct WalletTicketCard: View {
     @Environment(DrawStore.self) private var drawStore
     @State private var isDeleteConfirmPresented = false
 
+    /// 收起时画几注。5 注以内的票**一律全展开** —— 大多数票就是 1–5 注，
+    /// 为了它们做一次折叠交互纯属多余，用户还得多点一下才能看全自己的号码。
+    private static let collapsedLineLimit = 5
     /// 展开时最多画这么多注。复式一张票可以到 2000 注，
-    /// 全画出来就是 2000 行、每行一个横向 ScrollView，点开的一瞬间主线程直接停住。
+    /// 全画出来就是 2000 行，点开的一瞬间主线程直接停住。
     private static let expandedLineLimit = 50
 
     private var game: GameKey { batch.game }
@@ -26,8 +29,12 @@ struct WalletTicketCard: View {
         return drawStore.draw(for: game, expect: first.targetExpect)
     }
 
+    /// 5 注以内没有「折叠」这个状态，点按也不做任何事。
+    private var isCollapsible: Bool { batch.records.count > Self.collapsedLineLimit }
+
     private var visibleRecords: [TicketRecord] {
-        Array(batch.records.prefix(isExpanded ? Self.expandedLineLimit : 2))
+        let limit = isExpanded ? Self.expandedLineLimit : Self.collapsedLineLimit
+        return Array(batch.records.prefix(limit))
     }
 
     /// 收起 / 展开状态下没画出来的注数。
@@ -47,9 +54,11 @@ struct WalletTicketCard: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture(perform: onToggle)
+        .onTapGesture { if isCollapsible { onToggle() } }
         .accessibilityElement(children: .contain)
-        .accessibilityAction(named: isExpanded ? "收起" : "展开", onToggle)
+        .accessibilityAction(named: isExpanded ? "收起" : "展开") {
+            if isCollapsible { onToggle() }
+        }
         .contextMenu {
             Button("复制号码", systemImage: "doc.on.doc") { copyNumbers() }
             Button("删除这张票", systemImage: "trash", role: .destructive) {
@@ -77,9 +86,9 @@ struct WalletTicketCard: View {
             }
             Spacer(minLength: 8)
             StatusChip(status: batch.status)
-            // 整张卡片可以点开，但一张只有一两注的票上没有任何可点提示。
-            // 补一个箭头，展开 / 收起状态也才看得出来。
-            if batch.records.count > 2 {
+            // 只有真的能折叠的票才给箭头。5 注以内的票本来就全展开，
+            // 挂个点不动的箭头反而是误导。
+            if isCollapsible {
                 Image(systemName: "chevron.down")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.tertiary)
@@ -138,16 +147,15 @@ struct WalletTicketCard: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                TicketNumbersView(
-                    game: game,
-                    ticket: record.ticket,
-                    matched: matched,
-                    size: 27,
-                    dimUnmatched: !matched.isEmpty
-                )
-            }
-            .scrollClipDisabled()
+            // 不再套横向 ScrollView：号码放不下就自动缩小球径，
+            // 一行一个滚动视图既卡又让人以为号码被裁了。
+            TicketNumbersView(
+                game: game,
+                ticket: record.ticket,
+                matched: matched,
+                size: 27,
+                dimUnmatched: !matched.isEmpty
+            )
 
             Spacer(minLength: 0)
 
@@ -173,10 +181,7 @@ struct WalletTicketCard: View {
                     Text("开奖号码")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        DrawNumbersView(draw: draw, size: 23)
-                    }
-                    .scrollClipDisabled()
+                    DrawNumbersView(draw: draw, size: 23)
                 }
             } else {
                 Text("等待开奖")

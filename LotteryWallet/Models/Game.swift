@@ -127,12 +127,23 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         return Int(playMode) ?? section.count
     }
 
-    /// 开奖号的号码区定义，多数与投注票相同，七乐彩多一个特别号。
+    /// 开奖号的号码区定义。
+    ///
+    /// 注意数字型彩种：`Draw.convertNumbers` 把开奖数字统一存进 `.nums`，
+    /// 而投注票用的是 `.nums3` / `.nums5`。两边键名不一致的后果是
+    /// 首页的排列3、排列5、福彩3D 卡片上**一颗球都画不出来**。
+    /// 开奖号这一侧必须按仓库实际写入的键来声明。
     var drawSections: [GameSection] {
         switch self {
         case .qlc:
             [GameSection(key: .nums7, label: "基本号", count: 7, color: .yellow, range: 1...30),
              GameSection(key: .special, label: "特别号", count: 1, color: .k8orange, range: 1...30)]
+        case .fc3d:
+            [GameSection(key: .nums, label: "号码", count: 3, color: .fc3d, range: 0...9)]
+        case .pl3:
+            [GameSection(key: .nums, label: "号码", count: 3, color: .plum, range: 0...9)]
+        case .pl5:
+            [GameSection(key: .nums, label: "号码", count: 5, color: .plum, range: 0...9)]
         default:
             sections
         }

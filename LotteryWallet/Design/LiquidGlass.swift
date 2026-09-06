@@ -129,41 +129,56 @@ struct SecondaryGlassButton: ButtonStyle {
 ///
 /// 两个页面必须用同一个组件：早期两边各写一份，结果扫描和添加的**左右位置、
 /// 直径、字号全都是反的**，切个标签页手就按错。
+///
+/// 形状是一枚**药丸**而不是两个孤立的圆：两个动作本来就是一组
+/// （都是「往票夹里加一张票」），装在同一块玻璃里读起来是一个部件，
+/// 也和系统标签栏那枚悬浮胶囊形成呼应。
 struct FloatingActionButtons: View {
     var onScan: () -> Void
     var onAdd: () -> Void
 
-    @Namespace private var glassNamespace
-
     var body: some View {
-        GlassGroup(spacing: 12) {
-            HStack(spacing: 12) {
-                Button(action: onScan) {
-                    Image(systemName: "camera.viewfinder")
-                        .font(.title3.weight(.semibold))
-                        .frame(width: 52, height: 52)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
-                .glassCircle()
-                .glassMorph(id: "scan", in: glassNamespace)
-                .accessibilityLabel("扫描纸质彩票")
-
-                Button(action: onAdd) {
-                    Image(systemName: "plus")
-                        .font(.title2.weight(.semibold))
-                        .frame(width: 56, height: 56)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Palette.onAccent)
-                .background(Color.accentColor, in: Circle())
-                .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
-                .glassMorph(id: "add", in: glassNamespace)
-                .accessibilityLabel("手动录入彩票")
+        HStack(spacing: 0) {
+            Button(action: onScan) {
+                Image(systemName: "camera.viewfinder")
+                    .font(.system(size: 21, weight: .semibold))
+                    .frame(width: 54, height: 54)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(PressableIcon())
+            .foregroundStyle(Color.accentColor)
+            .accessibilityLabel("扫描纸质彩票")
+
+            Capsule()
+                .fill(Palette.separator)
+                .frame(width: 1, height: 22)
+
+            Button(action: onAdd) {
+                Image(systemName: "plus")
+                    .font(.system(size: 23, weight: .bold))
+                    .frame(width: 54, height: 54)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableIcon())
+            .foregroundStyle(Color.accentColor)
+            .accessibilityLabel("手动录入彩票")
         }
-        .padding(.trailing, 18)
-        .padding(.bottom, 22)
+        .glassPill()
+        .shadow(color: .black.opacity(0.16), radius: 14, y: 5)
+        .padding(.trailing, 16)
+        .padding(.bottom, 18)
+    }
+}
+
+/// 图标按钮的按下反馈。
+/// Apple 的第一条规则就是「在 pointer-down 的那一刻就给反馈」——
+/// 等到抬手才有反应，界面就是死的。
+struct PressableIcon: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.9 : 1)
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .animation(.spring(duration: 0.22, bounce: 0), value: configuration.isPressed)
     }
 }
 

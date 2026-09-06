@@ -106,10 +106,8 @@ struct DrawHistoryRow: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                DrawNumbersView(draw: draw, size: 28)
-            }
-            .scrollClipDisabled()
+            // 往期这里要看全号码，所以不限制颗数，只让球径自适应缩小
+            DrawNumbersView(draw: draw, size: 28)
             if let first = draw.firstPrize, first.winningCount > 0 {
                 Text("一等奖 \(first.winningCount) 注"
                      + (first.amount > 0 ? " · \(MoneyText.compactYuan(first.amount))/注" : ""))

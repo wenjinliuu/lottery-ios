@@ -12,6 +12,7 @@ struct RootView: View {
     @State private var isEntryPresented = false
     @State private var isScanPresented = false
     @State private var toast: ToastMessage?
+    @State private var celebrationTrigger = 0
 
     var body: some View {
         TabView(selection: $selection) {
@@ -29,7 +30,8 @@ struct RootView: View {
                 SettingsView()
             }
         }
-        .tabBarMinimizeBehavior(.onScrollDown)
+        // 标签栏常驻。滚动时收进左下角那个胶囊虽然是系统能力，
+        // 但三个标签本来就一直要用，收起来只是让人多点一次。
         .sheet(isPresented: $isEntryPresented) {
             EntryFlowView()
         }
@@ -37,8 +39,13 @@ struct RootView: View {
             TicketScanView()
         }
         .environment(\.showToast, ShowToastAction { message in
-            withAnimation(.spring(response: 0.36, dampingFraction: 0.8)) { toast = message }
+            withAnimation(.spring(duration: 0.36, bounce: 0.18)) { toast = message }
         })
+        .environment(\.celebrate, CelebrateAction { celebrationTrigger += 1 })
+        .overlay {
+            // 烟花压在所有内容之上、弹窗之下。只有中奖这种罕见时刻才会触发。
+            CelebrationView(trigger: celebrationTrigger)
+        }
         .overlay(alignment: .bottom) {
             if let toast {
                 ToastBanner(message: toast)
@@ -73,7 +80,10 @@ struct RootView: View {
         let service = RecordService(context: context, drawStore: drawStore)
         _ = try? service.reconcileInferredTargets()
         await Task.yield()
-        _ = try? service.checkAll()
+        // 冷启动自动核对出中奖，也应该看到烟花 —— 这正是用户最想被告知的一刻
+        if let outcome = try? service.checkAll(), outcome.won > 0 {
+            celebrationTrigger += 1
+        }
     }
 }
 
@@ -125,5 +135,24 @@ extension EnvironmentValues {
     var showToast: ShowToastAction {
         get { self[ShowToastKey.self] }
         set { self[ShowToastKey.self] = newValue }
+    }
+}
+
+// MARK: - 庆祝
+
+/// 放一次中奖烟花。和 `showToast` 一样挂在环境里，页面不必层层传闭包。
+struct CelebrateAction {
+    let handler: () -> Void
+    func callAsFunction() { handler() }
+}
+
+private struct CelebrateKey: EnvironmentKey {
+    static let defaultValue = CelebrateAction {}
+}
+
+extension EnvironmentValues {
+    var celebrate: CelebrateAction {
+        get { self[CelebrateKey.self] }
+        set { self[CelebrateKey.self] = newValue }
     }
 }

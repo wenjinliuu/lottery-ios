@@ -240,10 +240,7 @@ struct EntryFlowView: View {
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(.secondary)
                             .frame(width: 20)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            TicketNumbersView(game: game, ticket: ticket, size: 30)
-                        }
-                        .scrollClipDisabled()
+                        TicketNumbersView(game: game, ticket: ticket, size: 30)
                     }
                 }
             }

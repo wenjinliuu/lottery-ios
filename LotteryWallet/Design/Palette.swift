@@ -72,20 +72,20 @@ extension BallColor {
     var light: Color { Color(hex: lightHex) }
     var deep: Color { Color(hex: deepHex) }
 
-    /// 亮到白字读不清的两个彩种（七乐彩黄、七星彩特别号琥珀）。
+    /// 亮到白字对比度偏低的两个彩种（七乐彩黄、七星彩特别号琥珀）。
+    /// 现在不再换墨色，只用来给这两个球加一层描边把边缘勾出来。
     var isBright: Bool { self == .yellow || self == .amber }
 
-    /// 球面数字色。亮球用深墨，其余用白。
-    var ink: Color { isBright ? Color(hex: 0x3A2A06) : .white }
+    /// 球面数字色。八个彩种统一用白 —— 一致性比单个球的对比度重要，
+    /// 黄球和琥珀球靠 `rimStroke` 补边缘可辨识度。
+    var ink: Color { .white }
 
-    /// 球面填充。浅端只留在顶部当高光，0.72 之后就是深端 ——
-    /// 保证垂直居中的数字落在深端上，白字才有 3:1 以上的对比度。
+    /// 亮色球的边缘描边。深色球不需要。
+    var rimStroke: Color { isBright ? deep.opacity(0.55) : .clear }
+
+    /// 球面填充。浅端到深端的完整渐变，保持八个彩种鲜亮的视觉身份。
     var gradient: LinearGradient {
-        LinearGradient(
-            stops: [.init(color: light, location: 0), .init(color: deep, location: 0.72)],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+        LinearGradient(colors: [light, deep], startPoint: .top, endPoint: .bottom)
     }
 
     /// 当作文字 / 描边 / 小面积填充时的彩种色。
@@ -97,6 +97,13 @@ extension BallColor {
     var onAccentColor: Color {
         Color(light: isBright ? 0x2A1E04 : 0xFFFFFF, dark: 0x101014)
     }
+
+    /// 庆祝烟花用的一整套亮色，比球面色更跳。
+    static let festive: [Color] = [
+        Color(hex: 0xFF3B5C), Color(hex: 0xFFB020), Color(hex: 0x22D3A7),
+        Color(hex: 0x3B9BFF), Color(hex: 0xB86BFF), Color(hex: 0xFF7AC4),
+        Color(hex: 0x5BE1FF), Color(hex: 0xFFE066)
+    ]
 }
 
 extension GameKey {
@@ -108,13 +115,20 @@ extension GameKey {
 }
 
 /// 语义色。
+///
+/// 这一版刻意选**鲜亮**的取值而不是压暗到 WCAG 4.5:1 —— 上一版为了对比度
+/// 把绿和橙压成了墨绿、赭石，整个界面显得发闷。这几个色只出现在
+/// semibold 及以上的数字和图标上（大号粗体的阈值是 3:1），所以取
+/// 「亮到还能读」的那一档，深色模式再整体提亮。
 enum Palette {
-    /// 盈利。浅色模式要压暗到 4.5:1，深色模式要提亮。
-    static let profit = Color(light: 0x047857, dark: 0x34D399)
+    /// 盈利。
+    static let profit = Color(light: 0x00B884, dark: 0x3DE0A6)
     /// 亏损。
-    static let loss = Color(light: 0xDC2626, dark: 0xF87171)
+    static let loss = Color(light: 0xFF3B4E, dark: 0xFF7085)
     /// 提醒 / 待公布。
-    static let warning = Color(light: 0xB45309, dark: 0xFBBF24)
+    static let warning = Color(light: 0xFF9500, dark: 0xFFB340)
+    /// 「今日开奖」这类正向状态标记。
+    static let live = Color(light: 0x00B884, dark: 0x3DE0A6)
     /// 中性/待定。
     static let neutral = Color.secondary
     /// 压在系统强调色实心底上的前景色。

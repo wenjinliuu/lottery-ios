@@ -1,0 +1,121 @@
+import SwiftUI
+
+/// 中奖庆祝烟花，对齐 web 版核对出中奖时的那一片彩色绽放。
+///
+/// 动效预算的分配原则（Emil Kowalski / Apple 的说法是同一件事）：
+/// 每天要看几百次的东西一律不动效，只有**罕见的、值得庆祝的**时刻才配得上
+/// delight。中奖恰好是这一档 —— 一个用户可能几个月才见一次的瞬间。
+///
+/// 实现上刻意不引第三方粒子库：整个效果就是若干个 `Circle` 在
+/// 一次 `withAnimation` 里从中心飞出去，用 `Canvas` 一次性画完，
+/// 主线程只提交一次动画。
+struct CelebrationView: View {
+    /// 每次触发换一个新的 id，用来重启动画。
+    let trigger: Int
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var bursts: [Burst] = []
+
+    var body: some View {
+        ZStack {
+            ForEach(bursts) { burst in
+                BurstView(burst: burst, reduceMotion: reduceMotion)
+            }
+        }
+        .allowsHitTesting(false)
+        .task(id: trigger) {
+            guard trigger > 0 else { return }
+            bursts = Burst.random()
+            // 动画本身 1.5s 左右，留一点余量再清场，避免视图树里挂着死粒子
+            try? await Task.sleep(for: .seconds(2))
+            bursts = []
+        }
+    }
+}
+
+/// 一次绽放：一个随机位置、一组随机方向的粒子。
+struct Burst: Identifiable {
+    let id = UUID()
+    /// 相对于容器的位置，0...1。
+    let anchor: UnitPoint
+    /// 起爆延迟，让几处绽放错开而不是同时炸。
+    let delay: Double
+    let particles: [Particle]
+
+    struct Particle: Identifiable {
+        let id = UUID()
+        let color: Color
+        /// 飞出的角度（弧度）与距离。
+        let angle: Double
+        let distance: CGFloat
+        let size: CGFloat
+    }
+
+    /// 三到四处绽放，位置避开正中间那块通常压着文字的区域。
+    static func random() -> [Burst] {
+        (0..<Int.random(in: 3...4)).map { index in
+            Burst(
+                anchor: UnitPoint(x: .random(in: 0.12...0.88),
+                                  y: .random(in: 0.14...0.62)),
+                // 30–80ms 的错峰，比同时炸开自然得多
+                delay: Double(index) * Double.random(in: 0.05...0.13),
+                particles: (0..<Int.random(in: 10...14)).map { _ in
+                    Particle(
+                        color: BallColor.festive.randomElement() ?? .pink,
+                        angle: .random(in: 0..<(2 * .pi)),
+                        distance: .random(in: 46...104),
+                        size: .random(in: 5...9)
+                    )
+                }
+            )
+        }
+    }
+}
+
+private struct BurstView: View {
+    let burst: Burst
+    let reduceMotion: Bool
+
+    @State private var progress: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { proxy in
+            let origin = CGPoint(x: proxy.size.width * burst.anchor.x,
+                                 y: proxy.size.height * burst.anchor.y)
+            ZStack {
+                ForEach(burst.particles) { particle in
+                    Circle()
+                        .fill(particle.color)
+                        .frame(width: particle.size, height: particle.size)
+                        // 从 0.6 起步而不是 0：现实里没有东西是从「无」冒出来的，
+                        // 从一个已经看得见的尺寸放大出去才像真的炸开。
+                        .scaleEffect(0.6 + progress * 0.4)
+                        .opacity(opacity)
+                        .position(
+                            x: origin.x + cos(particle.angle) * particle.distance * progress,
+                            y: origin.y + sin(particle.angle) * particle.distance * progress
+                                // 一点点重力，粒子飞到末段会往下坠
+                                + 26 * progress * progress
+                        )
+                }
+            }
+        }
+        .task {
+            guard !reduceMotion else {
+                // 减弱动效下不做位移，只留一次轻微的淡入淡出
+                withAnimation(.easeOut(duration: 0.25)) { progress = 0.12 }
+                return
+            }
+            try? await Task.sleep(for: .seconds(burst.delay))
+            // 爆开是一次带冲量的运动：响应快、几乎不回弹，
+            // 靠 opacity 收尾而不是让粒子弹回来。
+            withAnimation(.spring(duration: 0.9, bounce: 0.18)) { progress = 1 }
+        }
+    }
+
+    /// 前 20% 全不透明，之后线性淡出。
+    private var opacity: Double {
+        guard progress > 0.2 else { return 1 }
+        return Double(1 - (progress - 0.2) / 0.8)
+    }
+}

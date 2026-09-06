@@ -9,6 +9,7 @@ struct TicketScanView: View {
     @Environment(\.modelContext) private var context
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.showToast) private var showToast
+    @Environment(\.celebrate) private var celebrate
 
     @State private var stage: Stage = .intro
     @State private var isCameraPresented = false
@@ -195,14 +196,11 @@ struct TicketScanView: View {
                                     .monospacedDigit()
                                     .foregroundStyle(.secondary)
                                     .frame(width: 20)
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    TicketNumbersView(
-                                        game: game,
-                                        ticket: Ticket(numbers: ticket.numbers),
-                                        size: 30
-                                    )
-                                }
-                                .scrollClipDisabled()
+                                TicketNumbersView(
+                                    game: game,
+                                    ticket: Ticket(numbers: ticket.numbers),
+                                    size: 30
+                                )
                                 Spacer(minLength: 0)
                                 Button {
                                     withAnimation(.easeOut(duration: 0.18)) {
@@ -327,8 +325,9 @@ struct TicketScanView: View {
                              multiple: editedMultiple,
                              target: target,
                              source: "ticket_scan")
-            _ = try? service.checkAll()
+            let checked = try? service.checkAll()
             showToast("已导入 \(tickets.count) 注", symbol: "checkmark.seal.fill")
+            if let checked, checked.won > 0 { celebrate() }
             dismiss()
         } catch {
             errorText = "导入失败：\(error.localizedDescription)"

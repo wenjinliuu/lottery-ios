@@ -9,6 +9,7 @@ struct WalletView: View {
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.modelContext) private var context
     @Environment(\.showToast) private var showToast
+    @Environment(\.celebrate) private var celebrate
     @Query(sort: \TicketRecord.createdAt, order: .reverse) private var records: [TicketRecord]
 
     @State private var filter: WalletFilter = .all
@@ -20,6 +21,18 @@ struct WalletView: View {
     /// 筛选结果也存下来。放在 body 里当计算属性的话，每帧都要把全部电子票过一遍。
     @State private var visibleBatches: [TicketBatch] = []
 
+    /// 首屏只画这么多张。一张电子票是一整块带号码球的卡片，
+    /// 几十上百张一次性铺开，进票夹那一下明显要卡。
+    static let previewLimit = 10
+
+    private var previewBatches: [TicketBatch] {
+        Array(visibleBatches.prefix(Self.previewLimit))
+    }
+
+    private var overflowCount: Int {
+        Swift.max(visibleBatches.count - Self.previewLimit, 0)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -28,14 +41,10 @@ struct WalletView: View {
                     if visibleBatches.isEmpty {
                         emptyState
                     } else {
-                        ForEach(visibleBatches) { batch in
-                            WalletTicketCard(
-                                batch: batch,
-                                isExpanded: expandedBatches.contains(batch.id),
-                                onToggle: { toggle(batch) },
-                                onDelete: { delete(batch) }
-                            )
+                        ForEach(previewBatches) { batch in
+                            card(for: batch)
                         }
+                        if overflowCount > 0 { moreButton }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -69,6 +78,45 @@ struct WalletView: View {
             .task(id: RecordsToken(records)) { rebuild() }
             .onChange(of: filter) { _, _ in applyFilter() }
         }
+    }
+
+    private func card(for batch: TicketBatch) -> some View {
+        WalletTicketCard(
+            batch: batch,
+            isExpanded: expandedBatches.contains(batch.id),
+            onToggle: { toggle(batch) },
+            onDelete: { delete(batch) }
+        )
+    }
+
+    /// 首屏之外的票走一个单独的完整列表页，而不是在首页无限往下堆。
+    private var moreButton: some View {
+        NavigationLink {
+            WalletAllTicketsView(
+                batches: visibleBatches,
+                title: filter == .all ? "全部电子票" : filter.label,
+                expandedBatches: $expandedBatches,
+                onDelete: delete
+            )
+        } label: {
+            HStack(spacing: 6) {
+                Text("查看全部 \(visibleBatches.count) 张")
+                    .font(.subheadline.weight(.semibold))
+                Text("还有 \(overflowCount) 张")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
+            .background(Palette.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 2)
     }
 
     private func rebuild() {
@@ -147,7 +195,7 @@ struct WalletView: View {
     // MARK: - 动作
 
     private func toggle(_ batch: TicketBatch) {
-        withAnimation(.easeOut(duration: 0.22)) {
+        withAnimation(.spring(duration: 0.28, bounce: 0)) {
             if expandedBatches.contains(batch.id) {
                 expandedBatches.remove(batch.id)
             } else {
@@ -174,6 +222,8 @@ struct WalletView: View {
             if !silent { showToast("核对失败", symbol: "exclamationmark.triangle") }
             return
         }
+        // 中奖是这个 App 里最值得庆祝的一刻，静默刷新也要放烟花
+        if outcome.won > 0 { celebrate() }
         guard !silent else { return }
         if outcome.checked == 0 {
             showToast("暂无可核对的新开奖")
@@ -182,6 +232,43 @@ struct WalletView: View {
         } else {
             showToast("已核对 \(outcome.checked) 注")
         }
+    }
+}
+
+/// 完整电子票列表。票夹首屏只放前 10 张，其余在这里翻。
+struct WalletAllTicketsView: View {
+    let batches: [TicketBatch]
+    let title: String
+    @Binding var expandedBatches: Set<String>
+    let onDelete: (TicketBatch) -> Void
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(batches) { batch in
+                    WalletTicketCard(
+                        batch: batch,
+                        isExpanded: expandedBatches.contains(batch.id),
+                        onToggle: {
+                            withAnimation(.spring(duration: 0.28, bounce: 0)) {
+                                if expandedBatches.contains(batch.id) {
+                                    expandedBatches.remove(batch.id)
+                                } else {
+                                    expandedBatches.insert(batch.id)
+                                }
+                            }
+                        },
+                        onDelete: { onDelete(batch) }
+                    )
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+            .padding(.bottom, 40)
+        }
+        .background(Palette.canvas)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

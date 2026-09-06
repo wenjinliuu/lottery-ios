@@ -13,10 +13,6 @@ struct StatsView: View {
     @State private var years: [Int] = []
     @State private var isShowingAllDays = false
 
-    /// 「每日明细」默认最多画这么多行。全年有记录的日子可以有三百多天，
-    /// 一次性把三百多行塞进一个非惰性的 VStack，滚到这里就会明显卡一下。
-    private static let dayPreviewLimit = 60
-
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 16) {
@@ -100,21 +96,40 @@ struct StatsView: View {
     }
 
     private var gameShareCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "彩种花费占比", subtitle: "共 \(stats.ticketCount) 注")
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeader(title: "彩种花费占比", subtitle: "共 \(stats.ticketCount) 注 · \(MoneyText.format(stats.cost))")
             if stats.byGame.isEmpty {
                 emptyHint
             } else {
+                // 环形图只能看出扇区大小，读者还得对着图例猜金额。
+                // 中间补上总额，下面的明细直接写金额和百分比 ——
+                // 明细占满整行才放得下「彩种 + 注数 + 占比 + 金额」四段。
                 Chart(stats.byGame) { item in
                     SectorMark(angle: .value("花费", item.cost),
-                               innerRadius: .ratio(0.6),
+                               innerRadius: .ratio(0.68),
                                angularInset: 1.5)
                         .foregroundStyle(by: .value("彩种", item.game.label))
                         .cornerRadius(4)
                 }
                 .chartForegroundStyleScale(domain: stats.byGame.map(\.game.label),
                                            range: stats.byGame.map(\.game.tint))
-                .frame(height: 200)
+                .chartLegend(.hidden)
+                .frame(height: 156)
+                .overlay {
+                    VStack(spacing: 1) {
+                        Text("总花费")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(MoneyText.compactYuan(stats.cost))
+                            .font(.system(.title3, design: .rounded, weight: .bold))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .padding(.horizontal, 8)
+                }
+
+                SpendBreakdown(items: stats.byGame, total: stats.cost, limit: 8)
             }
         }
         .contentCard()
@@ -145,48 +160,118 @@ struct StatsView: View {
         .contentCard()
     }
 
+    /// 「有记录的日子」。
+    ///
+    /// 原来是一行一天的清单，一个月三十行、一整年三百多行，密密麻麻还看不出重点。
+    /// 现在默认只给一条概览 + 最值得看的几天（赚最多和亏最多），
+    /// 想看全部再展开成清单。
     private var calendarCard: some View {
-        let visible = isShowingAllDays ? stats.byDay : Array(stats.byDay.prefix(Self.dayPreviewLimit))
-        let hidden = stats.byDay.count - visible.count
-        return VStack(alignment: .leading, spacing: 4) {
-            SectionHeader(title: "每日明细",
-                          subtitle: month == nil ? "全年有记录的日子" : "\(month ?? 0) 月")
-                .padding(.bottom, 8)
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(
+                title: "有记录的日子",
+                subtitle: "\(stats.byDay.count) 天" + (month == nil ? " · \(year) 全年" : " · \(month ?? 0) 月"),
+                action: stats.byDay.isEmpty ? nil : { isShowingAllDays.toggle() },
+                actionLabel: isShowingAllDays ? "收起" : "全部"
+            )
+
             if stats.byDay.isEmpty {
                 emptyHint
+            } else if isShowingAllDays {
+                dayList(stats.byDay)
             } else {
-                ForEach(visible) { day in
-                    HStack(spacing: 8) {
-                        Text(DateText.monthDay(day.date))
-                            .font(.subheadline)
-                            .monospacedDigit()
-                        Spacer(minLength: 4)
-                        Text("\(day.count) 注")
-                            .font(.caption)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                        Text(MoneyText.format(day.net))
-                            .font(.subheadline.weight(.medium))
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                            .foregroundStyle(Palette.profitColor(day.net))
-                            .frame(width: 96, alignment: .trailing)
-                    }
-                    .padding(.vertical, 9)
-                    if day.id != visible.last?.id {
-                        Divider()
-                    }
-                }
-                if hidden > 0 {
-                    Divider()
-                    Button("展开其余 \(hidden) 天") { isShowingAllDays = true }
-                        .font(.subheadline)
-                        .padding(.top, 10)
-                }
+                dayDigest
             }
         }
         .contentCard()
+    }
+
+    /// 概览：赚钱 / 亏钱 / 打平各多少天，再点出最好和最差的一天。
+    @ViewBuilder
+    private var dayDigest: some View {
+        let winning = stats.byDay.filter { $0.net > 0 }
+        let losing = stats.byDay.filter { $0.net < 0 }
+        let best = winning.max { $0.net < $1.net }
+        let worst = losing.min { $0.net < $1.net }
+
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                dayTally("赚钱", winning.count, Palette.profit)
+                dayTally("亏钱", losing.count, Palette.loss)
+                dayTally("打平", stats.byDay.count - winning.count - losing.count, .secondary)
+            }
+
+            if best != nil || worst != nil {
+                VStack(spacing: 8) {
+                    if let best { highlight("最好的一天", best) }
+                    if let worst { highlight("最差的一天", worst) }
+                }
+            }
+
+            // 一条按天排开的迷你柱，能看出节奏但不占地方
+            DayRhythmStrip(days: stats.byDay)
+        }
+    }
+
+    private func dayTally(_ title: String, _ count: Int, _ tint: Color) -> some View {
+        VStack(spacing: 2) {
+            Text("\(count)")
+                .font(.system(.title3, design: .rounded, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(tint)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 9)
+        .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private func highlight(_ title: String, _ day: ProfitDay) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(DateText.monthDay(day.date))
+                .font(.caption.weight(.medium))
+                .monospacedDigit()
+            Text("\(day.count) 注")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(MoneyText.format(day.net))
+                .font(.subheadline.weight(.bold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .foregroundStyle(Palette.profitColor(day.net))
+        }
+    }
+
+    private func dayList(_ days: [ProfitDay]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(days) { day in
+                HStack(spacing: 8) {
+                    Text(DateText.monthDay(day.date))
+                        .font(.subheadline)
+                        .monospacedDigit()
+                    Spacer(minLength: 4)
+                    Text("\(day.count) 注")
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                    Text(MoneyText.format(day.net))
+                        .font(.subheadline.weight(.medium))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .foregroundStyle(Palette.profitColor(day.net))
+                        .frame(width: 96, alignment: .trailing)
+                }
+                .padding(.vertical, 9)
+                if day.id != days.last?.id { Divider() }
+            }
+        }
     }
 
     private var emptyHint: some View {
@@ -195,5 +280,51 @@ struct StatsView: View {
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 22)
+    }
+}
+
+/// 按天排开的迷你柱条。零轴在中间，往上是赚往下是亏。
+/// 只表达节奏和幅度，具体数字看上面的概览或展开清单。
+struct DayRhythmStrip: View {
+    let days: [ProfitDay]
+
+    private var scale: Double {
+        Swift.max(days.map(\.net.magnitude).max() ?? 0, 1)
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let count = Swift.max(days.count, 1)
+            let width = Swift.max((proxy.size.width - Double(count - 1) * 2) / Double(count), 1.5)
+            let half = proxy.size.height / 2
+            HStack(alignment: .center, spacing: 2) {
+                ForEach(days) { day in
+                    let ratio = Swift.min(abs(day.net) / scale, 1)
+                    // 留 2pt 的最小高度，打平的那天也要看得见
+                    let height = Swift.max(half * ratio, 2)
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        if day.net >= 0 {
+                            Capsule().fill(Palette.profit).frame(height: height)
+                            Color.clear.frame(height: half)
+                        } else {
+                            Color.clear.frame(height: half)
+                            Capsule().fill(Palette.loss).frame(height: height)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .frame(width: width)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .center) {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.12))
+                    .frame(height: 0.5)
+            }
+        }
+        .frame(height: 52)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("每日盈亏节奏图，共 \(days.count) 天")
     }
 }
