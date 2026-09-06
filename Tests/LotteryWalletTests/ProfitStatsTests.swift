@@ -32,7 +32,7 @@ final class ProfitStatsTests: XCTestCase {
             entry("2026-03-05", cost: 2, prize: 6),
             entry("2026-03-06", cost: 2, prize: 0)
         ]
-        let series = ProfitStats.series(entries: entries, range: .week)
+        let series = ProfitStats.series(entries: entries, range: .half)
         XCTAssertEqual(series.days.count, 2)
         XCTAssertEqual(series.days.first?.count, 2)
         XCTAssertEqual(series.settledCount, 3)
@@ -92,5 +92,14 @@ final class ProfitStatsTests: XCTestCase {
         XCTAssertEqual(february.cost, 6)
         XCTAssertEqual(february.ticketCount, 2)
         XCTAssertEqual(february.byDay.count, 2)
+    }
+
+    /// 区间选项改过一轮（去掉近7天、90天改半年、新增一年）。
+    /// 这个断言是给下次改动兜底的 —— 上次删 `.week` 时忘了改测试，CI 才发现。
+    func testRangeOptions() {
+        XCTAssertEqual(ProfitRange.allCases, [.month, .half, .year, .all])
+        XCTAssertEqual(ProfitRange.half.gridSpan, 183)
+        XCTAssertEqual(ProfitRange.year.gridSpan, 365)
+        XCTAssertEqual(ProfitRange.month.label, "本月")
     }
 }
