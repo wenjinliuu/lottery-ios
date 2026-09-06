@@ -301,6 +301,163 @@ final class TicketTextParserTests: XCTestCase {
         XCTAssertEqual(result.tickets.map(\.issue), ["2026101", "2026102", "2026103"])
     }
 
+    // MARK: - 体彩单式票的圈码注序号
+
+    /// 大乐透单式票的行首是 **①②③**，不是福彩那样的 A./B./C.。
+    ///
+    /// 圈码在 Unicode 里是带数值的数字字符（`①` 的 numericValue 就是 1），
+    /// 会被当成一个前区号读进来 —— 前区变成 6 个号，整行判无效丢掉。
+    /// 这张票以前是**一注都进不来**。
+    func testDLTSingleWithCircledLineNumbers() {
+        let text = """
+        wenjin
+        体彩 超级大乐透
+        第 26089期 2026年08月08日开奖
+        110310-283661-111909-977872 410541 6ycSgw
+        单式票 追加投注2倍 合计18元
+        ① 12 15 17 24 33 + 04 12
+        ② 07 13 16 26 30 + 01 10
+        ③ 01 05 09 29 33 + 01 11
+        支付宝或微信扫码进入官方小程序
+        感谢您为公益事业贡献 6.48元
+        20-020689-101 00654 26/08/08 12:18:20
+        """
+        guard let ticket = TicketTextParser.parse(text).tickets.first else { return XCTFail("没解析出票") }
+        XCTAssertEqual(ticket.game, .dlt)
+        XCTAssertEqual(ticket.play, .single)
+        XCTAssertEqual(ticket.issue, "26089")
+        XCTAssertEqual(ticket.count, 3)
+        XCTAssertEqual(ticket.lines[0][.front], [12, 15, 17, 24, 33])
+        XCTAssertEqual(ticket.lines[0][.back], [4, 12])
+        XCTAssertEqual(ticket.lines[1][.front], [7, 13, 16, 26, 30])
+        XCTAssertEqual(ticket.lines[2][.front], [1, 5, 9, 29, 33])
+        XCTAssertEqual(ticket.lines[2][.back], [1, 11])
+        XCTAssertTrue(ticket.addOn, "「追加投注2倍」")
+        XCTAssertEqual(ticket.multiple, 2)
+        XCTAssertEqual(ticket.periods, 1, "「2倍」不能被当成期数")
+        // 3 注 × 3 元（追加）× 2 倍 = 18 元
+        assertMatchesPrintedTotal(ticket, 18)
+    }
+
+    /// 同一批样票的另外两张，号码不同、结构一样。
+    func testDLTSingleAddOnSamples() {
+        let samples: [(text: String, issue: String, front: [Int], back: [Int])] = [
+            ("""
+             体彩 超级大乐透
+             第 26087期 2026年08月03日开奖
+             110310-282261-111900-298308 059607 QyqjNQ
+             单式票 追加投注2倍 合计18元
+             ① 01 11 14 16 17 + 10 11
+             ② 03 04 10 12 17 + 07 09
+             ③ 03 07 09 15 17 + 09 11
+             感谢您为公益事业贡献 6.48元
+             """, "26087", [1, 11, 14, 16, 17], [10, 11]),
+            ("""
+             体彩 超级大乐透
+             第 26085期 2026年07月29日开奖
+             110310-281061-111891-295552 729610 Fy9gDQ
+             单式票 追加投注2倍 合计18元
+             ① 01 03 13 14 23 + 02 06
+             ② 10 15 16 26 35 + 06 09
+             ③ 08 22 27 30 35 + 08 12
+             感谢您为公益事业贡献 6.48元
+             """, "26085", [1, 3, 13, 14, 23], [2, 6])
+        ]
+        for sample in samples {
+            guard let ticket = TicketTextParser.parse(sample.text).tickets.first else {
+                return XCTFail("第 \(sample.issue) 期没解析出票")
+            }
+            XCTAssertEqual(ticket.issue, sample.issue)
+            XCTAssertEqual(ticket.count, 3, "第 \(sample.issue) 期注数不对")
+            XCTAssertEqual(ticket.lines[0][.front], sample.front)
+            XCTAssertEqual(ticket.lines[0][.back], sample.back)
+            XCTAssertTrue(ticket.addOn)
+            XCTAssertEqual(ticket.multiple, 2)
+            assertMatchesPrintedTotal(ticket, 18)
+        }
+    }
+
+    /// 福彩单式票：A/B/C 三注 + 每注 (3) 倍，D/E 是空注。
+    func testSSQSingleSamples() {
+        let samples: [(text: String, issue: String, red: [Int], blue: Int)] = [
+            ("""
+             wen
+             中国福利彩票 CHINA WELFARE LOTTERY
+             玩法: 双色球-单式 机号: 31130622
+             D33C-990B-B696-FD36-0878/28340987/4AB52
+             A.11 15 23 24 25 27-10 (3)
+             B.08 09 17 18 20 28-11 (3)
+             C.02 04 11 17 24 30-06 (3)
+             D.-- -- -- -- -- ----- (-)
+             E.-- -- -- -- -- ----- (-)
+             开奖期:2026089 26-08-04 合计18元
+             销售期:2026089-67 26-08-04 09:38:12
+             亭知路272-1号
+             感谢您为公益慈善事业贡献6.48元
+             """, "2026089", [11, 15, 23, 24, 25, 27], 10),
+            ("""
+             wen
+             中国福利彩票 CHINA WELFARE LOTTERY
+             玩法: 双色球-单式 机号:31130622
+             03C6-2000-87CF-8EA0-262D/76217677/1E911
+             A.20 22 26 28 29 33-07 (3)
+             B.03 05 11 17 23 25-06 (3)
+             C.01 05 07 12 19 21-07 (3)
+             D.-- -- -- -- -- ----- (-)
+             E.-- -- -- -- -- ----- (-)
+             开奖期:2026084 26-07-23 合计18元
+             销售期:2026084-122 26-07-23 11:46:53
+             亭知路272-1号
+             感谢您为公益慈善事业贡献6.48元
+             """, "2026084", [20, 22, 26, 28, 29, 33], 7)
+        ]
+        for sample in samples {
+            guard let ticket = TicketTextParser.parse(sample.text).tickets.first else {
+                return XCTFail("第 \(sample.issue) 期没解析出票")
+            }
+            XCTAssertEqual(ticket.game, .ssq)
+            XCTAssertEqual(ticket.issue, sample.issue)
+            XCTAssertEqual(ticket.count, 3, "D、E 是空注，不能算进来")
+            XCTAssertEqual(ticket.lines[0][.red], sample.red)
+            XCTAssertEqual(ticket.lines[0][.blue], [sample.blue])
+            XCTAssertEqual(ticket.multiple, 3)
+            XCTAssertFalse(ticket.addOn)
+            assertMatchesPrintedTotal(ticket, 18)
+        }
+    }
+
+    /// 五张样票的公益金都是面额的 36%（6.48 / 18），和首页那条统计口径一致。
+    func testWelfareShareMatchesPrintedAmount() {
+        XCTAssertEqual(18 * 0.36, 6.48, accuracy: 0.001)
+    }
+
+    /// 注序号只摘明确的形式，绝不摘裸的数字 —— 摘掉「11 15 23」开头那个 1
+    /// 会让整注红球全错。
+    func testDoesNotStripBareLeadingNumber() {
+        let text = """
+        玩法:双色球-单式
+        11 15 23 24 25 27-10
+        开奖期:2026089
+        合计2元
+        """
+        guard let ticket = TicketTextParser.parse(text).tickets.first else { return XCTFail("没解析出票") }
+        XCTAssertEqual(ticket.lines.first?[.red], [11, 15, 23, 24, 25, 27])
+    }
+
+    /// 行首的 `(1)` 是注序号，不是倍数 —— 倍数只认行尾那个括号。
+    func testLeadingParenthesisIsNotAMultiple() {
+        let text = """
+        体彩 超级大乐透
+        第 26089期
+        单式票 合计2元
+        (1) 12 15 17 24 33 + 04 12
+        """
+        guard let ticket = TicketTextParser.parse(text).tickets.first else { return XCTFail("没解析出票") }
+        XCTAssertEqual(ticket.lines.first?[.front], [12, 15, 17, 24, 33])
+        XCTAssertEqual(ticket.multiple, 1)
+        assertMatchesPrintedTotal(ticket, 2)
+    }
+
     // MARK: - 号码抽取本身
 
     /// 一位数的号码不能被吞掉 —— 蓝球复式经常印成 `1 2 3 … 9 10`。

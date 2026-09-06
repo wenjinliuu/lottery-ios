@@ -215,13 +215,26 @@ enum TicketTextParser {
 
     // MARK: - 单式行
 
-    /// `A.04 08 14 24 26 29-03 (3)` 这种一行一注的单式行。
+    /// 行首的注序号。
+    ///
+    /// 两家的打法不一样：福彩印 `A.` `B.` `C.`，体彩印 **`①` `②` `③`**。
+    /// 圈码在 Unicode 里是**带数值的数字字符**（`①` 的 numericValue 就是 1，
+    /// 类别是 Other_Number），所以 Swift 的 `wholeNumberValue` 会把它读成 1 ——
+    /// `① 12 15 17 24 33` 会变成六个前区号，整行当场被判无效丢掉。
+    /// 四张大乐透单式样票就是全军覆没在这一步。
+    ///
+    /// 这里只摘**明确带分隔符或本身就是圈码**的形式，绝不摘裸的数字：
+    /// `11 15 23…` 开头那个 1 一摘，红球就全错了。
+    private static let lineIndexPrefix =
+        "^\\s*(?:[A-Ea-e]\\s*[.。·:、)]|[①-⑮⒈-⒛]|[(（]\\s*\\d{1,2}\\s*[)）]|\\d{1,2}\\s*[.。、)])\\s*"
+
+    /// `A.04 08 14 24 26 29-03 (3)` / `① 12 15 17 24 33 + 04 12` 这种一行一注的单式行。
     private static func singleLine(_ line: String, game: GameKey) -> (numbers: NumberSet, multiple: Int?)? {
-        // 行首的 A–E 编号和行尾括号里的倍数都不是号码，先摘掉
+        // 行尾括号里的倍数和行首的注序号都不是号码，先摘掉
         let multiple = lineMultiple(line)
         var body = line.replacingOccurrences(of: "\\(\\s*[-—0-9OQDIloq|!]{1,3}\\s*\\)\\s*$",
                                              with: "", options: .regularExpression)
-        body = body.replacingOccurrences(of: "^\\s*[A-Ea-e]\\s*[.·:]\\s*", with: "", options: .regularExpression)
+        body = body.replacingOccurrences(of: lineIndexPrefix, with: "", options: .regularExpression)
         // 空注：`D.-- -- -- -- -- ----  (-)`
         guard body.contains(where: { $0.isNumber }) else { return nil }
 
@@ -247,16 +260,36 @@ enum TicketTextParser {
             second = Array(all.suffix(secondSection.count))
         }
 
+        // 兜底：正则没摘掉的注序号（OCR 把 ① 认成别的写法）会让号码多出一个。
+        // 多出来的那个必然在最前面，去掉之后剩下的能成一组合法号就采纳。
+        first = trimStray(first, to: firstSection)
+        second = trimStray(second, to: secondSection)
+
         guard first.count == firstSection.count, second.count == secondSection.count,
               first.allSatisfy(firstSection.range.contains),
               second.allSatisfy(secondSection.range.contains),
-              isAscendingUnique(first) else { return nil }
+              isAscendingUnique(first), isAscendingUnique(second) else { return nil }
 
         return (NumberSet([firstSection.key: first, secondSection.key: second]), multiple)
     }
 
+    /// 号码正好多出一个时，试着去掉头一个或最后一个，取能成立的那种。
+    private static func trimStray(_ values: [Int], to section: GameSection) -> [Int] {
+        guard values.count == section.count + 1 else { return values }
+        for candidate in [Array(values.dropFirst()), Array(values.dropLast())] {
+            if isAscendingUnique(candidate), candidate.allSatisfy(section.range.contains) {
+                return candidate
+            }
+        }
+        return values
+    }
+
+    /// 行尾括号里的倍数，比如 `(3)`。
+    ///
+    /// **必须锚在行尾。** 体彩的注序号有时会被打成 `(1)` 放在**行首**，
+    /// 不锚定的话第一注的倍数就被读成 1 了。
     private static func lineMultiple(_ line: String) -> Int? {
-        guard let match = firstMatch(in: line, pattern: "\\(\\s*([0-9OQDIloq|!]{1,2})\\s*\\)"),
+        guard let match = firstMatch(in: line, pattern: "\\(\\s*([0-9OQDIloq|!]{1,2})\\s*\\)\\s*$"),
               let text = match.groups.first else { return nil }
         return intValue(text)
     }
@@ -496,7 +529,14 @@ enum TicketTextParser {
         for line in lines {
             let isHeader = line.range(of: "玩法\\s*[:：]|中国福利彩票|超级大乐透|CHINA WELFARE|体彩",
                                       options: [.regularExpression, .caseInsensitive]) != nil
-            if isHeader || blocks.isEmpty {
+            // 票头只有在当前这块**已经有号码内容**时才另起一块。
+            //
+            // 一张票的抬头往往连着好几行都算票头：「中国福利彩票」一行、
+            // 「玩法:双色球-单式」又一行。无条件切的话它们会被拆成两块，
+            // 而带彩种名的那块因为没有数字被过滤掉，剩下的一块认不出彩种，
+            // 整张票就白扫了。
+            let currentHasNumbers = blocks.last?.contains { $0.contains(where: \.isNumber) } ?? false
+            if blocks.isEmpty || (isHeader && currentHasNumbers) {
                 blocks.append([line])
             } else {
                 blocks[blocks.count - 1].append(line)
