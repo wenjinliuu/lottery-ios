@@ -25,8 +25,27 @@ struct RootView: View {
                 WalletView()
             }
 
+            // 加号是标签栏里的**一个标签**，不是浮在旁边的东西。
+            //
+            // 上一版把它做成右下角一颗独立的玻璃圆，结果它和三个标签不在
+            // 一个层级上：菜单展开时那层遮罩会吞掉第一次点击，想回首页得点两下。
+            // 现在它就是第三个标签，和首页票夹设置在同一块玻璃、同一行。
+            // 它不承载页面 —— 选中的那一刻就把选择还回去，只把菜单弹起来。
+            Tab("添加", systemImage: "plus.circle.fill", value: MainTab.add) {
+                Color.clear
+            }
+
             Tab("设置", systemImage: "gearshape", value: MainTab.settings) {
                 SettingsView()
+            }
+        }
+        .onChange(of: selection) { previous, current in
+            if current == .add {
+                selection = previous == .add ? .home : previous
+                isActionMenuExpanded.toggle()
+            } else {
+                // 点任何一个真页面：立刻切过去，菜单同时收起
+                isActionMenuExpanded = false
             }
         }
         // 标签栏常驻。滚动时收进左下角那个胶囊虽然是系统能力，
@@ -34,19 +53,21 @@ struct RootView: View {
         //
         // 「扫描 / 录入」跟着标签栏走，不再由首页和票夹各挂一份悬浮胶囊：
         // 它是全局动作，两个页面各放一枚既重复又压内容。
-        .overlay {
+        // 遮罩只盖内容区，**不盖标签栏**。盖住的话点首页要点两下：
+        // 第一下被遮罩吃掉用来收菜单，第二下才切页面。
+        .overlay(alignment: .top) {
             if isActionMenuExpanded {
                 Color.black.opacity(0.001)
-                    .ignoresSafeArea()
+                    .ignoresSafeArea(edges: .top)
                     .onTapGesture { isActionMenuExpanded = false }
+                    .padding(.bottom, 72)
             }
         }
-        .overlay(alignment: .bottomTrailing) {
-            ExpandingActionButton(isExpanded: $isActionMenuExpanded,
-                                  onScan: { isScanPresented = true },
-                                  onAdd: { isEntryPresented = true })
-                .padding(.trailing, 16)
-                .padding(.bottom, 4)
+        .overlay(alignment: .bottom) {
+            ActionMenu(isExpanded: $isActionMenuExpanded,
+                       onScan: { isScanPresented = true },
+                       onAdd: { isEntryPresented = true })
+                .padding(.bottom, 8)
         }
         .sheet(isPresented: $isEntryPresented) {
             EntryFlowView()
@@ -119,7 +140,7 @@ struct RootView: View {
 }
 
 enum MainTab: Hashable {
-    case home, wallet, settings
+    case home, wallet, add, settings
 }
 
 // MARK: - 轻提示

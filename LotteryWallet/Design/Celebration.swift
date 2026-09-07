@@ -130,49 +130,64 @@ private struct BurstView: View {
 
 // MARK: - 中奖票上的常驻烟花
 
-/// 中奖彩票卡片上持续的一点光。
+/// 中奖彩票卡片上持续绽放的小烟花。
 ///
-/// 第一版是六个圆点各自放大淡出，效果很像加载动画 —— 因为圆点放大再消失
-/// 正是所有 loading spinner 的语言。烟花之所以是烟花，靠的是**从一点向外
-/// 迸开的一簇**，而不是单个点变大。
+/// 三版才调对：
+/// - 第一版圆点原地放大淡出 —— 那是 loading spinner 的语言，不是烟花。
+/// - 第二版改成从一点迸开的一簇，方向对了，但四处同时放、又快又小，
+///   看上去像静电噪点。
 ///
-/// 所以这一版改成小而密的一簇：每处四粒火星朝不同方向飞出去，飞的过程中
-/// 从亮到暗、从大到小，末尾还带一点下坠。一次只放一处，几处轮着来，
-/// 屏幕上永远只有四五粒在动 —— 票夹里同时十几张中奖票也不会拖慢。
+/// 这一版：
+/// 1. **有先后**。四朵各自独立，起爆时刻错开，而且每朵的间歇长短不同 ——
+///    它们会慢慢互相错开，永远凑不出一个固定的节拍。这就是「随机」的来源，
+///    而不是每帧摇一次骰子（那样很贵）。
+/// 2. **慢下来、放大**。单朵绽放 1.5 秒（原来 0.85），火星最大 5pt
+///    （原来 3.4），飞得也更远。慢和大才看得清是在「绽开」。
+/// 3. 一朵放完要静默好几秒。任何时刻屏幕上通常只有一朵在动。
 ///
-/// 预算控制得很紧：火星位置是**固定的**（不是每帧随机），动画交给
-/// CoreAnimation 的 `repeatForever`，提交一次之后主线程就不再参与。
+/// 时序用 `phaseAnimator` 表达：**等待 → 亮起 → 飞散**三相循环。
+/// `repeatForever` 做不到这件事 —— 它的周期就是动画本身的时长，
+/// 加 delay 只是推迟第一次，之后每 1.5 秒还是会重放一遍，四朵立刻挤在一起。
 struct TicketSparkleOverlay: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isAnimating = false
 
-    /// 一簇火星的起爆点。避开卡片正中间 —— 那里压着号码。
+    /// 一朵烟花：起爆点、起爆时刻、间歇、颜色和五粒火星各自的方向。
     private struct Burst: Identifiable {
         let id: Int
         let x: CGFloat
         let y: CGFloat
+        /// 第一次起爆前等多久。
         let delay: Double
+        /// 两次起爆之间的静默。刻意各不相同，好让四朵慢慢错开。
+        let rest: Double
         let colors: [BallColor]
+        /// 五粒火星的角度（弧度）。刻意不均分 —— 均分看着像齿轮。
+        let angles: [Double]
+        let spread: CGFloat
     }
 
-    private static let bursts: [Burst] = [
-        Burst(id: 0, x: 0.10, y: 0.17, delay: 0.0, colors: [.red, .yellow, .k8orange, .plum]),
-        Burst(id: 1, x: 0.91, y: 0.30, delay: 1.1, colors: [.blue, .plum, .fc3d, .yellow]),
-        Burst(id: 2, x: 0.22, y: 0.85, delay: 2.2, colors: [.yellow, .red, .amber, .blue]),
-        Burst(id: 3, x: 0.80, y: 0.80, delay: 3.3, colors: [.plum, .k8orange, .fc3d, .red])
-    ]
+    private static let burstDuration: Double = 1.5
 
-    /// 四个飞出方向，斜向铺开比正十字更像迸开
-    private static let angles: [Double] = [-0.9, -0.25, 0.35, 1.05]
-    private static let cycle: Double = 4.4
+    private static let bursts: [Burst] = [
+        Burst(id: 0, x: 0.11, y: 0.20, delay: 0.2, rest: 4.7,
+              colors: [.red, .yellow, .k8orange],
+              angles: [-2.5, -1.5, -0.4, 0.7, 2.0], spread: 26),
+        Burst(id: 1, x: 0.89, y: 0.30, delay: 1.7, rest: 5.3,
+              colors: [.blue, .plum, .fc3d],
+              angles: [-2.9, -1.9, -0.8, 0.5, 2.4], spread: 22),
+        Burst(id: 2, x: 0.24, y: 0.83, delay: 3.4, rest: 4.9,
+              colors: [.yellow, .amber, .red],
+              angles: [-2.2, -1.1, 0.2, 1.4, 2.7], spread: 28),
+        Burst(id: 3, x: 0.78, y: 0.78, delay: 5.1, rest: 5.8,
+              colors: [.plum, .k8orange, .blue],
+              angles: [-2.7, -1.3, 0.0, 1.1, 2.2], spread: 24)
+    ]
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
                 ForEach(Self.bursts) { burst in
-                    ForEach(Array(Self.angles.enumerated()), id: \.offset) { index, angle in
-                        spark(burst: burst, angle: angle, index: index, in: proxy.size)
-                    }
+                    BurstCluster(burst: burst, size: proxy.size, duration: Self.burstDuration)
                 }
             }
         }
@@ -180,31 +195,61 @@ struct TicketSparkleOverlay: View {
         .accessibilityHidden(true)
         // 减弱动效下彻底不画 —— 常驻动画对前庭敏感的人是最难受的一类。
         .opacity(reduceMotion ? 0 : 1)
-        .onAppear {
-            guard !reduceMotion else { return }
-            isAnimating = true
-        }
     }
 
-    private func spark(burst: Burst, angle: Double, index: Int, in size: CGSize) -> some View {
-        let distance: CGFloat = 13 + CGFloat(index % 2) * 5
-        let origin = CGPoint(x: size.width * burst.x, y: size.height * burst.y)
-        let color = burst.colors[index % burst.colors.count].accentColor
-        return Circle()
-            .fill(color)
-            .frame(width: 3.4, height: 3.4)
-            // 飞出去的同时缩小，末段再往下坠一点点 —— 火星就是这么熄的
-            .scaleEffect(isAnimating ? 0.35 : 1.25)
-            .opacity(isAnimating ? 0 : 1)
-            .offset(x: isAnimating ? cos(angle) * distance : 0,
-                    y: isAnimating ? sin(angle) * distance + 5 : 0)
-            .position(origin)
-            .animation(
-                .easeOut(duration: 0.85)
-                    .repeatForever(autoreverses: false)
-                    // 每处之间隔开一秒多，同一时刻屏幕上只有一簇在飞
-                    .delay(burst.delay + Double(index) * 0.05),
-                value: isAnimating
-            )
+    /// 一朵。等到 `delay` 之后才开始循环，四朵的起点因此错开。
+    private struct BurstCluster: View {
+        let burst: Burst
+        let size: CGSize
+        let duration: Double
+
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @State private var isLive = false
+
+        var body: some View {
+            ZStack {
+                if isLive {
+                    ForEach(Array(burst.angles.enumerated()), id: \.offset) { index, angle in
+                        spark(angle: angle, index: index)
+                    }
+                }
+            }
+            .task {
+                guard !reduceMotion else { return }
+                try? await Task.sleep(for: .seconds(burst.delay))
+                isLive = true
+            }
+        }
+
+        private func spark(angle: Double, index: Int) -> some View {
+            // 同一朵里每粒飞得远近不同，看起来才是炸开而不是齐步走
+            let distance = burst.spread * (0.62 + CGFloat(index % 3) * 0.19)
+            let diameter: CGFloat = 5 - CGFloat(index % 2) * 1.1
+            let origin = CGPoint(x: size.width * burst.x, y: size.height * burst.y)
+            let color = burst.colors[index % burst.colors.count].accentColor
+
+            return Circle()
+                .fill(color)
+                .frame(width: diameter, height: diameter)
+                .position(origin)
+                // 0 = 静默（不可见）、1 = 亮起、2 = 飞散
+                .phaseAnimator([0, 1, 2]) { view, phase in
+                    view
+                        // 从看得见的大小起步再缩小 —— 现实里没有东西是从「无」冒出来的
+                        .scaleEffect(phase == 2 ? 0.3 : 1.15)
+                        .opacity(phase == 1 ? 1 : 0)
+                        .offset(x: phase == 2 ? cos(angle) * distance : 0,
+                                // 末段带一点下坠，火星就是这么熄的
+                                y: phase == 2 ? sin(angle) * distance + 7 : 0)
+                } animation: { phase in
+                    switch phase {
+                    case 1: .linear(duration: 0.01)      // 亮起：瞬间
+                    case 2: .easeOut(duration: duration) // 飞散
+                    // 回到静默：这一段全程不可见，长短决定了两朵之间的间歇。
+                    // 同一朵里五粒的间歇差一点点，下一轮的形状就会不一样。
+                    default: .linear(duration: burst.rest + Double(index) * 0.07)
+                    }
+                }
+        }
     }
 }

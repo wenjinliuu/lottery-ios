@@ -130,84 +130,56 @@ struct SecondaryGlassButton: ButtonStyle {
     }
 }
 
-/// 标签栏右边那颗独立的加号。
+/// 标签栏「添加」弹出来的两个二级动作。
 ///
-/// 原来「扫描 / 录入」是首页和票夹各挂一枚悬浮胶囊。两个页面各挂一份，
-/// 位置还压在内容上；而它其实是全局动作，跟着标签栏走才对。
-///
-/// 现在是一颗**单独的玻璃圆**，和三个标签不在同一块玻璃里 —— 标签是
-/// 「去哪儿」，它是「做什么」，两类东西不该长在一起。点开之后向上展开
-/// 扫描和录入两个二级动作。
-struct ExpandingActionButton: View {
-    /// 展开状态放在外面：点空白处收起的那层遮罩要铺满整屏，
-    /// 只能由根视图来放，所以两边得看同一个状态。
+/// 触发它的加号本身是标签栏里的一个标签（见 `RootView`），所以这里只画
+/// 弹出来的部分。两个动作各自一颗玻璃胶囊，从标签栏上方浮起来。
+struct ActionMenu: View {
     @Binding var isExpanded: Bool
     var onScan: () -> Void
     var onAdd: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var expandAnimation: Animation {
-        reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.34, dampingFraction: 0.76)
+    private var animation: Animation {
+        reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.34, dampingFraction: 0.78)
     }
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 12) {
+        VStack(spacing: 10) {
             if isExpanded {
-                secondary(icon: "square.and.pencil", label: "手动录入", delay: 0.04) { onAdd() }
-                secondary(icon: "camera.viewfinder", label: "扫描彩票", delay: 0) { onScan() }
+                item(icon: "square.and.pencil", label: "手动录入", delay: 0.05, action: onAdd)
+                item(icon: "camera.viewfinder", label: "扫描彩票", delay: 0, action: onScan)
             }
-            trigger
         }
-        .animation(expandAnimation, value: isExpanded)
+        .animation(animation, value: isExpanded)
     }
 
-    private var trigger: some View {
-        Button {
-            isExpanded.toggle()
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 22, weight: .bold))
-                // 展开时转成叉号：同一颗按钮既是「打开」也是「收起」，
-                // 旋转让这层关系看得见，不用另画一个关闭按钮。
-                .rotationEffect(.degrees(isExpanded ? 45 : 0))
-                .frame(width: 54, height: 54)
-                .contentShape(Circle())
-        }
-        .buttonStyle(PressableIcon())
-        .foregroundStyle(Color.accentColor)
-        .glassCircle()
-        .shadow(color: .black.opacity(0.16), radius: 12, y: 4)
-        .accessibilityLabel(isExpanded ? "收起" : "添加彩票")
-    }
-
-    private func secondary(icon: String, label: String, delay: Double,
-                           action: @escaping () -> Void) -> some View {
+    private func item(icon: String, label: String, delay: Double,
+                      action: @escaping () -> Void) -> some View {
         Button {
             isExpanded = false
             action()
         } label: {
-            HStack(spacing: 8) {
-                Text(label)
-                    .font(.footnote.weight(.semibold))
-                    .fixedSize()
+            HStack(spacing: 9) {
                 Image(systemName: icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 46, height: 46)
+                    .font(.system(size: 17, weight: .semibold))
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
             }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableIcon())
         .foregroundStyle(Color.accentColor)
-        .padding(.leading, 14)
         .glassPill()
-        .shadow(color: .black.opacity(0.12), radius: 10, y: 3)
-        // 两个二级动作错开一点点出场，比同时冒出来更像「展开」而不是「闪现」
-        .transition(.scale(scale: 0.6, anchor: .bottomTrailing)
+        .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
+        // 两个动作错开一点点出场，比同时冒出来更像「展开」而不是「闪现」
+        .transition(.scale(scale: 0.7, anchor: .bottom)
             .combined(with: .opacity)
-            .animation(expandAnimation.delay(delay)))
+            .animation(animation.delay(delay)))
     }
-
 }
 
 /// 图标按钮的按下反馈。

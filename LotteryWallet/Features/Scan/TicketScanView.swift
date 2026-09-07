@@ -19,13 +19,16 @@ struct TicketScanView: View {
     @State private var isCameraPresented = false
     @State private var photoItem: PhotosPickerItem?
     @State private var preview: UIImage?
+    /// 矫正之后的正片。复核页顶上贴的就是它 —— 用户要核对的是「机器看到的」，
+    /// 不是他自己拍的那张歪的。
+    @State private var croppedPreview: UIImage?
     @State private var isPhotoZoomPresented = false
     @State private var zoomedImage: UIImage?
     @State private var rawText = ""
     @State private var tickets: [ScannedTicket] = []
     /// 每张票裁切矫正后的正片。复核、改号、补注时都要贴出来给人对照。
     @State private var ticketImages: [ScannedTicket.ID: UIImage] = [:]
-    @State private var detectedRegions = 0
+
     @State private var globalWarnings: [String] = []
     @State private var errorText: String?
     /// 正在改期号 / 改号码的那张票。
@@ -33,7 +36,7 @@ struct TicketScanView: View {
     @State private var zoneEditorTarget: ZoneEditorTarget?
 
     enum Stage {
-        case intro, scanning, review
+        case intro, crop, scanning, review
     }
 
     /// 一个 ForEach 里挂很多个 `.sheet` 是 SwiftUI 的经典坑（只有最后一个生效），
@@ -61,6 +64,7 @@ struct TicketScanView: View {
             Group {
                 switch stage {
                 case .intro: intro
+                case .crop: cropStep
                 case .scanning: scanning
                 case .review: review
                 }
@@ -68,13 +72,15 @@ struct TicketScanView: View {
             .background(Palette.canvas)
             .navigationTitle(stage == .review ? "核对识别结果" : "扫描彩票")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarVisibility(stage == .crop ? .hidden : .automatic, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
                 }
                 if stage == .review {
                     ToolbarItem(placement: .primaryAction) {
-                        Button("重扫") { reset() }
+                        // 重新裁一次比重拍一张常见得多 —— 号码没认全往往是框歪了
+                        Button("重新裁切") { stage = .crop }
                     }
                 }
             }
@@ -93,12 +99,13 @@ struct TicketScanView: View {
         .fullScreenCover(isPresented: $isCameraPresented) {
             CameraPicker { image in
                 preview = image
-                Task { await run(image) }
+                stage = .crop
+                detent = .large
             }
             .ignoresSafeArea()
         }
         .fullScreenCover(isPresented: $isPhotoZoomPresented) {
-            if let image = zoomedImage ?? preview {
+            if let image = zoomedImage ?? croppedPreview ?? preview {
                 PhotoZoomView(image: image)
             }
         }
@@ -117,7 +124,8 @@ struct TicketScanView: View {
                     return
                 }
                 preview = image
-                await run(image)
+                stage = .crop
+                detent = .large
             }
         }
         .task { await drawStore.loadYearCalendars() }
@@ -134,7 +142,7 @@ struct TicketScanView: View {
             VStack(spacing: 6) {
                 Text("把整张彩票放进取景框")
                     .font(.headline)
-                Text("识别全部在这台设备上完成，照片不上传也不保存。支持双色球和大乐透的单式、复式、胆拖票，一张照片里放几张也能分开认。")
+                Text("识别全部在这台设备上完成，照片不上传也不保存。支持双色球和大乐透的单式、复式、胆拖票。\n拍好之后框一下票面，一次认一张。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -167,6 +175,20 @@ struct TicketScanView: View {
             }
             .padding(.horizontal, 22)
             .padding(.bottom, 22)
+        }
+    }
+
+    /// 裁切。识别之前必经的一步。
+    @ViewBuilder
+    private var cropStep: some View {
+        if let preview {
+            TicketCropView(image: preview) {
+                // 「重拍」：回到入口，别把用户困在裁切界面里
+                reset()
+            } onConfirm: { quad in
+                Task { await run(preview, quad: quad) }
+            }
+            .ignoresSafeArea(edges: .bottom)
         }
     }
 
@@ -227,9 +249,9 @@ struct TicketScanView: View {
     /// 所以原图必须一直在手边，而且要能放大看清那几行小字。
     @ViewBuilder
     private var photoCard: some View {
-        if let preview {
+        if let preview = croppedPreview ?? preview {
             Button {
-                zoomedImage = preview
+                zoomedImage = croppedPreview ?? preview
                 isPhotoZoomPresented = true
             } label: {
                 ZStack(alignment: .bottomTrailing) {
@@ -612,11 +634,15 @@ struct TicketScanView: View {
 
     // MARK: - 动作
 
-    private func run(_ image: UIImage) async {
+    private func run(_ image: UIImage, quad: TicketQuad) async {
         stage = .scanning
         errorText = nil
+        // 按用户框的四个角摆正 + 放大。矫正失败（框成一条线之类）就用原图，
+        // 至少还能试着认一下。
+        let corrected = TicketImagePreprocessor.correct(image, quad: quad) ?? image
+        croppedPreview = corrected
         do {
-            var page = try await TicketVisionScanner.scan(image)
+            var page = try await TicketVisionScanner.scan(corrected)
             // 单价对不上时把追加标志纠正过来，再把提示重算一遍。
             // 纠正本身必须说出来 —— 单注价格从 2 元变成 3 元是记账口径的变化，
             // 悄悄改掉的话用户看到金额对不上也不知道是哪一步动的。
@@ -628,7 +654,6 @@ struct TicketScanView: View {
             rawText = page.result.rawText
             tickets = page.result.tickets
             ticketImages = page.images
-            detectedRegions = page.detectedRegions
             globalWarnings = page.result.warnings
             stage = .review
             detent = .large
@@ -642,10 +667,10 @@ struct TicketScanView: View {
         stage = .intro
         detent = .medium
         preview = nil
+        croppedPreview = nil
         photoItem = nil
         tickets = []
         ticketImages = [:]
-        detectedRegions = 0
         globalWarnings = []
         rawText = ""
         errorText = nil
