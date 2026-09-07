@@ -7,14 +7,12 @@
           "image-name": "Orb.svg",
           "name": "Orb",
           "glass": true,
-          "position": {
-            "scale": 1.75,
-            "translation-in-points": [
-              0,
-              0
-            ]
-          },
           "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.23137,0.50980,0.96471,1.00000"
+              }
+            },
             {
               "appearance": "dark",
               "value": {
@@ -25,24 +23,23 @@
         }
       ],
       "name": "Orb",
-      "specular": true,
-      "shadow": {
-        "kind": "layer-color",
-        "opacity": 0.24
-      },
-      "blur-material": 0.18,
-      "translucency": {
-        "enabled": true,
-        "value": 0.16
-      },
       "lighting": "combined",
       "specular-specializations": [
+        {
+          "value": true
+        },
         {
           "appearance": "dark",
           "value": true
         }
       ],
       "shadow-specializations": [
+        {
+          "value": {
+            "kind": "layer-color",
+            "opacity": 0.24
+          }
+        },
         {
           "appearance": "dark",
           "value": {
@@ -53,11 +50,20 @@
       ],
       "blur-material-specializations": [
         {
+          "value": 0.18
+        },
+        {
           "appearance": "dark",
           "value": 0.18
         }
       ],
       "translucency-specializations": [
+        {
+          "value": {
+            "enabled": true,
+            "value": 0.16
+          }
+        },
         {
           "appearance": "dark",
           "value": {
@@ -74,35 +80,27 @@
           "name": "LuckyStar",
           "opacity": 1,
           "blend-mode": "normal",
-          "glass": true,
-          "position": {
-            "scale": 0.75,
-            "translation-in-points": [
-              0,
-              0
-            ]
-          }
+          "glass": true
         }
       ],
       "name": "LuckyStar",
-      "specular": true,
-      "blur-material": 0.1,
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.16
-      },
-      "translucency": {
-        "enabled": true,
-        "value": 0.08
-      },
       "lighting": "individual",
       "specular-specializations": [
+        {
+          "value": true
+        },
         {
           "appearance": "dark",
           "value": true
         }
       ],
       "shadow-specializations": [
+        {
+          "value": {
+            "kind": "neutral",
+            "opacity": 0.16
+          }
+        },
         {
           "appearance": "dark",
           "value": {
@@ -113,11 +111,20 @@
       ],
       "blur-material-specializations": [
         {
+          "value": 0.1
+        },
+        {
           "appearance": "dark",
           "value": 0.08
         }
       ],
       "translucency-specializations": [
+        {
+          "value": {
+            "enabled": true,
+            "value": 0.08
+          }
+        },
         {
           "appearance": "dark",
           "value": {
