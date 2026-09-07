@@ -50,10 +50,14 @@ struct ScannedTicket: Identifiable, Hashable {
     var unitPrice: Double { game.unitPrice(addOn: addOn) }
 
     /// 展开成一注一注。
+    ///
+    /// 单式票会过滤掉空号码：「补一注」是先塞一注空的再打开编辑器，
+    /// 用户下滑关掉抽屉而不是点取消时，那一注空的会留在票上。
+    /// 它既不该算钱，也不该被存成一条没有号码的记录。
     var expandedLines: [NumberSet] {
         switch play {
         case .single:
-            return lines
+            return lines.filter { !$0.isEmpty }
         case .system, .dantuo:
             let playMode = game == .dlt ? (addOn ? "add" : "normal") : game.defaultPlayMode
             let tickets = TicketBuilder.expand(game: game, selections: selections,

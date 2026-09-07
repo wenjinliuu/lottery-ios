@@ -373,11 +373,65 @@ struct ProfitHeatmap: View {
     private let cell: CGFloat = 13
     private let gap: CGFloat = 3
 
-    /// 有记录的那些天。
-    private var byDay: [String: ProfitDay] {
-        var map: [String: ProfitDay] = [:]
-        for day in days where day.count > 0 { map[day.date] = day }
-        return map
+    /// 有记录的那些天，以及要画的周列。
+    ///
+    /// **必须一次算好。** 这两个原来都是计算属性：`byDay` 在每个格子的
+    /// `cellView` 里被访问一次（一年 371 格 × 每次重建整个字典），
+    /// `weeks` 在 `monthLabel` 里每列被访问一次（53 列 × 每次重跑一遍
+    /// 日历运算）。加起来是十几万次字典插入和上万次 Calendar 计算，
+    /// **每渲染一帧一遍** —— 而这正是这一版要去卡顿的那块屏。
+    private struct Grid {
+        let byDay: [String: ProfitDay]
+        let weeks: [[Date?]]
+        /// 每一列要不要写月份，写哪个月。和列一一对应。
+        let monthLabels: [String]
+    }
+
+    private var grid: Grid { Self.buildGrid(days: days, range: range) }
+
+    private static func buildGrid(days: [ProfitDay], range: ProfitRange) -> Grid {
+        var byDay: [String: ProfitDay] = [:]
+        byDay.reserveCapacity(days.count)
+        for day in days where day.count > 0 { byDay[day.date] = day }
+
+        let calendar = Calendar.chinaCalendar
+        let today = Date()
+        guard let start = calendar.date(byAdding: .day, value: -(range.gridSpan - 1), to: today) else {
+            return Grid(byDay: byDay, weeks: [], monthLabels: [])
+        }
+        // 回退到那一周的周一，列才不会错位
+        let weekdayIndex = (calendar.component(.weekday, from: start) + 5) % 7
+        guard let gridStart = calendar.date(byAdding: .day, value: -weekdayIndex, to: start) else {
+            return Grid(byDay: byDay, weeks: [], monthLabels: [])
+        }
+
+        var weeks: [[Date?]] = []
+        var cursor = gridStart
+        while cursor <= today {
+            var column: [Date?] = []
+            for _ in 0..<7 {
+                column.append(cursor <= today ? cursor : nil)
+                guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+                cursor = next
+            }
+            weeks.append(column)
+        }
+
+        // 月份刻度：只在换月的那一列写字
+        var labels: [String] = []
+        var previousMonth = 0
+        for (index, column) in weeks.enumerated() {
+            guard let first = column.compactMap({ $0 }).first else { labels.append(""); continue }
+            let month = calendar.component(.month, from: first)
+            defer { previousMonth = month }
+            if index == 0 {
+                // 首列这个月剩不下几天就别标，标签会被挤在最左边
+                labels.append(column.compactMap { $0 }.count >= 4 ? "\(month)月" : "")
+            } else {
+                labels.append(month == previousMonth ? "" : "\(month)月")
+            }
+        }
+        return Grid(byDay: byDay, weeks: weeks, monthLabels: labels)
     }
 
     /// 一天的颜色浓度，0…1。
@@ -400,47 +454,35 @@ struct ProfitHeatmap: View {
         return Swift.min(log(1 + day.net / base) / log(10.0), 1)
     }
 
-    /// 图上要画的日期区间，按周对齐（每列是完整一周，周一起头）。
-    private var weeks: [[Date?]] {
-        let calendar = Calendar.chinaCalendar
-        let today = Date()
-        guard let start = calendar.date(byAdding: .day, value: -(range.gridSpan - 1), to: today) else { return [] }
-
-        // 回退到那一周的周一，列才不会错位
-        let weekdayIndex = (calendar.component(.weekday, from: start) + 5) % 7
-        guard let gridStart = calendar.date(byAdding: .day, value: -weekdayIndex, to: start) else { return [] }
-
-        var columns: [[Date?]] = []
-        var cursor = gridStart
-        while cursor <= today {
-            var column: [Date?] = []
-            for _ in 0..<7 {
-                column.append(cursor <= today ? cursor : nil)
-                guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
-                cursor = next
-            }
-            columns.append(column)
-        }
-        return columns
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        // 一次算好，下面所有格子和月份刻度都读这一份
+        let grid = self.grid
+        return VStack(alignment: .leading, spacing: 7) {
             // 图例和「最好的一天」放在图**上面**：先看懂颜色的含义，再看图。
             // 放在下面等于让人看完一遍图再回头找说明。
             topBar
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(alignment: .top, spacing: gap) {
-                        ForEach(Array(weeks.enumerated()), id: \.offset) { _, column in
+                        ForEach(Array(grid.weeks.enumerated()), id: \.offset) { _, column in
                             VStack(spacing: gap) {
                                 ForEach(Array(column.enumerated()), id: \.offset) { _, date in
-                                    cellView(for: date)
+                                    cellView(for: date, byDay: grid.byDay)
                                 }
                             }
                         }
                     }
-                    monthScale
+                    // 月份刻度跟着方格一起横向滚，所以必须画在 ScrollView **里面**，
+                    // 而且每个标签要和它那一列对齐 —— 用等宽的列去铺。
+                    HStack(alignment: .top, spacing: gap) {
+                        ForEach(Array(grid.monthLabels.enumerated()), id: \.offset) { _, label in
+                            Text(label)
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                                .fixedSize()
+                                .frame(width: cell, alignment: .leading)
+                        }
+                    }
                 }
                 .padding(.vertical, 1)
             }
@@ -448,39 +490,11 @@ struct ProfitHeatmap: View {
             .defaultScrollAnchor(.trailing)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("逐日盈亏方格图，共 \(byDay.count) 天有记录")
-    }
-
-    /// 月份刻度。跟着方格一起横向滚动，所以必须画在 ScrollView **里面**，
-    /// 而且每个标签的横向位置要和它那一列对齐 —— 用等宽的列去铺，
-    /// 只在每个月的第一列写字。
-    private var monthScale: some View {
-        HStack(alignment: .top, spacing: gap) {
-            ForEach(Array(weeks.enumerated()), id: \.offset) { index, column in
-                Text(monthLabel(at: index, column: column))
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-                    .frame(width: cell, alignment: .leading)
-            }
-        }
-    }
-
-    /// 这一列是不是某个月的第一列。是就写「5月」，否则留空。
-    private func monthLabel(at index: Int, column: [Date?]) -> String {
-        let calendar = Calendar.chinaCalendar
-        guard let first = column.compactMap({ $0 }).first else { return "" }
-        let month = calendar.component(.month, from: first)
-        // 第一列只有在这个月还剩够多天时才标，否则标签会被挤在最左边
-        if index == 0 {
-            return column.compactMap { $0 }.count >= 4 ? "\(month)月" : ""
-        }
-        guard let previous = weeks[index - 1].compactMap({ $0 }).last else { return "" }
-        return calendar.component(.month, from: previous) == month ? "" : "\(month)月"
+        .accessibilityLabel("逐日盈亏方格图，共 \(grid.byDay.count) 天有记录")
     }
 
     @ViewBuilder
-    private func cellView(for date: Date?) -> some View {
+    private func cellView(for date: Date?, byDay: [String: ProfitDay]) -> some View {
         let shape = RoundedRectangle(cornerRadius: 3, style: .continuous)
         if let date, let day = byDay[DateText.day(date)] {
             shape

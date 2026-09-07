@@ -89,7 +89,7 @@ struct RecordService {
         guard record.status != status
                 || record.prizeAmount != result.amount
                 || record.prizeName != result.prizeName
-                || record.matchedData.isEmpty else { return false }
+                || !record.hasMatches else { return false }
 
         record.status = status
         record.resultText = text
@@ -123,7 +123,7 @@ struct RecordService {
                 guard apply(record) else { continue }
                 checked += 1
                 if record.status == .won { won += 1 }
-            } else if record.matchedData.isEmpty {
+            } else if !record.hasMatches {
                 if repairMatches(record) { repaired += 1 }
             }
         }
@@ -140,7 +140,7 @@ struct RecordService {
     /// 补标记是为了让号码球显示正确，不该有能力改写账目。
     @discardableResult
     func repairMatches(_ record: TicketRecord) -> Bool {
-        guard record.matchedData.isEmpty,
+        guard !record.hasMatches,
               let draw = drawStore.draw(matching: record) else { return false }
         let result = PrizeRules.evaluate(gameKey: record.game,
                                          ticket: record.ticket,
@@ -157,7 +157,7 @@ struct RecordService {
     /// 就得先拿到那一期的开奖号，而它多半已经不在最近 50 期里了。
     func archivesNeedingMatchRepair() -> [GameKey: Set<Int>] {
         var wanted: [GameKey: Set<Int>] = [:]
-        for record in allRecords() where record.matchedData.isEmpty && record.status.isFinal {
+        for record in allRecords() where !record.hasMatches && record.status.isFinal {
             let day = record.targetOpenDate.isEmpty ? DateText.day(record.createdAt) : record.targetOpenDate
             guard let year = Int(day.prefix(4)) else { continue }
             wanted[record.game, default: []].insert(year)

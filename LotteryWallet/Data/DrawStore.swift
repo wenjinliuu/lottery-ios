@@ -115,8 +115,11 @@ final class DrawStore {
         }
         var merged: [Draw] = []
         for (game, year, draws) in results {
+            // 只有真的拿到了才记成已加载。一次网络抖动就把这一年永久拉黑的话，
+            // 补命中标记那条路整个会话都不会再有第二次机会。
+            guard let draws, !draws.isEmpty else { continue }
             loadedArchives.insert(ArchiveKey(game: game, year: year))
-            if let draws { merged.append(contentsOf: draws) }
+            merged.append(contentsOf: draws)
         }
         if !merged.isEmpty { merge(merged) }
     }
@@ -152,11 +155,21 @@ final class DrawStore {
 
     func loadHistory(for game: GameKey) async {
         guard !loadedHistoryGames.contains(game) else { return }
-        // 空结果不算"已加载"：否则往期页第一次拿到空数组之后就永远停在空状态，
-        // 连"重试"都点不动。
-        guard let history = try? await client.fetchHistory(for: game), !history.isEmpty else { return }
-        merge(history)
+        let history = try? await client.fetchHistory(for: game)
+        // 「拉过了」和「拉到了」是两回事，必须都记下来。
+        //
+        // 原来失败或空结果就直接返回、不标记已加载，是为了让「重试」还能再拉。
+        // 但往期页拿这个集合区分「正在加载」和「确实没有数据」——不标记的话
+        // 那一页永远停在转圈上，连重试按钮都露不出来。
+        // 现在一律标记；重试走 `reloadHistory`，它会先把标记清掉。
         loadedHistoryGames.insert(game)
+        if let history, !history.isEmpty { merge(history) }
+    }
+
+    /// 用户点「重试」：清掉已加载标记再拉一次。
+    func reloadHistory(for game: GameKey) async {
+        loadedHistoryGames.remove(game)
+        await loadHistory(for: game)
     }
 
     /// 八个彩种的近 50 期并行拉取，电子票才能直接显示对应开奖号。
@@ -173,9 +186,9 @@ final class DrawStore {
             return collected
         }
         for (game, history) in results {
+            loadedHistoryGames.insert(game)
             guard let history, !history.isEmpty else { continue }
             merge(history)
-            loadedHistoryGames.insert(game)
         }
     }
 

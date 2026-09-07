@@ -595,6 +595,9 @@ struct TicketScanView: View {
         if tickets.isEmpty { return "还没有可导入的票" }
         if tickets.contains(where: { $0.count == 0 }) { return "有票没读出号码，点进去补一下" }
         if tickets.contains(where: { $0.issue.isEmpty }) { return "有票还没选期号" }
+        if let ticket = unresolvedPeriods.first {
+            return "第 \(ticket.issue) 期往后 \(ticket.periods) 期没在开奖日历里查到，先把期号选对"
+        }
         return nil
     }
 
@@ -602,7 +605,9 @@ struct TicketScanView: View {
     private var importCount: Int { tickets.reduce(0) { $0 + $1.periods } }
     private var totalLines: Int { tickets.reduce(0) { $0 + $1.count * $1.periods } }
     private var canImport: Bool {
-        !tickets.isEmpty && tickets.allSatisfy { $0.count > 0 && !$0.issue.isEmpty }
+        !tickets.isEmpty
+            && tickets.allSatisfy { $0.count > 0 && !$0.issue.isEmpty }
+            && unresolvedPeriods.isEmpty
     }
 
     // MARK: - 动作
@@ -690,8 +695,12 @@ struct TicketScanView: View {
         if issues.count == ticket.periods, !issues.isEmpty {
             return issues.map { $0.target(source: "ticket_scan") }
         }
-        // 日历里没查到（期号识别错了，或者那一年的日历还没生成）——
-        // 至少把票面上印的这一期原样记下来，不要把整张票丢掉。
+        // 只有单期票才允许退回「照票面记一期」。
+        //
+        // 连打 N 期的票查不到连续期号时**绝不能**退回一期：底栏按 N 期收了钱，
+        // 却只落一条记录，账目当场就差了 (N-1)/N。这种情况由 `unresolvedPeriods`
+        // 拦在导入之前，这里再兜一道底。
+        guard ticket.periods == 1 else { return [] }
         var fallback = DrawTarget()
         fallback.expect = ticket.issue
         fallback.openDate = ticket.drawDate
@@ -699,6 +708,15 @@ struct TicketScanView: View {
         fallback.source = "ticket_scan"
         fallback.isAvailable = true
         return [fallback]
+    }
+
+    /// 连打多期但日历里查不到那么多连续期号的票。
+    private var unresolvedPeriods: [ScannedTicket] {
+        tickets.filter { ticket in
+            ticket.periods > 1 &&
+            drawStore.issuesFollowing(game: ticket.game, from: ticket.issue,
+                                      count: ticket.periods).count != ticket.periods
+        }
     }
 }
 

@@ -57,7 +57,7 @@ struct DrawHistoryView: View {
                     } description: {
                         Text("可能是网络没连上，或者数据仓库还没有这个彩种的往期记录。")
                     } actions: {
-                        Button("重试") { Task { await drawStore.loadHistory(for: item) } }
+                        Button("重试") { Task { await drawStore.reloadHistory(for: item) } }
                             .buttonStyle(SecondaryGlassButton(tint: item.tint))
                     }
                     .padding(.top, 40)
