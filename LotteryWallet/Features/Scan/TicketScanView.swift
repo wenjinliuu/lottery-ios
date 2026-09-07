@@ -8,6 +8,10 @@ import UIKit
 /// 入口是个半屏抽屉，认出票之后自动长到整屏 —— 只是选张照片而已，
 /// 没必要一上来就把整个屏幕占满。
 struct TicketScanView: View {
+    /// 「手动录入」的出口。扫描抽屉是添加彩票的**唯一**入口，
+    /// 手动录入是它里面的一个分支。
+    var onManualEntry: (() -> Void)?
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Environment(DrawStore.self) private var drawStore
@@ -69,7 +73,8 @@ struct TicketScanView: View {
                 case .review: review
                 }
             }
-            .background(Palette.canvas)
+            // 抽屉自己已经是玻璃了，页面再铺一层不透明底色会把它糊死
+            .background(.clear)
             .navigationTitle(stage == .review ? "核对识别结果" : "扫描彩票")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarVisibility(stage == .crop ? .hidden : .automatic, for: .navigationBar)
@@ -96,6 +101,10 @@ struct TicketScanView: View {
         // 抽屉：入口半屏，进复核自动长到整屏
         .presentationDetents(stage == .review ? [.large] : [.medium, .large], selection: $detent)
         .presentationDragIndicator(.visible)
+        // 抽屉本身就是一层玻璃，底下的内容透上来 —— 它是浮在票夹之上的
+        // 一个临时工作台，不是另一个页面。
+        .presentationBackground(.regularMaterial)
+        .presentationCornerRadius(28)
         .fullScreenCover(isPresented: $isCameraPresented) {
             CameraPicker { image in
                 preview = image
@@ -172,6 +181,21 @@ struct TicketScanView: View {
                 }
                 .foregroundStyle(Color.accentColor)
                 .glassPill(tint: .accentColor)
+
+                // 手动录入放在这里，而不是让标签栏那颗按钮先弹一个二级菜单。
+                // 「扫描」是主路径，「手动」是它的退路 —— 退路就该摆在
+                // 主路径旁边，而不是和主路径平起平坐地占一层菜单。
+                Button {
+                    onManualEntry?()
+                    dismiss()
+                } label: {
+                    Label("手动录入号码", systemImage: "square.and.pencil")
+                        .font(.subheadline.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .foregroundStyle(.secondary)
+                .glassPill(interactive: true)
             }
             .padding(.horizontal, 22)
             .padding(.bottom, 22)
@@ -192,25 +216,44 @@ struct TicketScanView: View {
         }
     }
 
+    /// 识别中。
+    ///
+    /// 摆的是**裁切矫正之后**的那张图，铺满整块区域 —— 一来等待时有东西看，
+    /// 二来这一眼就能确认「机器拿到的是不是我框的那张」。
+    /// 原来图被压在 240pt 高、左右各留一大片白，看着像出错了。
     private var scanning: some View {
-        VStack(spacing: 18) {
-            Spacer()
-            if let preview {
-                Image(uiImage: preview)
+        ZStack {
+            if let image = croppedPreview ?? preview {
+                Image(uiImage: image)
                     .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 240)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(Palette.separator))
+                    .scaledToFill()
+                    .blur(radius: 2)
+                    .opacity(0.35)
+                    .ignoresSafeArea()
             }
-            ProgressView()
-            Text("正在本机识别号码…")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
+            VStack(spacing: 16) {
+                if let image = croppedPreview ?? preview {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Palette.separator))
+                        .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
+                        .padding(.horizontal, 24)
+                }
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("正在本机识别号码…")
+                        .font(.subheadline.weight(.medium))
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .glassPill(interactive: false)
+            }
+            .padding(.vertical, 24)
         }
-        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - 复核
@@ -218,14 +261,43 @@ struct TicketScanView: View {
     @ViewBuilder
     private var review: some View {
         if tickets.isEmpty {
-            ContentUnavailableView("没有识别到彩票", systemImage: "doc.questionmark",
-                                   description: Text("请把整张票放进画面，避开反光和折痕，然后重试。"))
-                .safeAreaInset(edge: .bottom) {
-                    Button("重新扫描") { reset() }
-                        .buttonStyle(ProminentGlassButton(tint: .accentColor))
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 20)
+            ScrollView {
+                VStack(spacing: 16) {
+                    photoCard
+                    ContentUnavailableView {
+                        Label("没有识别出彩票", systemImage: "doc.questionmark")
+                    } description: {
+                        Text(rawText.isEmpty
+                             ? "这张图上一个字都没认出来。多半是太糊或光线太暗，换个角度重拍试试。"
+                             : "字认出来了，但没能拼成一张票。看看下面的原文缺了哪一行 —— 多半是框的时候切掉了号码或者期号那一行。")
+                    }
+                    // 「一个字都没认出来」和「认出字但拼不成票」是完全不同的两件事，
+                    // 前者要重拍，后者只要重裁。把原文摆出来才分得清。
+                    if !rawText.isEmpty { rawTextCard }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
+            }
+            .safeAreaInset(edge: .bottom) {
+                HStack(spacing: 12) {
+                    Button("重新裁切") { stage = .crop }
+                        .buttonStyle(SecondaryGlassButton(tint: .accentColor))
+                        .fixedSize()
+                    Button("重新拍摄") { reset() }
+                        .buttonStyle(ProminentGlassButton(tint: .accentColor))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .fill(.regularMaterial)
+                        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .strokeBorder(Palette.separator))
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 10)
+            }
         } else {
             ScrollView {
                 VStack(spacing: 16) {

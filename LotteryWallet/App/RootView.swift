@@ -11,53 +11,18 @@ struct RootView: View {
     @State private var selection: MainTab = .home
     @State private var isEntryPresented = false
     @State private var isScanPresented = false
+    @State private var wantsManualEntry = false
     @State private var toast: ToastMessage?
     @State private var celebrationTrigger = 0
-    @State private var isActionMenuExpanded = false
-
-    /// 标签栏的选择要**在写进 `selection` 之前**拦下来。
-    ///
-    /// 不能用 `.onChange(of: selection)` 去拦：那时候 `.add` 已经写进去了，
-    /// 想还回去就得在处理器里再写一次 `selection`，而那次写入会把处理器
-    /// 再触发一遍、走进 else 分支，刚弹起来的菜单当场又被收掉 ——
-    /// 结果是加号怎么点都没反应，而这一版又刚把首页票夹的悬浮按钮删了，
-    /// 等于一个添加彩票的入口都没有了。
-    ///
-    /// 用自定义 Binding 就没有这个来回：`.add` 根本不写进 `selection`，
-    /// 它只是把菜单翻一下。
-    private var tabSelection: Binding<MainTab> {
-        Binding(
-            get: { selection },
-            set: { newValue in
-                if newValue == .add {
-                    isActionMenuExpanded.toggle()
-                } else {
-                    // 点任何一个真页面：立刻切过去，菜单同时收起
-                    selection = newValue
-                    isActionMenuExpanded = false
-                }
-            }
-        )
-    }
 
     var body: some View {
-        TabView(selection: tabSelection) {
+        TabView(selection: $selection) {
             Tab("首页", systemImage: "chart.line.uptrend.xyaxis", value: MainTab.home) {
                 HomeView()
             }
 
             Tab("票夹", systemImage: "wallet.bifold", value: MainTab.wallet) {
                 WalletView()
-            }
-
-            // 加号是标签栏里的**一个标签**，不是浮在旁边的东西。
-            //
-            // 上一版把它做成右下角一颗独立的玻璃圆，结果它和三个标签不在
-            // 一个层级上：菜单展开时那层遮罩会吞掉第一次点击，想回首页得点两下。
-            // 现在它就是第三个标签，和首页票夹设置在同一块玻璃、同一行。
-            // 它不承载页面 —— 选中的那一刻就把选择还回去，只把菜单弹起来。
-            Tab("添加", systemImage: "plus.circle.fill", value: MainTab.add) {
-                Color.clear
             }
 
             Tab("设置", systemImage: "gearshape", value: MainTab.settings) {
@@ -70,29 +35,44 @@ struct RootView: View {
         //
         // 「扫描 / 录入」跟着标签栏走，不再由首页和票夹各挂一份悬浮胶囊：
         // 它是全局动作，两个页面各放一枚既重复又压内容。
-        // 遮罩只盖内容区，**不盖标签栏**。盖住的话点首页要点两下：
-        // 第一下被遮罩吃掉用来收菜单，第二下才切页面。
-        .overlay(alignment: .top) {
-            if isActionMenuExpanded {
-                Color.black.opacity(0.001)
-                    .ignoresSafeArea(edges: .top)
-                    .onTapGesture { isActionMenuExpanded = false }
-                    .padding(.bottom, 72)
+        // 标签栏右边一颗**独立的**玻璃圆，和 Apple Music 的搜索按钮一样：
+        // 三个标签是「去哪儿」，它是「做什么」，两类东西不该长在同一块玻璃里，
+        // 但高度要齐平，看起来才像同一排。
+        //
+        // 它直接开扫描抽屉，不再先弹一层二级菜单 —— 添加彩票的主路径就是扫描，
+        // 手动录入是抽屉里的一个分支（见 TicketScanView）。少一层菜单，
+        // 点标签也就不会再被任何遮罩挡住。
+        .overlay(alignment: .bottomTrailing) {
+            Button {
+                isScanPresented = true
+            } label: {
+                Image(systemName: "camera.viewfinder")
+                    .font(.system(size: 21, weight: .semibold))
+                    .frame(width: 52, height: 52)
+                    .contentShape(Circle())
             }
-        }
-        .overlay(alignment: .bottom) {
-            ActionMenu(isExpanded: $isActionMenuExpanded,
-                       onScan: { isScanPresented = true },
-                       onAdd: { isEntryPresented = true })
-                .padding(.bottom, 8)
+            .buttonStyle(PressableIcon())
+            .foregroundStyle(Color.accentColor)
+            .glassCircle()
+            .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
+            .padding(.trailing, 14)
+            .padding(.bottom, 6)
+            .accessibilityLabel("扫描彩票")
         }
         .sheet(isPresented: $isEntryPresented) {
             EntryFlowView()
         }
         // 扫描入口是个半屏抽屉，认出票之后自己长到整屏（见 TicketScanView 里的
         // presentationDetents）。选张照片而已，不必一上来就占满整个屏幕。
-        .sheet(isPresented: $isScanPresented) {
-            TicketScanView()
+        // 从扫描抽屉里跳到手动录入：不能在关闭的同一帧就去开另一张 sheet，
+        // 前一张还在收，后一张会被吞掉。记个待办，等它真的关完再开。
+        .sheet(isPresented: $isScanPresented, onDismiss: {
+            if wantsManualEntry {
+                wantsManualEntry = false
+                isEntryPresented = true
+            }
+        }) {
+            TicketScanView(onManualEntry: { wantsManualEntry = true })
         }
         // 这里**不能**用 withAnimation 包住状态变更。
         // withAnimation 开的是一个全局事务，整棵视图树在这一帧里的所有变化
@@ -164,7 +144,7 @@ struct RootView: View {
 }
 
 enum MainTab: Hashable {
-    case home, wallet, add, settings
+    case home, wallet, settings
 }
 
 // MARK: - 轻提示

@@ -882,6 +882,9 @@ struct DrawCard: View {
                 .frame(width: 8, height: 8)
             Text(game.label)
                 .font(.headline)
+                // 彩种名用彩种色。八张卡翻过去，认的就是这个颜色 ——
+                // 和票夹卡片的做法保持一致。
+                .foregroundStyle(game.accent.accentColor)
 
             if opensToday {
                 Text("今日开奖")

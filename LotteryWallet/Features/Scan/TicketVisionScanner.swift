@@ -34,15 +34,30 @@ enum TicketVisionScanner {
     static func scan(_ image: UIImage) async throws -> ScannedPage {
         var page = ScannedPage()
         let fragments = try await recognizeFragments(in: image)
-        var result = TicketTextParser.parse(blocks: LayoutSegmenter.blocks(from: fragments))
+        // **不再做版面切分。**
+        //
+        // 递归 XY 切分是为「一张照片里几张票」写的，现在一次只认一张，
+        // 它变成了纯粹的风险：一张票内部同样有整列的空白 ——
+        // 右边那一竖排的机号、每注的 (3) 倍数、合计金额，正好能凑够
+        // 切分要求的碎片数，于是一张完整的票被从中间劈开：
+        // 左半边只剩号码没有彩种名（认不出彩种），右半边只有几个金额。
+        // 两半都解析不出票，用户看到的就是「没有识别到彩票」——
+        // 而且他明明裁得很准。
+        //
+        // 现在整块文本一起交给解析器，同一张纸上连着打两张票的情况
+        // 由 `splitBlocks` 按「玩法:」这类票头来切，那是按内容切的，不会误伤。
+        var result = TicketTextParser.parse(LayoutSegmenter.lines(fragments))
         if result.tickets.isEmpty {
             // 再放大一遍重试。裁切之后还认不出，多半是原图本身就糊。
             if let upscaled = upscale(image, factor: 1.6),
                let retry = try? await recognizeFragments(in: upscaled) {
-                let second = TicketTextParser.parse(blocks: LayoutSegmenter.blocks(from: retry))
+                let second = TicketTextParser.parse(LayoutSegmenter.lines(retry))
                 if !second.tickets.isEmpty { result = second }
             }
         }
+        // 一个字都没认出来和「认出字但拼不成票」是两回事，
+        // 复核页要能把原文摆出来，否则用户只能干瞪眼。
+        if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
         page.result = result
         for ticket in result.tickets { page.images[ticket.id] = image }
         return page

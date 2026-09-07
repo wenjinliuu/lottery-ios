@@ -21,7 +21,8 @@ struct TicketCropView: View {
     /// 正在拖的那个角，用来放大它的手柄。
     @State private var activeCorner: Int?
 
-    private let handleRadius: CGFloat = 13
+    private let handleRadius: CGFloat = 14
+    private static let canvasSpace = "ticket-crop-canvas"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,6 +45,7 @@ struct TicketCropView: View {
                     }
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
+                .coordinateSpace(.named(Self.canvasSpace))
             }
             footer
         }
@@ -147,6 +149,15 @@ struct TicketCropView: View {
         return path
     }
 
+    /// 一个角上的手柄。
+    ///
+    /// **手势必须挂在 `.position` 之前。** `.position` 返回的视图会占满整个父容器
+    /// （它只是把子视图摆到那个点上），手势挂在它后面的话，四个手柄就是四块
+    /// 铺满全屏的热区叠在一起 —— 最后画的那个（左下角）压在最上面，
+    /// 于是屏幕上点哪儿动的都是它。这就是「只能拖左下角」的原因。
+    ///
+    /// 另外拖动的坐标要取**画布坐标**：手势挂在 52pt 的小圆上时，
+    /// `value.location` 默认是相对这个小圆的，必须指定 `coordinateSpace`。
     private func handle(index: Int, in frame: CGRect) -> some View {
         let center = viewPoint(quad[index], in: frame)
         let isActive = activeCorner == index
@@ -154,25 +165,19 @@ struct TicketCropView: View {
             .fill(Color.accentColor)
             .overlay(Circle().strokeBorder(.white, lineWidth: 2.5))
             .frame(width: handleRadius * 2, height: handleRadius * 2)
-            .scaleEffect(isActive ? 1.35 : 1)
+            .scaleEffect(isActive ? 1.4 : 1)
             .animation(.spring(response: 0.22, dampingFraction: 0.7), value: isActive)
-            .position(center)
-            // 手柄本身只有 26pt，够不上 44pt 的最小点击区，
-            // 再套一层透明的大圆当热区。
-            .background {
-                Circle()
-                    .fill(.clear)
-                    .frame(width: 52, height: 52)
-                    .position(center)
-                    .contentShape(Circle())
-            }
+            // 手柄本身 28pt，够不上 44pt 的最小点击区，撑到 56pt 当热区
+            .frame(width: 56, height: 56)
+            .contentShape(Circle())
             .gesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.canvasSpace))
                     .onChanged { value in
                         activeCorner = index
                         quad[index] = normalized(value.location, in: frame)
                     }
                     .onEnded { _ in activeCorner = nil }
             )
+            .position(center)
     }
 }

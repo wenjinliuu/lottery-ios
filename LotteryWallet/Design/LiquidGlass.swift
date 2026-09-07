@@ -130,58 +130,6 @@ struct SecondaryGlassButton: ButtonStyle {
     }
 }
 
-/// 标签栏「添加」弹出来的两个二级动作。
-///
-/// 触发它的加号本身是标签栏里的一个标签（见 `RootView`），所以这里只画
-/// 弹出来的部分。两个动作各自一颗玻璃胶囊，从标签栏上方浮起来。
-struct ActionMenu: View {
-    @Binding var isExpanded: Bool
-    var onScan: () -> Void
-    var onAdd: () -> Void
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var animation: Animation {
-        reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.34, dampingFraction: 0.78)
-    }
-
-    var body: some View {
-        VStack(spacing: 10) {
-            if isExpanded {
-                item(icon: "square.and.pencil", label: "手动录入", delay: 0.05, action: onAdd)
-                item(icon: "camera.viewfinder", label: "扫描彩票", delay: 0, action: onScan)
-            }
-        }
-        .animation(animation, value: isExpanded)
-    }
-
-    private func item(icon: String, label: String, delay: Double,
-                      action: @escaping () -> Void) -> some View {
-        Button {
-            isExpanded = false
-            action()
-        } label: {
-            HStack(spacing: 9) {
-                Image(systemName: icon)
-                    .font(.system(size: 17, weight: .semibold))
-                Text(label)
-                    .font(.subheadline.weight(.semibold))
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressableIcon())
-        .foregroundStyle(Color.accentColor)
-        .glassPill()
-        .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
-        // 两个动作错开一点点出场，比同时冒出来更像「展开」而不是「闪现」
-        .transition(.scale(scale: 0.7, anchor: .bottom)
-            .combined(with: .opacity)
-            .animation(animation.delay(delay)))
-    }
-}
-
 /// 图标按钮的按下反馈。
 /// Apple 的第一条规则就是「在 pointer-down 的那一刻就给反馈」——
 /// 等到抬手才有反应，界面就是死的。
