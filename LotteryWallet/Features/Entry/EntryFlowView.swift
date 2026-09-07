@@ -211,17 +211,15 @@ struct EntryFlowView: View {
     private var playModePicker: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeader(title: "玩法")
-            // 快乐8 有「选一」到「选十」十个玩法。十段分段控件每段只剩不到 30pt，
-            // 中文标签会被压成省略号，只能改成菜单。
+            // 快乐8 有「选一」到「选十」十个玩法。
+            //
+            // 十段分段控件每段只剩不到 30pt，中文标签会被压成省略号；
+            // 换成菜单又把选项藏进了二级弹窗 —— 十个平级选项本来一眼能看全，
+            // 藏起来只是把「看一眼」变成「点开、找、再点」。
+            // 现在是一条可横滑的芯片：全部可见、当前选中一直亮着、
+            // 手指落下就有反馈，不需要任何弹窗。
             if game.playModes.count > 4 {
-                Picker("玩法", selection: $playMode) {
-                    ForEach(game.playModes) { item in
-                        Text(item.label).tag(item.key)
-                    }
-                }
-                .pickerStyle(.menu)
-                .tint(game.tint)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                playModeScroller
             } else {
                 Picker("玩法", selection: $playMode) {
                     ForEach(game.playModes) { item in
@@ -232,6 +230,41 @@ struct EntryFlowView: View {
             }
         }
         .contentCard()
+    }
+
+    /// 横滑的玩法芯片条。
+    private var playModeScroller: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(game.playModes) { item in
+                        let isOn = playMode == item.key
+                        Button {
+                            playMode = item.key
+                        } label: {
+                            Text(item.label)
+                                .font(.footnote.weight(.bold))
+                                .foregroundStyle(isOn ? game.onTint : Color.primary)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(isOn ? AnyShapeStyle(game.tint) : AnyShapeStyle(Color.primary.opacity(0.06)),
+                                            in: Capsule())
+                                .overlay(Capsule().strokeBorder(isOn ? game.accent.solidStroke : .clear, lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .id(item.key)
+                        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .scrollClipDisabled()
+            .animation(.spring(response: 0.28, dampingFraction: 0.82), value: playMode)
+            // 默认玩法是「选十」，在最右边。不滚过去的话打开页面看到的是
+            // 「选一」被选中的错觉。
+            .onAppear { proxy.scrollTo(playMode, anchor: .center) }
+            .onChange(of: game) { _, _ in proxy.scrollTo(playMode, anchor: .center) }
+        }
     }
 
     private var modePicker: some View {
@@ -319,7 +352,7 @@ struct EntryFlowView: View {
                     required: requiredCount(for: section),
                     mode: mode,
                     danPicking: danPicking,
-                    onReject: { showToast($0, symbol: "hand.raised") }
+                    onReject: { showToast($0, symbol: "hand.raised", feedback: .warning) }
                 )
             }
 
@@ -471,11 +504,11 @@ struct EntryFlowView: View {
     private func addCandidate() {
         guard let pendingLine else { return }
         guard !candidates.contains(pendingLine) else {
-            showToast("这一注已经在候选里了", symbol: "exclamationmark.circle")
+            showToast("这一注已经在候选里了", symbol: "exclamationmark.circle", feedback: .warning)
             return
         }
         guard candidates.count < TicketBuilder.maxCombinations else {
-            showToast("一张票最多 \(TicketBuilder.maxCombinations) 注", symbol: "hand.raised")
+            showToast("一张票最多 \(TicketBuilder.maxCombinations) 注", symbol: "hand.raised", feedback: .warning)
             return
         }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
@@ -541,7 +574,7 @@ struct EntryFlowView: View {
                              multiple: multiple,
                              target: target,
                              source: mode.rawValue)
-            showToast("已保存 \(built.count) 注", symbol: "checkmark.seal.fill")
+            showToast("已保存 \(built.count) 注", symbol: "checkmark.seal.fill", feedback: .success)
             dismiss()
         } catch {
             saveError = "保存失败：\(error.localizedDescription)"

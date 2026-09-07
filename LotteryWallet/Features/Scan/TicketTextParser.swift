@@ -562,7 +562,7 @@ enum TicketTextParser {
                 }
             }
         }
-        result.warnings = summarize(result.tickets)
+        result.warnings = summary(for: result.tickets)
         return result
     }
 
@@ -616,7 +616,7 @@ enum TicketTextParser {
         return nil
     }
 
-    private static func summarize(_ tickets: [ScannedTicket]) -> [String] {
+    static func summary(for tickets: [ScannedTicket]) -> [String] {
         var warnings: [String] = []
         if tickets.isEmpty {
             warnings.append("没认出彩票。目前支持双色球和大乐透的单式、复式、胆拖票。")

@@ -18,18 +18,53 @@ enum TicketVisionScanner {
         }
     }
 
-    static func scan(_ image: UIImage) async throws -> ScanResult {
-        let fragments = try await recognizeFragments(in: image)
-        var result = TicketTextParser.parse(blocks: LayoutSegmenter.blocks(from: fragments))
-        if result.tickets.isEmpty {
-            // 一次没认出来就把图片放大再来一遍，热敏票小字很吃分辨率
-            if let upscaled = upscale(image, factor: 2),
-               let retry = try? await recognizeFragments(in: upscaled) {
-                let second = TicketTextParser.parse(blocks: LayoutSegmenter.blocks(from: retry))
-                if !second.tickets.isEmpty { result = second }
+    /// 一次扫描的产物：识别结果 + 每张票裁下来的正片。
+    struct ScannedPage {
+        var result = ScanResult()
+        /// 按票的 id 存它自己那张裁切矫正后的图，复核和改号的时候贴出来。
+        var images: [ScannedTicket.ID: UIImage] = [:]
+        /// 预处理认出来几张票。为 0 表示没找到票框，走的是整图兜底。
+        var detectedRegions = 0
+    }
+
+    static func scan(_ image: UIImage) async throws -> ScannedPage {
+        var page = ScannedPage()
+
+        // 第一步：把画面里的每张票找出来、摆正、裁下来、放大。
+        // 逐张识别比整图识别准得多 —— 斜的字被拉正了，小字被放大了，
+        // 几张票之间也不会再串行。
+        let regions = await TicketImagePreprocessor.regions(in: image)
+        page.detectedRegions = regions.count
+
+        for region in regions {
+            guard let fragments = try? await recognizeFragments(in: region.image) else { continue }
+            let parsed = TicketTextParser.parse(blocks: LayoutSegmenter.blocks(from: fragments))
+            for ticket in parsed.tickets {
+                page.result.tickets.append(ticket)
+                page.images[ticket.id] = region.image
             }
+            page.result.rawText += (page.result.rawText.isEmpty ? "" : "\n\n———\n\n") + parsed.rawText
         }
-        return result
+
+        // 找不到票框，或者裁出来的块一张票都没认出来：退回整图。
+        // 版面切分（递归 XY 切分）仍然能处理并排的两张票。
+        if page.result.tickets.isEmpty {
+            let fragments = try await recognizeFragments(in: image)
+            var result = TicketTextParser.parse(blocks: LayoutSegmenter.blocks(from: fragments))
+            if result.tickets.isEmpty {
+                // 最后一招：整图放大再来一遍，热敏票小字很吃分辨率
+                if let upscaled = upscale(image, factor: 2),
+                   let retry = try? await recognizeFragments(in: upscaled) {
+                    let second = TicketTextParser.parse(blocks: LayoutSegmenter.blocks(from: retry))
+                    if !second.tickets.isEmpty { result = second }
+                }
+            }
+            page.result = result
+            for ticket in result.tickets { page.images[ticket.id] = image }
+        } else {
+            page.result.warnings = TicketTextParser.summary(for: page.result.tickets)
+        }
+        return page
     }
 
     // MARK: - 文字识别

@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Charts
+import UIKit
 
 /// 记录集合的变化指纹。
 ///
@@ -20,8 +21,6 @@ struct RecordsToken: Equatable {
 }
 
 struct HomeView: View {
-    var onOpenEntry: () -> Void
-    var onOpenScan: () -> Void
 
     @Environment(DrawStore.self) private var drawStore
     @Query(sort: \TicketRecord.createdAt, order: .reverse) private var records: [TicketRecord]
@@ -35,7 +34,6 @@ struct HomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isDrawSheetPresented = false
     /// 点开奖卡片上的省略球时，把整期号码摊开给用户看。
-    @State private var expandedDraw: Draw?
 
     /// 开奖日程也不能在 body 里算。`todayOpenGames` / `pendingDrawUpdates` /
     /// `carouselOrder` 每次都要取一遍东八区时间、过一遍八个彩种，
@@ -68,9 +66,6 @@ struct HomeView: View {
                     }
                     .accessibilityLabel("统计")
                 }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                FloatingActionButtons(onScan: onOpenScan, onAdd: onOpenEntry)
             }
             .refreshable { await drawStore.refresh() }
             .task(id: RecordsToken(records)) { recompute() }
@@ -179,18 +174,21 @@ struct HomeView: View {
                 ForEach(Array(carouselGames.enumerated()), id: \.element) { index, game in
                     DrawCard(game: game,
                              draw: drawStore.latestDraw(for: game),
-                             opensToday: todayGames.contains(game),
-                             onExpandNumbers: { expandedDraw = drawStore.latestDraw(for: game) })
+                             opensToday: todayGames.contains(game))
                         // 分页是整屏宽翻的，卡片自己不留边就会和下一张严丝合缝地
                         // 贴在一起，滑动时看起来像一整条在动，分不出是两张卡。
-                        .padding(.horizontal, 5)
+                        .padding(.horizontal, HomeLayout.carouselPagePadding)
                         .tag(index)
                 }
             }
             // 系统自带的分页圆点画在 TabView 的画布里，会压在卡片下沿上。
             // 关掉它自己画一排放到卡片外面，既不重叠也能控制配色。
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: 140)
+            // 高度跟着**当前这一页**的内容走。快乐8 要两行球，
+            // 其余彩种一行就够 —— 让所有页都按最高的那张撑开，
+            // 剩下七张卡片下面就会空出一大片。
+            .frame(height: carouselHeight)
+            .animation(.spring(duration: 0.32, bounce: 0.1), value: carouselHeight)
             .accessibilityHint("左右滑动查看其他彩种的最新开奖")
             // 手一碰就停自动轮播。轮播抢走用户正在看的那张卡是很讨厌的事。
             .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in
@@ -203,9 +201,20 @@ struct HomeView: View {
         .sheet(isPresented: $isDrawSheetPresented) {
             DrawHistoryView()
         }
-        .sheet(item: $expandedDraw) { draw in
-            DrawNumbersSheet(draw: draw)
-        }
+    }
+
+    /// 当前这一页要多高。
+    private var carouselHeight: CGFloat {
+        guard carouselGames.indices.contains(carouselIndex) else { return 140 }
+        let game = carouselGames[carouselIndex]
+        let draw = drawStore.latestDraw(for: game)
+        let prizeRows = Swift.min(draw?.prizeList.filter {
+            ($0.prizeName.contains("一等奖") || $0.prizeName.contains("二等奖"))
+                && ($0.winningCount > 0 || $0.amount > 0)
+        }.count ?? 0, 2)
+        return DrawCardMetrics.cardHeight(for: draw,
+                                          containerWidth: HomeLayout.screenWidth - HomeLayout.pagePadding * 2,
+                                          prizeRows: prizeRows)
     }
 
     /// 开奖卡片自动轮播。
@@ -329,6 +338,26 @@ struct HomeView: View {
     }
 }
 
+/// 首页的固定尺寸。
+///
+/// 开奖卡片的号码块高度必须在 `GeometryReader` **外面**算出来
+/// （高度依赖自身宽度会成布局环），所以内宽在这里统一算一次：
+/// 屏幕宽 − 页面左右 16 − 轮播页左右 5 − 卡片左右 14。
+enum HomeLayout {
+    static let pagePadding: CGFloat = 16
+    static let carouselPagePadding: CGFloat = 5
+
+    static var screenWidth: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow?.bounds.width }
+            .first ?? 393
+    }
+
+    static var drawCardInnerWidth: CGFloat {
+        screenWidth - pagePadding * 2 - carouselPagePadding * 2 - DrawCardMetrics.horizontalPadding * 2
+    }
+}
+
 // MARK: - 盈亏热力图
 
 /// 逐日盈亏方格图。
@@ -396,27 +425,58 @@ struct ProfitHeatmap: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 7) {
+            // 图例和「最好的一天」放在图**上面**：先看懂颜色的含义，再看图。
+            // 放在下面等于让人看完一遍图再回头找说明。
+            topBar
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: gap) {
-                    ForEach(Array(weeks.enumerated()), id: \.offset) { _, column in
-                        VStack(spacing: gap) {
-                            ForEach(Array(column.enumerated()), id: \.offset) { _, date in
-                                cellView(for: date)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .top, spacing: gap) {
+                        ForEach(Array(weeks.enumerated()), id: \.offset) { _, column in
+                            VStack(spacing: gap) {
+                                ForEach(Array(column.enumerated()), id: \.offset) { _, date in
+                                    cellView(for: date)
+                                }
                             }
                         }
                     }
+                    monthScale
                 }
                 .padding(.vertical, 1)
             }
             // 从右往左看更符合「最近的在手边」，默认停在最新的一周
             .defaultScrollAnchor(.trailing)
-
-            legend
         }
-        .frame(height: cell * 7 + gap * 6 + 30)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("逐日盈亏方格图，共 \(byDay.count) 天有记录")
+    }
+
+    /// 月份刻度。跟着方格一起横向滚动，所以必须画在 ScrollView **里面**，
+    /// 而且每个标签的横向位置要和它那一列对齐 —— 用等宽的列去铺，
+    /// 只在每个月的第一列写字。
+    private var monthScale: some View {
+        HStack(alignment: .top, spacing: gap) {
+            ForEach(Array(weeks.enumerated()), id: \.offset) { index, column in
+                Text(monthLabel(at: index, column: column))
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .frame(width: cell, alignment: .leading)
+            }
+        }
+    }
+
+    /// 这一列是不是某个月的第一列。是就写「5月」，否则留空。
+    private func monthLabel(at index: Int, column: [Date?]) -> String {
+        let calendar = Calendar.chinaCalendar
+        guard let first = column.compactMap({ $0 }).first else { return "" }
+        let month = calendar.component(.month, from: first)
+        // 第一列只有在这个月还剩够多天时才标，否则标签会被挤在最左边
+        if index == 0 {
+            return column.compactMap { $0 }.count >= 4 ? "\(month)月" : ""
+        }
+        guard let previous = weeks[index - 1].compactMap({ $0 }).last else { return "" }
+        return calendar.component(.month, from: previous) == month ? "" : "\(month)月"
     }
 
     @ViewBuilder
@@ -442,9 +502,14 @@ struct ProfitHeatmap: View {
         return (day.net >= 0 ? Palette.profit : Palette.loss).opacity(level)
     }
 
-    private var legend: some View {
+    /// 图例 + 最好的一天。
+    ///
+    /// 图例的字收成「亏 / 赚」两个字。原来写「全亏 / 大赚」是想说明色阶的
+    /// 两端，但色块本身已经从浅到深排开了，浓度的含义一眼就看得出来，
+    /// 那两个字只是把一行挤窄。
+    private var topBar: some View {
         HStack(spacing: 6) {
-            Text("全亏")
+            Text("亏")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             ForEach([1.0, 0.55, 0.25], id: \.self) { level in
@@ -460,14 +525,14 @@ struct ProfitHeatmap: View {
                     .fill(Palette.profit.opacity(0.30 + 0.70 * level))
                     .frame(width: 9, height: 9)
             }
-            Text("大赚")
+            Text("赚")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
             if let best = days.filter({ $0.count > 0 }).max(by: { $0.net < $1.net }), best.net > 0 {
                 Text("最好的一天 \(MoneyText.format(best.net))")
                     .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.profit)
                     .lineLimit(1)
             }
         }
@@ -551,91 +616,142 @@ struct SpendBreakdown: View {
 
 // MARK: - 开奖卡
 
+/// 开奖卡片的尺寸计算。
+///
+/// 卡片高度由**内容**决定，不再写死。号码球的直径也是算出来的：
+/// 先定这一行要放几颗，再用可用宽度反推球径，这样任何彩种都不会出现
+/// 「最后一颗球被挤到第二行」——那正是之前反复出现的问题。
+enum DrawCardMetrics {
+    static let maxBall: CGFloat = 30
+    static let minBall: CGFloat = 19
+    /// 球之间、号码区之间的间隙，和 `BallFlow` 里的系数保持一致。
+    static let ballGap: CGFloat = 0.19
+    static let sectionGap: CGFloat = 0.24
+    static let lineGap: CGFloat = 0.22
+    /// 卡片自己的左右内边距。
+    static let horizontalPadding: CGFloat = 14
+    /// 快乐8 一期开 20 个号，一行放 10 颗、正好两行。
+    static let k8PerRow = 10
+
+    /// 一张票要画几颗球、分成几个号码区。
+    static func layout(for draw: Draw) -> (balls: Int, sections: Int) {
+        var balls = 0
+        var sections = 0
+        for section in draw.gameKey.drawSections {
+            let count = draw.drawValues[section.key].count
+            guard count > 0 else { continue }
+            balls += count
+            sections += 1
+        }
+        return (balls, sections)
+    }
+
+    /// 每行放几颗。快乐8 固定 10 颗一行，其余彩种一行放完。
+    static func perRow(for draw: Draw) -> Int {
+        draw.gameKey == .k8 ? k8PerRow : Swift.max(layout(for: draw).balls, 1)
+    }
+
+    static func rows(for draw: Draw) -> Int {
+        let balls = Swift.max(layout(for: draw).balls, 1)
+        return Int(ceil(Double(balls) / Double(perRow(for: draw))))
+    }
+
+    /// 一行能放下 `perRow` 颗球的最大球径。
+    ///
+    /// 分母是「以球径为单位」的总宽：`n` 颗球 + `n-1` 个球间隙 + 号码区间隙。
+    /// 末尾特意留 2pt 余量 —— 布局里到处是浮点乘法，算得刚刚好就会因为
+    /// 零点几个像素的误差换行，而换行的代价是整张卡片的排版垮掉。
+    static func ballSize(for draw: Draw, width: CGFloat) -> CGFloat {
+        let (balls, sections) = layout(for: draw)
+        guard balls > 0, width > 0 else { return maxBall }
+        let n = Swift.min(perRow(for: draw), balls)
+        // 一行之内跨号码区才需要留区间隙；快乐8 只有一个区
+        let gaps = sections > 1 && n >= balls ? CGFloat(sections - 1) * sectionGap : 0
+        let units = CGFloat(n) + CGFloat(n - 1) * ballGap + gaps
+        return Swift.max(minBall, Swift.min(maxBall, ((width - 2) / units).rounded(.down)))
+    }
+
+    /// 号码那一块的高度。
+    static func numbersHeight(for draw: Draw, width: CGFloat) -> CGFloat {
+        let size = ballSize(for: draw, width: width)
+        let rowCount = CGFloat(rows(for: draw))
+        return rowCount * size + (rowCount - 1) * size * lineGap
+    }
+
+    /// 整张卡片的高度。轮播要求各页等高，所以外面按**当前这一页**取值。
+    static func cardHeight(for draw: Draw?, containerWidth: CGFloat, prizeRows: Int) -> CGFloat {
+        let inner = containerWidth - horizontalPadding * 2
+        let numbers = draw.map { numbersHeight(for: $0, width: inner) } ?? maxBall
+        // 顶部标题 22 + 上下内边距 24 + 段间距 16 + 每行奖项 16
+        return 22 + 24 + 16 + numbers + CGFloat(prizeRows) * 16
+    }
+}
+
 /// 首页轮播里的一张开奖卡。
 ///
-/// 高度是抠出来的：标题、号码、一等奖三块之间原来各留了一大段空白，
-/// 卡片被撑到近 200pt。现在固定成紧凑的三段式。
+/// 三段式：标题顶格、号码居中、奖项贴底。高度由内容决定。
 struct DrawCard: View {
     let game: GameKey
     let draw: Draw?
     /// 这个彩种今天开奖。原来「今日开奖」是页面顶部单独一行标签，
     /// 和它描述的卡片隔得很远；写进卡片里既更省地方也更好懂。
     var opensToday: Bool = false
-    var onExpandNumbers: (() -> Void)?
 
-    /// 首页每个号码区最多画 8 颗球。快乐8 一期开 20 个，
-    /// 全画出来要么撑爆卡片要么缩到看不清。
-    private let ballLimit = 8
-    private let ballSize: CGFloat = 32
-
-    private var firstPrize: PrizeEntry? {
-        guard let entry = draw?.firstPrize, entry.winningCount > 0 || entry.amount > 0 else { return nil }
-        return entry
+    /// 一二等奖。数据仓库里各奖级都有，卡片上列前两级就够了 ——
+    /// 三等奖往下金额小、信息量低，占地方。
+    private var topPrizes: [PrizeEntry] {
+        guard let list = draw?.prizeList else { return [] }
+        return ["一等奖", "二等奖"].compactMap { name in
+            list.first { $0.prizeName.contains(name) && ($0.winningCount > 0 || $0.amount > 0) }
+        }
     }
 
     var body: some View {
-        // 三段各归各位：标题顶格、号码居中、一等奖贴底。
-        // 早期版本把整组内容在卡片里垂直居中，结果标题浮在半空，
-        // 而且卡片高度一固定，号码一换行就会压到一等奖那一行上。
         VStack(alignment: .leading, spacing: 8) {
             header
             Spacer(minLength: 0)
             numbersRow
             Spacer(minLength: 0)
-            if let firstPrize {
-                prizeStrip(firstPrize)
+            if !topPrizes.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(topPrizes.enumerated()), id: \.offset) { _, entry in
+                        prizeStrip(entry)
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.vertical, 12)
-        .padding(.horizontal, 14)
+        .padding(.horizontal, DrawCardMetrics.horizontalPadding)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Palette.card)
         )
     }
 
-    /// 号码那一行。
-    ///
-    /// **必须保证不换行。** 卡片高度是固定的（轮播要求各页等高），
-    /// 一旦号码排到第二行就会盖住一等奖那一行 —— 快乐8 尤其明显：
-    /// 8 颗球加一颗省略球，按 32pt 画出来正好比卡片可用宽度多十几个点。
-    /// 所以这里先量出可用宽度，再反推一个能把所有球放进一行的球径。
+    /// 号码。球径按可用宽度反推，保证每行正好放下该放的颗数。
     @ViewBuilder
     private var numbersRow: some View {
         if let draw {
             GeometryReader { proxy in
-                let size = fittingBallSize(for: draw, width: proxy.size.width)
-                DrawNumbersView(draw: draw, size: size, limit: ballLimit, onOverflow: onExpandNumbers)
-                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
+                let size = DrawCardMetrics.ballSize(for: draw, width: proxy.size.width)
+                DrawNumbersView(draw: draw, size: size)
+                    .frame(width: proxy.size.width, alignment: .leading)
             }
-            .frame(height: ballSize)
+            .frame(height: DrawCardMetrics.numbersHeight(for: draw, width: cardInnerWidth))
         } else {
             Text("暂无开奖数据")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .frame(height: ballSize)
+                .frame(height: DrawCardMetrics.maxBall)
         }
     }
 
-    /// 一行放得下的最大球径。系数和 `BallFlow` 里的间距一致：
-    /// 球间 0.19 倍球径，号码区之间再多 0.24 倍。
-    private func fittingBallSize(for draw: Draw, width: CGFloat) -> CGFloat {
-        var balls = 0
-        var sections = 0
-        for section in draw.gameKey.drawSections {
-            let all = draw.drawValues[section.key]
-            guard !all.isEmpty else { continue }
-            balls += Swift.min(all.count, ballLimit)
-            if all.count > ballLimit { balls += 1 }   // 省略球也占一颗的位置
-            sections += 1
-        }
-        guard balls > 0, width > 0 else { return ballSize }
-        let units = CGFloat(balls)
-            + CGFloat(balls - 1) * 0.19
-            + CGFloat(Swift.max(sections - 1, 0)) * 0.24
-        return Swift.min(ballSize, (width / units).rounded(.down))
+    /// 号码块的高度得在 GeometryReader **外面**定，否则高度依赖自身宽度会成环。
+    /// 这里用屏幕宽度反推一个和实际布局一致的内宽。
+    private var cardInnerWidth: CGFloat {
+        HomeLayout.drawCardInnerWidth
     }
 
     private var header: some View {
@@ -667,13 +783,14 @@ struct DrawCard: View {
         }
     }
 
-    /// 一等奖那一行。信息密度最高的「单注奖金」要被强调出来。
+    /// 一个奖级一行。奖金后面不再跟「/注」—— 一二等奖本来就是按注计的，
+    /// 那两个字每行都重复一遍，纯占地方。
     private func prizeStrip(_ entry: PrizeEntry) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: "trophy.fill")
+            Image(systemName: entry.prizeName.contains("一等奖") ? "trophy.fill" : "rosette")
                 .font(.system(size: 10))
                 .foregroundStyle(game.tint)
-            Text("一等奖 \(entry.winningCount) 注")
+            Text("\(entry.prizeName.contains("一等奖") ? "一等奖" : "二等奖") \(entry.winningCount) 注")
                 .font(.caption2)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -685,61 +802,7 @@ struct DrawCard: View {
                     .foregroundStyle(game.tint)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                Text("/注")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
             }
         }
-    }
-}
-
-/// 展开一期的全部开奖号码。快乐8 那 20 个号在卡片上放不下，
-/// 点省略球就弹这个。
-struct DrawNumbersSheet: View {
-    let draw: Draw
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    ForEach(draw.gameKey.drawSections) { section in
-                        let values = draw.drawValues[section.key]
-                        if !values.isEmpty {
-                            VStack(alignment: .leading, spacing: 10) {
-                                HStack(spacing: 6) {
-                                    Text(section.label)
-                                        .font(.subheadline.weight(.bold))
-                                        .foregroundStyle(section.color.accentColor)
-                                    Text("\(values.count) 个")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                // 球径和其他彩种一致，放不下就换行
-                                BallFlow(spacing: 7, lineSpacing: 9) {
-                                    ForEach(Array(values.enumerated()), id: \.offset) { _, value in
-                                        BallView(value: value, color: section.color, size: 34,
-                                                 padded: section.range.upperBound > 9)
-                                    }
-                                }
-                            }
-                            .contentCard()
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 6)
-                .padding(.bottom, 30)
-            }
-            .background(Palette.canvas)
-            .navigationTitle("\(draw.gameKey.label) 第 \(draw.expect) 期")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
     }
 }

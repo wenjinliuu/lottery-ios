@@ -3,8 +3,6 @@ import SwiftData
 
 /// 票夹：每次购买是一张电子票，按购买时间倒序。
 struct WalletView: View {
-    var onOpenEntry: () -> Void
-    var onOpenScan: () -> Void
 
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.modelContext) private var context
@@ -68,9 +66,6 @@ struct WalletView: View {
                     .accessibilityLabel("重新核对全部票据")
                 }
             }
-            .overlay(alignment: .bottomTrailing) {
-                FloatingActionButtons(onScan: onOpenScan, onAdd: onOpenEntry)
-            }
             .refreshable {
                 await drawStore.refresh()
                 await recheck(silent: true)
@@ -94,9 +89,12 @@ struct WalletView: View {
     /// 首屏之外的票走一个单独的完整列表页，而不是在首页无限往下堆。
     private var moreButton: some View {
         NavigationLink {
+            // 传**全部**票进去，让那一页自己筛。只把当前筛选结果传进去的话，
+            // 那一页顶上再放一排筛选就成了在筛选之后的结果里再筛，
+            // 用户切到「已中奖」会发现什么都没有。
             WalletAllTicketsView(
-                cards: visibleCards,
-                title: filter == .all ? "全部电子票" : filter.label,
+                cards: cards,
+                initialFilter: filter,
                 expandedBatches: $expandedBatches,
                 onDelete: delete,
                 onCelebrate: { celebrate() }
@@ -123,7 +121,7 @@ struct WalletView: View {
     }
 
     private func rebuild() {
-        let snapshot = TicketCard.snapshot(records)
+        let snapshot = TicketCard.orderForWallet(TicketCard.snapshot(records))
         cards = snapshot
         var tally: [WalletFilter: Int] = [:]
         for item in WalletFilter.allCases {
@@ -189,10 +187,7 @@ struct WalletView: View {
             ContentUnavailableView {
                 Label("票夹是空的", systemImage: "wallet.bifold")
             } description: {
-                Text("扫描纸质彩票，或手动录入已经购买的号码")
-            } actions: {
-                Button("添加彩票", action: onOpenEntry)
-                    .buttonStyle(SecondaryGlassButton(tint: .accentColor))
+                Text("扫描纸质彩票，或手动录入已经购买的号码 —— 右下角那颗加号就是入口")
             }
             .padding(.top, 50)
         } else {
@@ -225,9 +220,9 @@ struct WalletView: View {
     private func delete(_ item: TicketCard) {
         do {
             try RecordService(context: context, drawStore: drawStore).delete(batchId: item.id)
-            showToast("已删除这张票", symbol: "trash")
+            showToast("已删除这张票", symbol: "trash", feedback: .success)
         } catch {
-            showToast("删除失败", symbol: "exclamationmark.triangle")
+            showToast("删除失败", symbol: "exclamationmark.triangle", feedback: .error)
         }
     }
 
@@ -237,7 +232,7 @@ struct WalletView: View {
         await drawStore.loadAllHistories()
         let service = RecordService(context: context, drawStore: drawStore)
         guard let outcome = try? service.checkAll(records) else {
-            if !silent { showToast("核对失败", symbol: "exclamationmark.triangle") }
+            if !silent { showToast("核对失败", symbol: "exclamationmark.triangle", feedback: .error) }
             return
         }
         // 中奖是这个 App 里最值得庆祝的一刻，静默刷新也要放烟花
@@ -246,27 +241,48 @@ struct WalletView: View {
         if outcome.checked == 0 {
             showToast("暂无可核对的新开奖")
         } else if outcome.won > 0 {
-            showToast("核对 \(outcome.checked) 注 · 中奖 \(outcome.won) 注", symbol: "trophy.fill")
+            showToast("核对 \(outcome.checked) 注 · 中奖 \(outcome.won) 注", symbol: "trophy.fill", feedback: .success)
         } else {
-            showToast("已核对 \(outcome.checked) 注")
+            showToast("已核对 \(outcome.checked) 注", feedback: .success)
         }
     }
 }
 
 /// 完整电子票列表。票夹首屏只放前 10 张，其余在这里翻。
+/// 完整票列表。
+///
+/// 这一页原来只是把票铺开，**顶上的筛选条没跟过来** —— 首页只放十张，
+/// 真正要找一张票的时候恰恰是在这一页，反而没得筛。现在筛选比首页还多一档：
+/// 除了状态，还能按彩种筛。
 struct WalletAllTicketsView: View {
     let cards: [TicketCard]
-    let title: String
+    var initialFilter: WalletFilter = .all
     @Binding var expandedBatches: Set<String>
     let onDelete: (TicketCard) -> Void
     var onCelebrate: (() -> Void)?
 
     @Environment(DrawStore.self) private var drawStore
+    @State private var status: WalletFilter = .all
+    @State private var game: GameKey?
+
+    /// 出现过的彩种。没买过的彩种不该占着筛选条。
+    private var games: [GameKey] {
+        GameKey.ordered.filter { key in cards.contains { $0.game == key } }
+    }
+
+    private var filtered: [TicketCard] {
+        cards.filter { status.matches($0.status) && (game == nil || $0.game == game) }
+    }
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                ForEach(cards) { item in
+                filterBars
+                if filtered.isEmpty {
+                    ContentUnavailableView("没有符合条件的票", systemImage: "line.3.horizontal.decrease.circle")
+                        .padding(.top, 40)
+                }
+                ForEach(filtered) { item in
                     WalletTicketCard(
                         card: item,
                         isExpanded: expandedBatches.contains(item.id),
@@ -290,8 +306,56 @@ struct WalletAllTicketsView: View {
             .padding(.bottom, 40)
         }
         .background(Palette.canvas)
-        .navigationTitle(title)
+        .navigationTitle("全部电子票")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { status = initialFilter }
+    }
+
+    /// 两条筛选：状态一条，彩种一条。
+    private var filterBars: some View {
+        VStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(WalletFilter.allCases) { item in
+                        let count = cards.reduce(0) { $0 + (item.matches($1.status) ? 1 : 0) }
+                        chip(title: "\(item.label) \(count)",
+                             isOn: status == item,
+                             tint: item.tint) { status = item }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .scrollClipDisabled()
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    chip(title: "全部彩种", isOn: game == nil, tint: .accentColor) { game = nil }
+                    ForEach(games) { key in
+                        chip(title: key.label, isOn: game == key, tint: key.tint) { game = key }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .scrollClipDisabled()
+        }
+        .animation(.easeOut(duration: 0.18), value: status)
+        .animation(.easeOut(duration: 0.18), value: game)
+        .padding(.bottom, 2)
+    }
+
+    private func chip(title: String, isOn: Bool, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(isOn ? Color.white : Color.primary)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
+                .background(isOn ? AnyShapeStyle(tint) : AnyShapeStyle(Color.primary.opacity(0.06)),
+                            in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
     }
 }
 
@@ -307,6 +371,16 @@ enum WalletFilter: String, CaseIterable, Identifiable {
         case .pending: "待核对"
         case .won: "已中奖"
         case .lost: "未中奖"
+        }
+    }
+
+    /// 筛选芯片选中时的底色。「待核对」用提示黄，和票面上的状态标一致。
+    var tint: Color {
+        switch self {
+        case .all: .accentColor
+        case .pending: Palette.warning
+        case .won: Palette.profit
+        case .lost: Color.secondary
         }
     }
 

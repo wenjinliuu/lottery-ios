@@ -18,21 +18,12 @@ struct TicketPaper<Content: View>: View {
             .padding(.horizontal, 16)
             .padding(.top, 15)
             .padding(.bottom, 13)
-            .background {
-                ZStack {
-                    Palette.card
-                    // 右上角的彩种辉光，很轻，只用来区分彩种
-                    RadialGradient(
-                        colors: [game.tint.opacity(0.13), .clear],
-                        center: .init(x: 1, y: 0),
-                        startRadius: 0,
-                        endRadius: 200
-                    )
-                }
-                .clipShape(shape)
-            }
+            // 票面就是一张白纸。右上角原来有一层彩种辉光，本意是区分彩种，
+            // 实际效果是每张卡片都糊着一块颜色，一列卡片刷下来很脏；
+            // 而且彩种已经有描边和标题两处在说了，第三处纯属重复。
+            .background(Palette.card, in: shape)
             .overlay {
-                shape.stroke(game.tint.opacity(0.14), lineWidth: 1)
+                shape.stroke(game.tint.opacity(0.30), lineWidth: 1)
             }
             .overlay(alignment: .topLeading) { notches }
     }

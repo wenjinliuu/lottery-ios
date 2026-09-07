@@ -130,54 +130,49 @@ private struct BurstView: View {
 
 // MARK: - 中奖票上的常驻烟花
 
-/// 中奖彩票卡片上持续绽放的小烟花。
+/// 中奖彩票卡片上持续的一点光。
 ///
-/// 和 `CelebrationView` 的区别是「一次性」对「常驻」：那个是核出中奖的
-/// 那一瞬间放一次的大场面，这个是留在票上的一点持续的光。
+/// 第一版是六个圆点各自放大淡出，效果很像加载动画 —— 因为圆点放大再消失
+/// 正是所有 loading spinner 的语言。烟花之所以是烟花，靠的是**从一点向外
+/// 迸开的一簇**，而不是单个点变大。
 ///
-/// 预算控制得很紧，因为票夹里可能同时有十几张中奖票在画：
-/// 粒子位置是**固定的**（不是每帧随机），动画交给 CoreAnimation 的
-/// `repeatForever`，提交一次之后主线程就不再参与。
+/// 所以这一版改成小而密的一簇：每处四粒火星朝不同方向飞出去，飞的过程中
+/// 从亮到暗、从大到小，末尾还带一点下坠。一次只放一处，几处轮着来，
+/// 屏幕上永远只有四五粒在动 —— 票夹里同时十几张中奖票也不会拖慢。
+///
+/// 预算控制得很紧：火星位置是**固定的**（不是每帧随机），动画交给
+/// CoreAnimation 的 `repeatForever`，提交一次之后主线程就不再参与。
 struct TicketSparkleOverlay: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isAnimating = false
 
-    /// 固定的绽放点。避开卡片正中间 —— 那里压着号码。
-    private struct Spark: Identifiable {
+    /// 一簇火星的起爆点。避开卡片正中间 —— 那里压着号码。
+    private struct Burst: Identifiable {
         let id: Int
         let x: CGFloat
         let y: CGFloat
-        let size: CGFloat
         let delay: Double
-        let color: BallColor
+        let colors: [BallColor]
     }
 
-    private static let sparks: [Spark] = [
-        Spark(id: 0, x: 0.09, y: 0.16, size: 6, delay: 0.00, color: .red),
-        Spark(id: 1, x: 0.93, y: 0.24, size: 5, delay: 0.45, color: .yellow),
-        Spark(id: 2, x: 0.24, y: 0.86, size: 5, delay: 0.90, color: .blue),
-        Spark(id: 3, x: 0.78, y: 0.78, size: 7, delay: 1.35, color: .plum),
-        Spark(id: 4, x: 0.52, y: 0.07, size: 5, delay: 1.80, color: .k8orange),
-        Spark(id: 5, x: 0.05, y: 0.55, size: 5, delay: 2.25, color: .amber)
+    private static let bursts: [Burst] = [
+        Burst(id: 0, x: 0.10, y: 0.17, delay: 0.0, colors: [.red, .yellow, .k8orange, .plum]),
+        Burst(id: 1, x: 0.91, y: 0.30, delay: 1.1, colors: [.blue, .plum, .fc3d, .yellow]),
+        Burst(id: 2, x: 0.22, y: 0.85, delay: 2.2, colors: [.yellow, .red, .amber, .blue]),
+        Burst(id: 3, x: 0.80, y: 0.80, delay: 3.3, colors: [.plum, .k8orange, .fc3d, .red])
     ]
+
+    /// 四个飞出方向，斜向铺开比正十字更像迸开
+    private static let angles: [Double] = [-0.9, -0.25, 0.35, 1.05]
+    private static let cycle: Double = 4.4
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                ForEach(Self.sparks) { spark in
-                    Circle()
-                        .fill(spark.color.accentColor)
-                        .frame(width: spark.size, height: spark.size)
-                        .scaleEffect(isAnimating ? 1.9 : 0.35)
-                        .opacity(isAnimating ? 0 : 0.95)
-                        .position(x: proxy.size.width * spark.x,
-                                  y: proxy.size.height * spark.y)
-                        .animation(
-                            .easeOut(duration: 1.5)
-                                .repeatForever(autoreverses: false)
-                                .delay(spark.delay),
-                            value: isAnimating
-                        )
+                ForEach(Self.bursts) { burst in
+                    ForEach(Array(Self.angles.enumerated()), id: \.offset) { index, angle in
+                        spark(burst: burst, angle: angle, index: index, in: proxy.size)
+                    }
                 }
             }
         }
@@ -189,5 +184,27 @@ struct TicketSparkleOverlay: View {
             guard !reduceMotion else { return }
             isAnimating = true
         }
+    }
+
+    private func spark(burst: Burst, angle: Double, index: Int, in size: CGSize) -> some View {
+        let distance: CGFloat = 13 + CGFloat(index % 2) * 5
+        let origin = CGPoint(x: size.width * burst.x, y: size.height * burst.y)
+        let color = burst.colors[index % burst.colors.count].accentColor
+        return Circle()
+            .fill(color)
+            .frame(width: 3.4, height: 3.4)
+            // 飞出去的同时缩小，末段再往下坠一点点 —— 火星就是这么熄的
+            .scaleEffect(isAnimating ? 0.35 : 1.25)
+            .opacity(isAnimating ? 0 : 1)
+            .offset(x: isAnimating ? cos(angle) * distance : 0,
+                    y: isAnimating ? sin(angle) * distance + 5 : 0)
+            .position(origin)
+            .animation(
+                .easeOut(duration: 0.85)
+                    .repeatForever(autoreverses: false)
+                    // 每处之间隔开一秒多，同一时刻屏幕上只有一簇在飞
+                    .delay(burst.delay + Double(index) * 0.05),
+                value: isAnimating
+            )
     }
 }

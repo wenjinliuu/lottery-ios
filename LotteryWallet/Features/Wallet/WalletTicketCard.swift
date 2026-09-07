@@ -65,7 +65,7 @@ struct WalletTicketCard: View {
         .contextMenu {
             Button("复制号码", systemImage: "doc.on.doc") {
                 UIPasteboard.general.string = card.copyText
-                showToast("号码已复制", symbol: "doc.on.doc")
+                showToast("号码已复制", symbol: "doc.on.doc", feedback: .success)
             }
             Button("删除这张票", systemImage: "trash", role: .destructive) {
                 isDeleteConfirmPresented = true
@@ -86,6 +86,9 @@ struct WalletTicketCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(game.label)
                     .font(.headline)
+                    // 彩种名用彩种色。票面上唯一该带颜色的就是它和描边，
+                    // 一列卡片刷下来靠这两处认彩种，比一块底色干净得多。
+                    .foregroundStyle(game.accent.accentColor)
                 Text(issueText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)

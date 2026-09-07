@@ -117,15 +117,38 @@ struct RecordService {
         let targets = records ?? allRecords()
         var checked = 0
         var won = 0
+        var repaired = 0
         for record in targets {
-            let needsMatchRepair = record.matchedData.isEmpty && record.status.isFinal
-            guard record.status == .pending || record.status == .prizeFloat || needsMatchRepair else { continue }
-            guard apply(record) else { continue }
-            checked += 1
-            if record.status == .won { won += 1 }
+            if record.status == .pending || record.status == .prizeFloat {
+                guard apply(record) else { continue }
+                checked += 1
+                if record.status == .won { won += 1 }
+            } else if record.matchedData.isEmpty {
+                if repairMatches(record) { repaired += 1 }
+            }
         }
-        if checked > 0 { try context.save() }
+        if checked > 0 || repaired > 0 { try context.save() }
         return (checked, won)
+    }
+
+    /// 只补命中标记，**不动**状态和奖金。
+    ///
+    /// 这一步刻意不走 `apply`。已结算的记录里状态和奖金是当初核对出来、
+    /// 用户也已经看过的事实；重算一遍等于拿今天的开奖数据去覆盖它，
+    /// 只要有一处对不上（最典型的是大乐透追加：奖池行缺了追加那一档，
+    /// `PrizeRules` 会算出 0 元），一张真的中过奖的票就会被改成「未中奖」。
+    /// 补标记是为了让号码球显示正确，不该有能力改写账目。
+    @discardableResult
+    func repairMatches(_ record: TicketRecord) -> Bool {
+        guard record.matchedData.isEmpty,
+              let draw = drawStore.draw(matching: record) else { return false }
+        let result = PrizeRules.evaluate(gameKey: record.game,
+                                         ticket: record.ticket,
+                                         draw: draw,
+                                         multiple: record.multiple)
+        guard !result.matched.isEmpty else { return false }
+        record.matched = result.matched
+        return true
     }
 
     /// 需要补命中标记的记录横跨哪些「彩种 × 年份」。
@@ -364,6 +387,28 @@ extension TicketCard {
     }
 
     /// 记录变化时一次性把全部电子票抽成快照。
+    /// 票夹的排序键。
+    ///
+    /// 待核对的排在最前面，且**开奖日升序** —— 最近就要开的那一期排最上，
+    /// 它是唯一还需要用户操心的东西。已核对的跟在后面，**开奖日降序**，
+    /// 刚出结果的在上。同一天之内按创建时间倒序。
+    var sortKey: (group: Int, date: String, created: Date) {
+        let day = openDate.isEmpty ? DateText.day(createdAt) : openDate
+        return (status == .pending ? 0 : 1, day, createdAt)
+    }
+
+    static func orderForWallet(_ cards: [TicketCard]) -> [TicketCard] {
+        cards.sorted { lhs, rhs in
+            let a = lhs.sortKey, b = rhs.sortKey
+            if a.group != b.group { return a.group < b.group }
+            if a.date != b.date {
+                // 待核对升序（快开的在上），已核对降序（刚开的在上）
+                return a.group == 0 ? a.date < b.date : a.date > b.date
+            }
+            return a.created > b.created
+        }
+    }
+
     static func snapshot(_ records: [TicketRecord]) -> [TicketCard] {
         TicketBatch.group(records).map(TicketCard.init(batch:))
     }

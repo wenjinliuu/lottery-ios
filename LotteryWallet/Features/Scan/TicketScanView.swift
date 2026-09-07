@@ -20,8 +20,12 @@ struct TicketScanView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var preview: UIImage?
     @State private var isPhotoZoomPresented = false
+    @State private var zoomedImage: UIImage?
     @State private var rawText = ""
     @State private var tickets: [ScannedTicket] = []
+    /// 每张票裁切矫正后的正片。复核、改号、补注时都要贴出来给人对照。
+    @State private var ticketImages: [ScannedTicket.ID: UIImage] = [:]
+    @State private var detectedRegions = 0
     @State private var globalWarnings: [String] = []
     @State private var errorText: String?
     /// 正在改期号 / 改号码的那张票。
@@ -94,8 +98,8 @@ struct TicketScanView: View {
             .ignoresSafeArea()
         }
         .fullScreenCover(isPresented: $isPhotoZoomPresented) {
-            if let preview {
-                PhotoZoomView(image: preview)
+            if let image = zoomedImage ?? preview {
+                PhotoZoomView(image: image)
             }
         }
         .sheet(item: $zoneEditorTarget) { target in
@@ -225,6 +229,7 @@ struct TicketScanView: View {
     private var photoCard: some View {
         if let preview {
             Button {
+                zoomedImage = preview
                 isPhotoZoomPresented = true
             } label: {
                 ZStack(alignment: .bottomTrailing) {
@@ -290,6 +295,24 @@ struct TicketScanView: View {
             }
 
             TicketDivider(tint: game.tint).padding(.vertical, 10)
+
+            if let cropped = ticketImages[value.id] {
+                Button {
+                    isPhotoZoomPresented = true
+                    zoomedImage = cropped
+                } label: {
+                    Image(uiImage: cropped)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 132)
+                        .frame(maxWidth: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Palette.separator))
+                }
+                .buttonStyle(.plain)
+                .padding(.bottom, 10)
+            }
 
             numbersEditor(value)
 
@@ -368,10 +391,32 @@ struct TicketScanView: View {
                     }
                 }
             }
-            Text(ticket.play == .single ? "点一注可以改这一注的号码" : "点号码球可以改这一区")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            HStack(spacing: 10) {
+                Text(ticket.play == .single ? "点一注可以改这一注的号码" : "点号码球可以改这一区")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
+                // 少认出一注是很常见的（折痕、反光压住一行）。没有这个入口的话
+                // 用户只能整张重扫，而重扫大概率还是认不出那一行。
+                if ticket.play == .single {
+                    Button {
+                        addLine(to: ticket.id)
+                    } label: {
+                        Label("补一注", systemImage: "plus.circle")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(ticket.game.accent.accentColor)
+                }
+            }
         }
+    }
+
+    /// 手工补一注：先塞一注空号码，再直接打开编辑器让人填。
+    private func addLine(to id: ScannedTicket.ID) {
+        guard let index = tickets.firstIndex(where: { $0.id == id }) else { return }
+        tickets[index].lines.append(NumberSet())
+        zoneEditorTarget = ZoneEditorTarget(ticketID: id, lineIndex: tickets[index].lines.count - 1)
     }
 
     private struct ZoneRow {
@@ -491,37 +536,66 @@ struct TicketScanView: View {
     private func zoneEditor(_ target: ZoneEditorTarget) -> some View {
         if let index = tickets.firstIndex(where: { $0.id == target.ticketID }) {
             if let lineIndex = target.lineIndex {
-                ScanLineEditor(ticket: $tickets[index], lineIndex: lineIndex)
+                ScanLineEditor(ticket: $tickets[index],
+                               lineIndex: lineIndex,
+                               image: ticketImages[target.ticketID])
             } else if let key = target.key {
-                ScanZoneEditor(ticket: $tickets[index], key: key)
+                ScanZoneEditor(ticket: $tickets[index], key: key,
+                               image: ticketImages[target.ticketID])
             }
         }
     }
 
     // MARK: - 底栏
 
+    /// 底栏。
+    ///
+    /// 原来是一条 `.bar` 材质 + 一根 Divider —— 那是导航栏的语言，
+    /// 压在一屏卡片下面显得又平又硬。现在整条做成一块浮起来的玻璃：
+    /// 内容从它下面滑过去看得见，和抽屉本身的层级也对得上。
     private var importBar: some View {
-        VStack(spacing: 8) {
-            Divider()
-            HStack {
-                Text("共 \(importCount) 张票 · \(totalLines) 注")
-                    .font(.subheadline.weight(.semibold))
-                    .monospacedDigit()
+        VStack(spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(importCount) 张票 · \(totalLines) 注")
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                    if let blocker = importBlocker {
+                        Text(blocker)
+                            .font(.caption2)
+                            .foregroundStyle(Palette.warning)
+                    }
+                }
                 Spacer(minLength: 8)
                 Text(MoneyText.format(tickets.reduce(0) { $0 + $1.totalCost }))
                     .font(.title3.weight(.bold))
                     .monospacedDigit()
                     .foregroundStyle(Color.accentColor)
             }
-            .padding(.horizontal, 16)
 
             Button("加入票夹") { importAll() }
                 .buttonStyle(ProminentGlassButton(tint: .accentColor))
                 .disabled(!canImport)
-                .padding(.horizontal, 16)
         }
-        .padding(.bottom, 14)
-        .background(.bar)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(.regularMaterial)
+                .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .strokeBorder(Palette.separator))
+                .shadow(color: .black.opacity(0.10), radius: 16, y: -2)
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 10)
+    }
+
+    /// 不能导入时说清楚卡在哪一步，别只把按钮变灰。
+    private var importBlocker: String? {
+        if tickets.isEmpty { return "还没有可导入的票" }
+        if tickets.contains(where: { $0.count == 0 }) { return "有票没读出号码，点进去补一下" }
+        if tickets.contains(where: { $0.issue.isEmpty }) { return "有票还没选期号" }
+        return nil
     }
 
     /// 追加多期的票导入后是好几张，这里按拆开之后的张数报。
@@ -537,18 +611,20 @@ struct TicketScanView: View {
         stage = .scanning
         errorText = nil
         do {
-            var scanned = try await TicketVisionScanner.scan(image)
+            var page = try await TicketVisionScanner.scan(image)
             // 单价对不上时把追加标志纠正过来，再把提示重算一遍。
             // 纠正本身必须说出来 —— 单注价格从 2 元变成 3 元是记账口径的变化，
             // 悄悄改掉的话用户看到金额对不上也不知道是哪一步动的。
-            for index in scanned.tickets.indices {
-                let note = TicketTextParser.reconcileAddOn(&scanned.tickets[index])
-                scanned.tickets[index].warnings =
-                    (note.map { [$0] } ?? []) + TicketTextParser.validate(scanned.tickets[index])
+            for index in page.result.tickets.indices {
+                let note = TicketTextParser.reconcileAddOn(&page.result.tickets[index])
+                page.result.tickets[index].warnings =
+                    (note.map { [$0] } ?? []) + TicketTextParser.validate(page.result.tickets[index])
             }
-            rawText = scanned.rawText
-            tickets = scanned.tickets
-            globalWarnings = scanned.warnings
+            rawText = page.result.rawText
+            tickets = page.result.tickets
+            ticketImages = page.images
+            detectedRegions = page.detectedRegions
+            globalWarnings = page.result.warnings
             stage = .review
             detent = .large
         } catch {
@@ -563,6 +639,8 @@ struct TicketScanView: View {
         preview = nil
         photoItem = nil
         tickets = []
+        ticketImages = [:]
+        detectedRegions = 0
         globalWarnings = []
         rawText = ""
         errorText = nil
@@ -598,7 +676,7 @@ struct TicketScanView: View {
                 }
             }
             let checked = try? service.checkAll()
-            showToast("已导入 \(saved) 注", symbol: "checkmark.seal.fill")
+            showToast("已导入 \(saved) 注", symbol: "checkmark.seal.fill", feedback: .success)
             if let checked, checked.won > 0 { celebrate() }
             dismiss()
         } catch {
@@ -630,6 +708,7 @@ struct TicketScanView: View {
 private struct ScanZoneEditor: View {
     @Binding var ticket: ScannedTicket
     let key: SectionKey
+    var image: UIImage?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.showToast) private var showToast
@@ -641,6 +720,8 @@ private struct ScanZoneEditor: View {
     var body: some View {
         NavigationStack {
             ScrollView {
+                VStack(spacing: 14) {
+                    TicketReferenceImage(image: image)
                 if let section {
                     VStack(alignment: .leading, spacing: 14) {
                         if ticket.play == .dantuo, section.count > 1 {
@@ -655,11 +736,13 @@ private struct ScanZoneEditor: View {
                                          required: section.count,
                                          mode: ticket.play.entryMode,
                                          danPicking: danPicking,
-                                         onReject: { showToast($0, symbol: "hand.raised") })
+                                         onReject: { showToast($0, symbol: "hand.raised", feedback: .warning) })
                     }
                     .contentCard()
-                    .padding(.horizontal, 16)
                 }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 24)
             }
             .background(Palette.canvas)
             .navigationTitle("修改\(section?.label ?? "号码")")
@@ -682,6 +765,9 @@ private struct ScanZoneEditor: View {
 private struct ScanLineEditor: View {
     @Binding var ticket: ScannedTicket
     let lineIndex: Int
+    /// 这张票裁切矫正后的正片。改号的时候人是拿着票面在核对，
+    /// 让他一边翻回上一页看图一边改号是最容易改错的做法。
+    var image: UIImage?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.showToast) private var showToast
@@ -696,17 +782,20 @@ private struct ScanLineEditor: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(ticket.game.sections) { section in
-                        NumberPadSection(section: section,
-                                         selection: binding(for: section.key),
-                                         required: section.count,
-                                         mode: .manual,
-                                         danPicking: false,
-                                         onReject: { showToast($0, symbol: "hand.raised") })
+                VStack(spacing: 14) {
+                    TicketReferenceImage(image: image)
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(ticket.game.sections) { section in
+                            NumberPadSection(section: section,
+                                             selection: binding(for: section.key),
+                                             required: section.count,
+                                             mode: .manual,
+                                             danPicking: false,
+                                             onReject: { showToast($0, symbol: "hand.raised", feedback: .warning) })
+                        }
                     }
+                    .contentCard()
                 }
-                .contentCard()
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
             }
@@ -714,7 +803,17 @@ private struct ScanLineEditor: View {
             .navigationTitle("修改第 \(lineIndex + 1) 注")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") {
+                        // 「补一注」是先塞一注空号码再打开这个页面的。
+                        // 用户点取消就该当没发生过，不能在票上留一注空的。
+                        if ticket.lines.indices.contains(lineIndex),
+                           ticket.lines[lineIndex].isEmpty {
+                            ticket.lines.remove(at: lineIndex)
+                        }
+                        dismiss()
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") {
                         guard ticket.lines.indices.contains(lineIndex) else { return dismiss() }
@@ -740,6 +839,41 @@ private struct ScanLineEditor: View {
     private func binding(for key: SectionKey) -> Binding<SectionSelection> {
         Binding(get: { selections[key] ?? SectionSelection() },
                 set: { selections[key] = $0 })
+    }
+}
+
+/// 改号页面顶上的票面参照图。可捏合放大 —— 要核对的就是那几行小字。
+private struct TicketReferenceImage: View {
+    var image: UIImage?
+    @State private var isZoomPresented = false
+
+    var body: some View {
+        if let image {
+            Button { isZoomPresented = true } label: {
+                ZStack(alignment: .bottomTrailing) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 210)
+                    Label("放大", systemImage: "arrow.up.left.and.arrow.down.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.black.opacity(0.45), in: Capsule())
+                        .padding(8)
+                }
+                .frame(maxWidth: .infinity)
+                .background(Palette.card)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Palette.separator))
+            }
+            .buttonStyle(.plain)
+            .fullScreenCover(isPresented: $isZoomPresented) {
+                PhotoZoomView(image: image)
+            }
+        }
     }
 }
 

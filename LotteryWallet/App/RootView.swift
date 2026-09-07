@@ -13,17 +13,16 @@ struct RootView: View {
     @State private var isScanPresented = false
     @State private var toast: ToastMessage?
     @State private var celebrationTrigger = 0
+    @State private var isActionMenuExpanded = false
 
     var body: some View {
         TabView(selection: $selection) {
             Tab("首页", systemImage: "chart.line.uptrend.xyaxis", value: MainTab.home) {
-                HomeView(onOpenEntry: { isEntryPresented = true },
-                         onOpenScan: { isScanPresented = true })
+                HomeView()
             }
 
             Tab("票夹", systemImage: "wallet.bifold", value: MainTab.wallet) {
-                WalletView(onOpenEntry: { isEntryPresented = true },
-                           onOpenScan: { isScanPresented = true })
+                WalletView()
             }
 
             Tab("设置", systemImage: "gearshape", value: MainTab.settings) {
@@ -32,6 +31,23 @@ struct RootView: View {
         }
         // 标签栏常驻。滚动时收进左下角那个胶囊虽然是系统能力，
         // 但三个标签本来就一直要用，收起来只是让人多点一次。
+        //
+        // 「扫描 / 录入」跟着标签栏走，不再由首页和票夹各挂一份悬浮胶囊：
+        // 它是全局动作，两个页面各放一枚既重复又压内容。
+        .overlay {
+            if isActionMenuExpanded {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .onTapGesture { isActionMenuExpanded = false }
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            ExpandingActionButton(isExpanded: $isActionMenuExpanded,
+                                  onScan: { isScanPresented = true },
+                                  onAdd: { isEntryPresented = true })
+                .padding(.trailing, 16)
+                .padding(.bottom, 4)
+        }
         .sheet(isPresented: $isEntryPresented) {
             EntryFlowView()
         }
@@ -40,8 +56,12 @@ struct RootView: View {
         .sheet(isPresented: $isScanPresented) {
             TicketScanView()
         }
+        // 这里**不能**用 withAnimation 包住状态变更。
+        // withAnimation 开的是一个全局事务，整棵视图树在这一帧里的所有变化
+        // 都会被卷进同一段动画 —— 表现就是弹个提示，底下的整票预览卡片
+        // 跟着闪一下。动画只该属于提示条自己，所以挂在它的 overlay 上。
         .environment(\.showToast, ShowToastAction { message in
-            withAnimation(.spring(duration: 0.36, bounce: 0.18)) { toast = message }
+            toast = message
         })
         .environment(\.celebrate, CelebrateAction { celebrationTrigger += 1 })
         .overlay {
@@ -49,22 +69,28 @@ struct RootView: View {
             CelebrationView(trigger: celebrationTrigger)
         }
         .overlay(alignment: .bottom) {
-            if let toast {
-                ToastBanner(message: toast)
-                    // 悬浮标签栏大约 50pt 高，96 是为了压在它上面留一段空隙。
-                    // 左右也要留边，长文案（比如导入失败的系统报错）不能顶到屏幕边缘。
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 96)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .task(id: toast.id) {
-                        try? await Task.sleep(for: .seconds(2.6))
-                        withAnimation(.easeOut(duration: 0.25)) { self.toast = nil }
-                    }
+            // 动画只作用在这一小棵子树上：把 `.animation(value:)` 挂在容器上，
+            // 提示条的进出照样有动画，而底下的票面预览、方格图不会被卷进来重画。
+            ZStack(alignment: .bottom) {
+                if let toast {
+                    ToastBanner(message: toast)
+                        // 悬浮标签栏大约 50pt 高，96 是为了压在它上面留一段空隙。
+                        // 左右也要留边，长文案（比如导入失败的系统报错）不能顶到屏幕边缘。
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 96)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .task(id: toast.id) {
+                            try? await Task.sleep(for: .seconds(2.6))
+                            self.toast = nil
+                        }
+                }
             }
+            .animation(.spring(duration: 0.36, bounce: 0.18), value: toast?.id)
         }
-        // 保存、删除、核对完成这些都只有一个轻提示，没有任何触觉反馈，
-        // 手指在屏幕下半部分时经常察觉不到。
-        .sensoryFeedback(.success, trigger: toast?.id)
+        // 震动由提示自己声明，见 `ToastMessage.feedback`。
+        // 原来一律 `.success`：点号码球被拒时，选号盘那边已经震过一次，
+        // 提示又补一记重的，慢半拍到手上，像是点了两下。
+        .sensoryFeedback(trigger: toast?.id) { _, _ in toast?.feedback }
         .task {
             await drawStore.bootstrap()
             await runStartupChecks()
@@ -102,6 +128,13 @@ struct ToastMessage: Identifiable, Equatable {
     let id = UUID()
     let text: String
     var symbol: String = "checkmark.circle.fill"
+    /// 这条提示要不要自己震一下。
+    ///
+    /// 默认**不震**。大多数提示是跟在一个已经震过的动作后面的
+    /// （点了号码球、加入候选），提示再震一次就是同一次操作响两下，
+    /// 而且第二下还慢半拍 —— 手上的感觉是「多余的一记」。
+    /// 只有本身没有别的反馈的动作（点不动、保存成功）才在这里配震动。
+    var feedback: SensoryFeedback?
 }
 
 struct ToastBanner: View {
@@ -127,8 +160,10 @@ struct ToastBanner: View {
 struct ShowToastAction {
     let handler: (ToastMessage) -> Void
 
-    func callAsFunction(_ text: String, symbol: String = "checkmark.circle.fill") {
-        handler(ToastMessage(text: text, symbol: symbol))
+    func callAsFunction(_ text: String,
+                        symbol: String = "checkmark.circle.fill",
+                        feedback: SensoryFeedback? = nil) {
+        handler(ToastMessage(text: text, symbol: symbol, feedback: feedback))
     }
 }
 
