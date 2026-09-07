@@ -184,32 +184,6 @@ struct ToastMessage: Identifiable, Equatable {
 
 struct ToastBanner: View {
     let message: ToastMessage
-
-    /// 标签栏的选择要**在写进 `selection` 之前**拦下来。
-    ///
-    /// 不能用 `.onChange(of: selection)` 去拦：那时候 `.add` 已经写进去了，
-    /// 想还回去就得在处理器里再写一次 `selection`，而那次写入会把处理器
-    /// 再触发一遍、走进 else 分支，刚弹起来的菜单当场又被收掉 ——
-    /// 结果是加号怎么点都没反应，而这一版又刚把首页票夹的悬浮按钮删了，
-    /// 等于一个添加彩票的入口都没有了。
-    ///
-    /// 用自定义 Binding 就没有这个来回：`.add` 根本不写进 `selection`，
-    /// 它只是把菜单翻一下。
-    private var tabSelection: Binding<MainTab> {
-        Binding(
-            get: { selection },
-            set: { newValue in
-                if newValue == .add {
-                    isActionMenuExpanded.toggle()
-                } else {
-                    // 点任何一个真页面：立刻切过去，菜单同时收起
-                    selection = newValue
-                    isActionMenuExpanded = false
-                }
-            }
-        )
-    }
-
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: message.symbol)
