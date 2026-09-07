@@ -1,0 +1,64 @@
+name: App Icon Preview
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "DesignAssets/AppIcon/*.svg"
+      - "LotteryWallet/Resources/AppIcon.icon/**"
+      - "project.yml"
+      - ".github/workflows/icon-preview.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: app-icon-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  render:
+    runs-on: macos-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Check Icon Composer
+        run: npx -y -p icon-composer-mcp@1.1.0 icon-composer doctor
+
+      - name: Validate icon bundle
+        run: npx -y -p icon-composer-mcp@1.1.0 icon-composer inspect LotteryWallet/Resources/AppIcon.icon
+
+      - name: Render Apple Liquid Glass appearances
+        run: |
+          mkdir -p build/app-icon
+          for rendition in Default Dark TintedLight TintedDark ClearLight ClearDark; do
+            npx -y -p icon-composer-mcp@1.1.0 icon-composer render \
+              LotteryWallet/Resources/AppIcon.icon \
+              "build/app-icon/${rendition}.png" \
+              --platform iOS \
+              --rendition "$rendition" \
+              --width 1024 \
+              --height 1024
+          done
+
+      - name: Export marketing icon
+        run: |
+          npx -y -p icon-composer-mcp@1.1.0 icon-composer export-marketing \
+            LotteryWallet/Resources/AppIcon.icon \
+            build/app-icon/Marketing-1024.png \
+            --size 1024
+
+      - name: Include source bundle
+        run: cp -R LotteryWallet/Resources/AppIcon.icon build/app-icon/AppIcon.icon
+
+      - name: Upload icon package
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-icon-${{ github.sha }}
+          path: build/app-icon
+          if-no-files-found: error

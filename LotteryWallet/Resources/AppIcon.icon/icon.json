@@ -1,0 +1,150 @@
+{
+  "color-space-for-untagged-svg-colors": "srgb",
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "Orb.svg",
+          "name": "Orb",
+          "glass": true,
+          "position": {
+            "scale": 1.75,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          },
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.48627,0.73725,1.00000,1.00000"
+              }
+            }
+          ]
+        }
+      ],
+      "name": "Orb",
+      "specular": true,
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.24
+      },
+      "blur-material": 0.18,
+      "translucency": {
+        "enabled": true,
+        "value": 0.16
+      },
+      "lighting": "combined",
+      "specular-specializations": [
+        {
+          "appearance": "dark",
+          "value": true
+        }
+      ],
+      "shadow-specializations": [
+        {
+          "appearance": "dark",
+          "value": {
+            "kind": "layer-color",
+            "opacity": 0.2
+          }
+        }
+      ],
+      "blur-material-specializations": [
+        {
+          "appearance": "dark",
+          "value": 0.18
+        }
+      ],
+      "translucency-specializations": [
+        {
+          "appearance": "dark",
+          "value": {
+            "enabled": true,
+            "value": 0.12
+          }
+        }
+      ]
+    },
+    {
+      "layers": [
+        {
+          "image-name": "LuckyStar.svg",
+          "name": "LuckyStar",
+          "opacity": 1,
+          "blend-mode": "normal",
+          "glass": true,
+          "position": {
+            "scale": 0.75,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "name": "LuckyStar",
+      "specular": true,
+      "blur-material": 0.1,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.16
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.08
+      },
+      "lighting": "individual",
+      "specular-specializations": [
+        {
+          "appearance": "dark",
+          "value": true
+        }
+      ],
+      "shadow-specializations": [
+        {
+          "appearance": "dark",
+          "value": {
+            "kind": "neutral",
+            "opacity": 0.12
+          }
+        }
+      ],
+      "blur-material-specializations": [
+        {
+          "appearance": "dark",
+          "value": 0.08
+        }
+      ],
+      "translucency-specializations": [
+        {
+          "appearance": "dark",
+          "value": {
+            "enabled": true,
+            "value": 0.06
+          }
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared",
+    "circles": [
+      "watchOS"
+    ]
+  },
+  "fill-specializations": [
+    {
+      "value": {
+        "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "srgb:0.01961,0.01961,0.02353,1.00000"
+      }
+    }
+  ]
+}
