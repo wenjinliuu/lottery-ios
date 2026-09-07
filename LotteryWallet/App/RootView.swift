@@ -15,8 +15,26 @@ struct RootView: View {
     @State private var toast: ToastMessage?
     @State private var celebrationTrigger = 0
 
+    /// 扫描那个「标签」要**在写进 `selection` 之前**拦下来。
+    ///
+    /// 不能用 `.onChange(of: selection)`：那时候值已经写进去了，想还回去
+    /// 就得在处理器里再写一次，而那次写入会把处理器再触发一遍 ——
+    /// 上一版就是这么把刚弹出来的菜单当场收掉的。
+    private var tabSelection: Binding<MainTab> {
+        Binding(
+            get: { selection },
+            set: { newValue in
+                if newValue == .scan {
+                    isScanPresented = true
+                } else {
+                    selection = newValue
+                }
+            }
+        )
+    }
+
     var body: some View {
-        TabView(selection: $selection) {
+        TabView(selection: tabSelection) {
             Tab("首页", systemImage: "chart.line.uptrend.xyaxis", value: MainTab.home) {
                 HomeView()
             }
@@ -28,6 +46,20 @@ struct RootView: View {
             Tab("设置", systemImage: "gearshape", value: MainTab.settings) {
                 SettingsView()
             }
+
+            // 扫描用 `.search` 这个角色。
+            //
+            // 这不是把它当搜索用，而是因为**只有这个角色能拿到那个版式**：
+            // 系统会把三个普通标签的玻璃收窄、靠左，再把这一个单独拎出来
+            // 摆到右边，两者齐平 —— 就是 Apple Music 底部那个样子。
+            // 手工摆一颗悬浮圆做不到这件事：系统标签栏的位置和宽度
+            // SwiftUI 不暴露，那颗圆只能靠猜，猜出来的高度和大小都对不上。
+            //
+            // 它不承载页面：选中它的那一刻在 Binding 里就被拦下来了，
+            // 只把扫描抽屉弹起来。
+            Tab(value: MainTab.scan, role: .search) {
+                Color.clear
+            }
         }
 
         // 标签栏常驻。滚动时收进左下角那个胶囊虽然是系统能力，
@@ -35,35 +67,6 @@ struct RootView: View {
         //
         // 「扫描 / 录入」跟着标签栏走，不再由首页和票夹各挂一份悬浮胶囊：
         // 它是全局动作，两个页面各放一枚既重复又压内容。
-        // 标签栏右边一颗**独立的**玻璃圆，和 Apple Music 的搜索按钮一样：
-        // 三个标签是「去哪儿」，它是「做什么」，两类东西不该长在同一块玻璃里，
-        // 但高度要齐平，看起来才像同一排。
-        //
-        // 它直接开扫描抽屉，不再先弹一层二级菜单 —— 添加彩票的主路径就是扫描，
-        // 手动录入是抽屉里的一个分支（见 TicketScanView）。少一层菜单，
-        // 点标签也就不会再被任何遮罩挡住。
-        .overlay(alignment: .bottomTrailing) {
-            Button {
-                isScanPresented = true
-            } label: {
-                Image(systemName: "camera.viewfinder")
-                    .font(.system(size: 21, weight: .semibold))
-                    .frame(width: 52, height: 52)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(PressableIcon())
-            .foregroundStyle(Color.accentColor)
-            .glassCircle()
-            .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
-            .padding(.trailing, 14)
-            .padding(.bottom, 6)
-            .accessibilityLabel("扫描彩票")
-        }
-        .sheet(isPresented: $isEntryPresented) {
-            EntryFlowView()
-        }
-        // 扫描入口是个半屏抽屉，认出票之后自己长到整屏（见 TicketScanView 里的
-        // presentationDetents）。选张照片而已，不必一上来就占满整个屏幕。
         // 从扫描抽屉里跳到手动录入：不能在关闭的同一帧就去开另一张 sheet，
         // 前一张还在收，后一张会被吞掉。记个待办，等它真的关完再开。
         .sheet(isPresented: $isScanPresented, onDismiss: {
@@ -145,6 +148,8 @@ struct RootView: View {
 
 enum MainTab: Hashable {
     case home, wallet, settings
+    /// 只是标签栏右边那颗独立按钮，不对应任何页面。
+    case scan
 }
 
 // MARK: - 轻提示
@@ -164,6 +169,24 @@ struct ToastMessage: Identifiable, Equatable {
 
 struct ToastBanner: View {
     let message: ToastMessage
+    /// 扫描那个「标签」要**在写进 `selection` 之前**拦下来。
+    ///
+    /// 不能用 `.onChange(of: selection)`：那时候值已经写进去了，想还回去
+    /// 就得在处理器里再写一次，而那次写入会把处理器再触发一遍 ——
+    /// 上一版就是这么把刚弹出来的菜单当场收掉的。
+    private var tabSelection: Binding<MainTab> {
+        Binding(
+            get: { selection },
+            set: { newValue in
+                if newValue == .scan {
+                    isScanPresented = true
+                } else {
+                    selection = newValue
+                }
+            }
+        )
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: message.symbol)

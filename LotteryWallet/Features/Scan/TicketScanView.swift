@@ -709,9 +709,11 @@ struct TicketScanView: View {
     private func run(_ image: UIImage, quad: TicketQuad) async {
         stage = .scanning
         errorText = nil
-        // 按用户框的四个角摆正 + 放大。矫正失败（框成一条线之类）就用原图，
-        // 至少还能试着认一下。
-        let corrected = TicketImagePreprocessor.correct(image, quad: quad) ?? image
+        // 按用户框的四个角摆正，再把文字基线拉平，最后放大。
+        // 第二步（拉平）是关键：透视矫正只保证四个角是正的，
+        // 框成梯形或者票本身印歪时，里面的字照样斜着 —— 那正是
+        // 「裁得很准却识别错位」的来源。
+        let corrected = await TicketImagePreprocessor.prepare(image, quad: quad)
         croppedPreview = corrected
         do {
             var page = try await TicketVisionScanner.scan(corrected)

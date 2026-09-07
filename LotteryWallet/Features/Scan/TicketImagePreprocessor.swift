@@ -108,6 +108,61 @@ enum TicketImagePreprocessor {
         return render(corrected)
     }
 
+    /// 裁切 → 摆正 → 拉平 → 放大，一条龙。
+    static func prepare(_ image: UIImage, quad: TicketQuad) async -> UIImage {
+        let corrected = correct(image, quad: quad) ?? image
+        return await deskewed(corrected)
+    }
+
+    /// 二次水平矫正：把票面上的文字基线拉平。
+    ///
+    /// 透视矫正只保证**四个角**落在矩形的四个角上，不保证**文字是平的**。
+    /// 用户框的时候手一抖框成个梯形，或者票本身是斜着印在纸上的，
+    /// 矫正完四个角是正的，里面的字仍然带着一两度的倾斜。
+    ///
+    /// 一两度看着不明显，对 OCR 却是实打实的损失：一行号码横跨大半张票，
+    /// 1.5° 的倾斜在行尾就是十几个像素的落差，够让识别把一行拆成两段、
+    /// 或者把上下两行的数字串到一起 —— 这就是「明明裁得很准却识别错位」。
+    ///
+    /// 做法是先做一次**廉价的**文字区域检测（不识别内容，只找位置），
+    /// 量出所有文字行基线角度的中位数，再反向转回来。用中位数而不是平均值：
+    /// 票上总有几个歪的印章、手写字，平均值会被它们拽跑。
+    static func deskewed(_ image: UIImage) async -> UIImage {
+        guard let cgImage = image.cgImage else { return image }
+
+        let angles: [Double] = await Task.detached(priority: .userInitiated) {
+            let request = VNDetectTextRectanglesRequest()
+            request.reportCharacterBoxes = false
+            let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up)
+            try? handler.perform([request])
+            let width = Double(cgImage.width)
+            let height = Double(cgImage.height)
+            return (request.results ?? []).compactMap { observation -> Double? in
+                // 归一化坐标是各向异性的（x 除以宽、y 除以高），
+                // 直接拿它算角度在非正方形的图上会算错，必须先换回像素。
+                let dx = Double(observation.topRight.x - observation.topLeft.x) * width
+                let dy = Double(observation.topRight.y - observation.topLeft.y) * height
+                // 太短的文字块量出来的角度噪声太大，丢掉
+                guard hypot(dx, dy) > width * 0.08 else { return nil }
+                return atan2(dy, dx)
+            }
+        }.value
+
+        guard angles.count >= 3 else { return image }
+        let sorted = angles.sorted()
+        let median = sorted[sorted.count / 2]
+
+        // 超过 12° 基本不是「有点歪」，而是检测本身出了问题，别乱转
+        let degrees = median * 180 / .pi
+        guard abs(degrees) > 0.35, abs(degrees) < 12 else { return image }
+
+        // Vision 的 y 轴向上，图像的 y 轴向下，所以这里**不用**再取负号：
+        // 正的 median（文字向右上走）在 CoreImage 里正好也是逆时针转正。
+        let source = CIImage(cgImage: cgImage)
+        let rotated = source.transformed(by: CGAffineTransform(rotationAngle: -median))
+        return render(rotated) ?? image
+    }
+
     /// 放大到 OCR 够用的分辨率。
     private static func render(_ image: CIImage) -> UIImage? {
         let extent = image.extent
