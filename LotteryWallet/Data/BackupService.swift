@@ -185,7 +185,7 @@ struct BackupService {
             // 命中标记优先从备份带回来。带不回来（老版本备份里没有这个字段）
             // 也不要紧，启动时的核对流程会按开奖号补一次 —— 但那一步需要能
             // 取到对应期次的开奖数据，所以能带就带。
-            record.matched = matchedFlags(row["matched"])
+            record.matched = Self.matchedFlags(row["matched"])
             record.refreshProfitDay()
             record.updatedAt = DateText.parse(string(row["updatedAt"]) ?? "") ?? Date()
         }
