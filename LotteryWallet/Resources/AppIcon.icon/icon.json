@@ -13,6 +13,28 @@
   ],
   "groups" : [
     {
+      "blur-material" : 0.1,
+      "hidden" : false,
+      "layers" : [
+        {
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "LuckyStar.svg",
+          "name" : "LuckyStar"
+        }
+      ],
+      "lighting" : "individual",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.16
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.08
+      }
+    },
+    {
       "blur-material" : 0.18,
       "hidden" : false,
       "layers" : [
@@ -45,28 +67,6 @@
       "translucency" : {
         "enabled" : true,
         "value" : 0.16
-      }
-    },
-    {
-      "blur-material" : 0.1,
-      "hidden" : false,
-      "layers" : [
-        {
-          "glass" : true,
-          "hidden" : false,
-          "image-name" : "LuckyStar.svg",
-          "name" : "LuckyStar"
-        }
-      ],
-      "lighting" : "individual",
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.16
-      },
-      "specular" : true,
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.08
       }
     }
   ],
