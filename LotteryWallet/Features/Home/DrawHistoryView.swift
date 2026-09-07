@@ -39,7 +39,7 @@ struct DrawHistoryView: View {
         // 「还没拉过」和「拉过但是空的」是两回事。只按当前选中的彩种判断
         // 是否在加载，滑到还没加载的那一页会直接看到「网络没连上」的空状态 ——
         // 明明只是还没轮到它。
-        let hasLoaded = drawStore.loadedHistoryGames.contains(item)
+        let hasLoaded = drawStore.attemptedHistoryGames.contains(item)
         ScrollView {
             LazyVStack(spacing: 12) {
                 if !rows.isEmpty {

@@ -31,7 +31,10 @@ final class DrawStore {
     private(set) var latestUpdatedAt: String = ""
     private(set) var isLoading = false
     private(set) var loadFailed = false
+    /// **拉到了数据**的彩种。跳过重复拉取看这个。
     private(set) var loadedHistoryGames: Set<GameKey> = []
+    /// **尝试过**的彩种，不管成没成。往期页拿它区分「还在加载」和「确实没有」。
+    private(set) var attemptedHistoryGames: Set<GameKey> = []
     /// 整年开奖日历，按年缓存。文件是静态的，一年只需要取一次。
     private(set) var yearCalendars: [Int: DrawCalendarYear] = [:]
     private var loadedArchives: Set<ArchiveKey> = []
@@ -156,19 +159,24 @@ final class DrawStore {
     func loadHistory(for game: GameKey) async {
         guard !loadedHistoryGames.contains(game) else { return }
         let history = try? await client.fetchHistory(for: game)
-        // 「拉过了」和「拉到了」是两回事，必须都记下来。
+        // 「拉过了」和「拉到了」是两回事，得分开记。
         //
-        // 原来失败或空结果就直接返回、不标记已加载，是为了让「重试」还能再拉。
-        // 但往期页拿这个集合区分「正在加载」和「确实没有数据」——不标记的话
-        // 那一页永远停在转圈上，连重试按钮都露不出来。
-        // 现在一律标记；重试走 `reloadHistory`，它会先把标记清掉。
-        loadedHistoryGames.insert(game)
-        if let history, !history.isEmpty { merge(history) }
+        // 往期页要靠「拉过了」区分「还在转圈」和「确实没有数据」，不然失败时
+        // 那一页永远停在加载中，连重试按钮都露不出来。
+        // 但跳过重复拉取只能看「拉到了」—— 否则一次离线启动就把整个会话的
+        // 往期加载永久关掉：下拉刷新和「重新核对」都走 loadAllHistories，
+        // 它会因为「拉过了」直接空转返回。
+        attemptedHistoryGames.insert(game)
+        if let history, !history.isEmpty {
+            merge(history)
+            loadedHistoryGames.insert(game)
+        }
     }
 
-    /// 用户点「重试」：清掉已加载标记再拉一次。
+    /// 用户点「重试」：清掉标记再拉一次。
     func reloadHistory(for game: GameKey) async {
         loadedHistoryGames.remove(game)
+        attemptedHistoryGames.remove(game)
         await loadHistory(for: game)
     }
 
@@ -186,9 +194,10 @@ final class DrawStore {
             return collected
         }
         for (game, history) in results {
-            loadedHistoryGames.insert(game)
+            attemptedHistoryGames.insert(game)
             guard let history, !history.isEmpty else { continue }
             merge(history)
+            loadedHistoryGames.insert(game)
         }
     }
 

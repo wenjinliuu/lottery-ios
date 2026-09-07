@@ -357,8 +357,24 @@ enum TicketTextParser {
 
         // 标签行读到号码，但玩法没写「复式/胆拖」——按选号个数反推
         if !selections.isEmpty {
-            if ticket.play == .single { ticket.play = inferPlay(game: game, selections: selections) }
-            ticket.lines = []
+            let inferred = ticket.play == .single ? inferPlay(game: game, selections: selections) : ticket.play
+            ticket.play = inferred
+            if inferred == .single {
+                // 每个区都刚好选满，这就是一注单式，只是印成了带标签的样子
+                // （`红单:… / 蓝单:…`）。
+                //
+                // **不能把 lines 清空。** 单式票的号码是从 `lines` 读的，
+                // 清掉之后 `expandedLines` 返回空数组，注数变 0，
+                // 刚刚读出来的号码全部丢掉。
+                var numbers = NumberSet()
+                for section in game.sections {
+                    numbers[section.key] = (selections[section.key]?.selected ?? []).sorted()
+                }
+                ticket.lines = numbers.isEmpty ? singleLines : [numbers]
+                ticket.selections = [:]
+            } else {
+                ticket.lines = []
+            }
         } else if ticket.play != .single, singleLines.isEmpty {
             return nil
         } else {

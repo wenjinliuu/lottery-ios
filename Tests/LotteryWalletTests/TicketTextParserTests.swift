@@ -534,6 +534,44 @@ final class TicketTextParserTests: XCTestCase {
         XCTAssertEqual(TicketTextParser.extractMultiple("单式票 追加投注2倍 合计18元"), 2)
     }
 
+    /// 带标签但每区都刚好选满 —— 这是一注单式，号码不能丢。
+    ///
+    /// 解析器读到标签行会把号码放进 `selections`（复式/胆拖的容器），
+    /// 但单式票的号码是从 `lines` 读的。判成单式之后如果只是把 lines 清空，
+    /// 注数会变成 0，刚读出来的号码全部丢掉。
+    func testLabelledSingleLineKeepsNumbers() {
+        let text = """
+        玩法:双色球-单式
+        红单:07 09 16 22 27 29
+        蓝单:07
+        开奖期:2026060
+        合计2元
+        """
+        guard let ticket = TicketTextParser.parse(text).tickets.first else { return XCTFail("没解析出票") }
+        XCTAssertEqual(ticket.play, .single)
+        XCTAssertEqual(ticket.count, 1)
+        XCTAssertEqual(ticket.lines.first?[.red], [7, 9, 16, 22, 27, 29])
+        XCTAssertEqual(ticket.lines.first?[.blue], [7])
+        assertMatchesPrintedTotal(ticket, 2)
+    }
+
+    /// 大乐透同理：前区 5 个 + 后区 2 个刚好选满就是一注单式。
+    func testLabelledDLTSingleLineKeepsNumbers() {
+        let text = """
+        体彩 超级大乐透
+        第 26099期
+        单式票 1倍 合计2元
+        前区 07 08 12 22 26
+        后区 05 09
+        """
+        guard let ticket = TicketTextParser.parse(text).tickets.first else { return XCTFail("没解析出票") }
+        XCTAssertEqual(ticket.play, .single)
+        XCTAssertEqual(ticket.count, 1)
+        XCTAssertEqual(ticket.lines.first?[.front], [7, 8, 12, 22, 26])
+        XCTAssertEqual(ticket.lines.first?[.back], [5, 9])
+        assertMatchesPrintedTotal(ticket, 2)
+    }
+
     // MARK: - 号码抽取本身
 
     /// 一位数的号码不能被吞掉 —— 蓝球复式经常印成 `1 2 3 … 9 10`。

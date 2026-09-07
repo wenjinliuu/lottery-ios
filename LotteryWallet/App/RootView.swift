@@ -15,8 +15,33 @@ struct RootView: View {
     @State private var celebrationTrigger = 0
     @State private var isActionMenuExpanded = false
 
+    /// 标签栏的选择要**在写进 `selection` 之前**拦下来。
+    ///
+    /// 不能用 `.onChange(of: selection)` 去拦：那时候 `.add` 已经写进去了，
+    /// 想还回去就得在处理器里再写一次 `selection`，而那次写入会把处理器
+    /// 再触发一遍、走进 else 分支，刚弹起来的菜单当场又被收掉 ——
+    /// 结果是加号怎么点都没反应，而这一版又刚把首页票夹的悬浮按钮删了，
+    /// 等于一个添加彩票的入口都没有了。
+    ///
+    /// 用自定义 Binding 就没有这个来回：`.add` 根本不写进 `selection`，
+    /// 它只是把菜单翻一下。
+    private var tabSelection: Binding<MainTab> {
+        Binding(
+            get: { selection },
+            set: { newValue in
+                if newValue == .add {
+                    isActionMenuExpanded.toggle()
+                } else {
+                    // 点任何一个真页面：立刻切过去，菜单同时收起
+                    selection = newValue
+                    isActionMenuExpanded = false
+                }
+            }
+        )
+    }
+
     var body: some View {
-        TabView(selection: $selection) {
+        TabView(selection: tabSelection) {
             Tab("首页", systemImage: "chart.line.uptrend.xyaxis", value: MainTab.home) {
                 HomeView()
             }
@@ -39,15 +64,7 @@ struct RootView: View {
                 SettingsView()
             }
         }
-        .onChange(of: selection) { previous, current in
-            if current == .add {
-                selection = previous == .add ? .home : previous
-                isActionMenuExpanded.toggle()
-            } else {
-                // 点任何一个真页面：立刻切过去，菜单同时收起
-                isActionMenuExpanded = false
-            }
-        }
+
         // 标签栏常驻。滚动时收进左下角那个胶囊虽然是系统能力，
         // 但三个标签本来就一直要用，收起来只是让人多点一次。
         //
@@ -101,7 +118,14 @@ struct RootView: View {
                         .padding(.bottom, 96)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .task(id: toast.id) {
-                            try? await Task.sleep(for: .seconds(2.6))
+                            // 不能用 `try?` 把取消吞掉：2.6 秒内弹第二条提示时，
+                            // 第一条的任务被取消后会照样往下跑 `toast = nil`，
+                            // 把刚弹出来的第二条清掉。和 CelebrationView 是同一个坑。
+                            do {
+                                try await Task.sleep(for: .seconds(2.6))
+                            } catch {
+                                return
+                            }
                             self.toast = nil
                         }
                 }
@@ -160,6 +184,31 @@ struct ToastMessage: Identifiable, Equatable {
 
 struct ToastBanner: View {
     let message: ToastMessage
+
+    /// 标签栏的选择要**在写进 `selection` 之前**拦下来。
+    ///
+    /// 不能用 `.onChange(of: selection)` 去拦：那时候 `.add` 已经写进去了，
+    /// 想还回去就得在处理器里再写一次 `selection`，而那次写入会把处理器
+    /// 再触发一遍、走进 else 分支，刚弹起来的菜单当场又被收掉 ——
+    /// 结果是加号怎么点都没反应，而这一版又刚把首页票夹的悬浮按钮删了，
+    /// 等于一个添加彩票的入口都没有了。
+    ///
+    /// 用自定义 Binding 就没有这个来回：`.add` 根本不写进 `selection`，
+    /// 它只是把菜单翻一下。
+    private var tabSelection: Binding<MainTab> {
+        Binding(
+            get: { selection },
+            set: { newValue in
+                if newValue == .add {
+                    isActionMenuExpanded.toggle()
+                } else {
+                    // 点任何一个真页面：立刻切过去，菜单同时收起
+                    selection = newValue
+                    isActionMenuExpanded = false
+                }
+            }
+        )
+    }
 
     var body: some View {
         HStack(spacing: 8) {
