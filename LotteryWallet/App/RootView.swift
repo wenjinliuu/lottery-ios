@@ -169,24 +169,6 @@ struct ToastMessage: Identifiable, Equatable {
 
 struct ToastBanner: View {
     let message: ToastMessage
-    /// 扫描那个「标签」要**在写进 `selection` 之前**拦下来。
-    ///
-    /// 不能用 `.onChange(of: selection)`：那时候值已经写进去了，想还回去
-    /// 就得在处理器里再写一次，而那次写入会把处理器再触发一遍 ——
-    /// 上一版就是这么把刚弹出来的菜单当场收掉的。
-    private var tabSelection: Binding<MainTab> {
-        Binding(
-            get: { selection },
-            set: { newValue in
-                if newValue == .scan {
-                    isScanPresented = true
-                } else {
-                    selection = newValue
-                }
-            }
-        )
-    }
-
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: message.symbol)
