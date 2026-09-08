@@ -5,36 +5,49 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="彩票夹-号码记录 的隐私政策。本应用不收集任何个人信息，所有数据仅保存在设备本地。">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101014" media="(prefers-color-scheme: dark)">
 <title>彩票夹-号码记录 隐私政策</title>
 <style>
+  /* 配色取自 App 图标本身：主球 #3B82F6，深色模式下换成图标的深色变体 #7CBCFF。
+     一页说明文档和它要说明的那个 App 长得像，本身就是一种可信度。 */
   :root {
-    --bg: #ffffff;
-    --surface: #f6f7f9;
-    --text: #1c1c1e;
-    --muted: #6b7280;
-    --rule: #e5e7eb;
-    --accent: #3b82f6;
+    --bg:      #ffffff;
+    --surface: #f5f6f8;
+    --raised:  #ffffff;
+    --text:    #16171a;
+    --muted:   #6b7280;
+    --faint:   #9aa1ab;
+    --rule:    #e6e8ec;
+    --accent:  #3b82f6;
+    --accent-soft: rgba(59, 130, 246, 0.10);
+    --warn:    #b45309;
+    --warn-soft: rgba(180, 83, 9, 0.09);
+    --shadow:  0 1px 2px rgba(16, 17, 20, 0.05), 0 8px 24px rgba(16, 17, 20, 0.05);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #101014;
-      --surface: #1c1d22;
-      --text: #ececf0;
-      --muted: #9aa0aa;
-      --rule: #2e3138;
-      --accent: #81b1ff;
+      --bg:      #101014;
+      --surface: #17181d;
+      --raised:  #1b1c22;
+      --text:    #ececf0;
+      --muted:   #9aa0aa;
+      --faint:   #71767f;
+      --rule:    #2a2d34;
+      --accent:  #7cbcff;
+      --accent-soft: rgba(124, 188, 255, 0.13);
+      --warn:    #f0b357;
+      --warn-soft: rgba(240, 179, 87, 0.11);
+      --shadow:  none;
     }
   }
 
   * { box-sizing: border-box; }
-
-  html {
-    -webkit-text-size-adjust: 100%;
-  }
+  html { -webkit-text-size-adjust: 100%; }
 
   body {
     margin: 0;
-    padding: 32px 20px 72px;
+    padding: 0 20px calc(72px + env(safe-area-inset-bottom));
     background: var(--bg);
     color: var(--text);
     /* 全部是系统自带字体，不引用任何外部字体文件 */
@@ -43,130 +56,306 @@
     font-size: 17px;
     line-height: 1.8;
     word-break: break-word;
+    -webkit-font-smoothing: antialiased;
   }
 
-  main {
-    max-width: 700px;
-    margin: 0 auto;
+  .wrap { max-width: 700px; margin: 0 auto; }
+
+  /* ---------- 页头 ---------- */
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 44px 0 26px;
   }
 
-  h1 {
-    font-size: 1.55em;
-    line-height: 1.4;
-    letter-spacing: -0.01em;
-    margin: 0 0 8px;
+  .mark {
+    flex: none;
+    width: 60px;
+    height: 60px;
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
   }
 
-  h2 {
-    font-size: 1.12em;
-    line-height: 1.5;
-    margin: 40px 0 10px;
-    padding-top: 20px;
+  .mark svg { display: block; width: 100%; height: 100%; }
+
+  .title h1 {
+    font-size: 1.42em;
+    line-height: 1.35;
+    letter-spacing: -0.015em;
+    margin: 0;
+    font-weight: 700;
+  }
+
+  .title .app {
+    display: block;
+    font-size: 0.62em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+    margin-bottom: 1px;
+  }
+
+  .effective {
+    margin: 0;
+    padding: 0 0 30px;
+    color: var(--faint);
+    font-size: 0.86em;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  /* ---------- 要点速览 ----------
+     审核员和用户都不会先读第一节，他们要的是结论。
+     把三条结论放在最前面，正文用来支撑它们。 */
+
+  .summary {
+    margin: 30px 0 8px;
+    padding: 4px 20px 18px;
+    background: var(--surface);
+    border-radius: 16px;
+  }
+
+  .summary h2 {
+    font-size: 0.78em;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    color: var(--faint);
+    margin: 18px 0 12px;
+    border: 0;
+    padding: 0;
+  }
+
+  .summary ul { list-style: none; margin: 0; padding: 0; }
+
+  .summary li {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin: 0 0 12px;
+    line-height: 1.65;
+  }
+
+  .summary li:last-child { margin-bottom: 0; }
+
+  .tick {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    margin-top: 4px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .tick svg { width: 12px; height: 12px; display: block; }
+
+  .summary b { font-weight: 600; }
+
+  .summary small {
+    display: block;
+    color: var(--muted);
+    font-size: 0.82em;
+    line-height: 1.6;
+  }
+
+  /* ---------- 正文 ---------- */
+
+  section {
+    padding-top: 34px;
+    margin-top: 34px;
     border-top: 1px solid var(--rule);
   }
 
-  h2:first-of-type {
-    border-top: 0;
-    padding-top: 0;
+  section:first-of-type { border-top: 0; }
+
+  h2 {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 1.1em;
+    line-height: 1.5;
+    font-weight: 700;
+    margin: 0 0 14px;
+  }
+
+  .num {
+    flex: none;
+    font-size: 0.78em;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    opacity: 0.85;
   }
 
   p { margin: 0 0 14px; }
+  p:last-child { margin-bottom: 0; }
 
-  ul {
+  ul.body {
     margin: 0 0 14px;
-    padding-left: 1.35em;
+    padding-left: 1.3em;
   }
 
-  li { margin-bottom: 8px; }
-
-  .meta {
-    color: var(--muted);
-    font-size: 0.92em;
-    margin: 0 0 28px;
-  }
-
-  .lead {
-    background: var(--surface);
-    border-radius: 12px;
-    padding: 16px 18px;
-    margin: 0 0 32px;
-  }
-
-  .lead p:last-child { margin-bottom: 0; }
+  ul.body li { margin-bottom: 9px; }
+  ul.body li:last-child { margin-bottom: 0; }
 
   strong { font-weight: 600; }
 
-  a {
-    color: var(--accent);
-    text-decoration: underline;
-    text-underline-offset: 2px;
+  /* 卸载即丢数据是这一页里唯一真会伤到用户的事，给它单独的视觉分量 */
+  .notice {
+    margin: 18px 0 0;
+    padding: 14px 16px;
+    background: var(--warn-soft);
+    border-left: 3px solid var(--warn);
+    border-radius: 4px 12px 12px 4px;
   }
 
+  .notice p { font-size: 0.94em; line-height: 1.7; }
+  .notice strong { color: var(--warn); }
+
+  /* 联系方式做成可点的一块，手机上直接拉起邮件 */
+  .contact {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+    padding: 12px 18px;
+    background: var(--raised);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+    word-break: break-all;
+  }
+
+  .contact svg { flex: none; width: 17px; height: 17px; }
+
   footer {
-    margin-top: 48px;
-    padding-top: 20px;
+    margin-top: 46px;
+    padding-top: 22px;
     border-top: 1px solid var(--rule);
-    color: var(--muted);
-    font-size: 0.88em;
+    color: var(--faint);
+    font-size: 0.85em;
+    line-height: 1.7;
+  }
+
+  footer p { margin: 0; }
+
+  @media (max-width: 400px) {
+    body { font-size: 16px; }
+    header { gap: 13px; padding-top: 34px; }
+    .mark { width: 52px; height: 52px; }
   }
 </style>
 </head>
 <body>
-<main>
+<div class="wrap">
 
-  <h1>彩票夹-号码记录 隐私政策</h1>
-  <p class="meta">生效日期：2026 年 9 月 8 日</p>
+  <header>
+    <div class="mark" aria-hidden="true">
+      <!-- 内联的 App 图标：主球 + 幸运星，路径取自仓库里的 DesignAssets/AppIcon -->
+      <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="512" cy="512" r="348" fill="var(--accent)"/>
+        <path fill="#FFFFFF" d="M512 362c21.667 0 29.583 86.667 50.417 107.5C583.667 491.167 662 493.25 662 514.083s-78.333 22.917-99.583 44.584C541.583 579.5 533.667 666.167 512 666.167s-29.583-86.667-50.417-107.5C440.333 537 362 534.917 362 514.083s78.333-22.916 99.583-44.583C482.417 448.667 490.333 362 512 362Z"/>
+      </svg>
+    </div>
+    <div class="title">
+      <h1><span class="app">彩票夹-号码记录</span>隐私政策</h1>
+    </div>
+  </header>
 
-  <div class="lead">
-    <p>「彩票夹-号码记录」（以下简称「本应用」）是一款帮助用户记录自己已购买的彩票号码、并在开奖后进行核对的工具。</p>
-    <p>本应用<strong>不收集、不存储、不传输任何个人信息</strong>。我们没有服务器，也无法访问您在应用内产生的任何数据。</p>
+  <p class="effective">生效日期：2026 年 9 月 8 日</p>
+
+  <div class="summary">
+    <h2>要点速览</h2>
+    <ul>
+      <li>
+        <span class="tick" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.3 4.6 9 10 3"/></svg></span>
+        <span><b>不收集任何个人信息。</b><small>我们没有自己的服务器，无需注册登录，不获取设备标识、位置或通讯录。</small></span>
+      </li>
+      <li>
+        <span class="tick" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.3 4.6 9 10 3"/></svg></span>
+        <span><b>数据只存在你的手机上。</b><small>号码、识别结果、备注全部保存在设备本地，开发者无法访问。</small></span>
+      </li>
+      <li>
+        <span class="tick" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.3 4.6 9 10 3"/></svg></span>
+        <span><b>无广告、无统计、无第三方 SDK。</b><small>票面文字识别在设备本机完成，照片不上传任何服务器。</small></span>
+      </li>
+    </ul>
   </div>
 
-  <h2>一、我们不收集任何个人信息</h2>
-  <p>本应用没有任何形式的用户信息收集行为，具体而言：</p>
-  <ul>
-    <li>我们<strong>没有自己的服务器</strong>，不存在接收或保存用户数据的后端系统；</li>
-    <li>无需注册、无需登录，不要求您提供姓名、手机号、邮箱或任何其他身份信息；</li>
-    <li>不获取设备标识符（如 IDFA、IDFV）、广告标识、地理位置、通讯录、日历或麦克风；</li>
-    <li>不对您的使用行为进行任何形式的跟踪、画像或统计。</li>
-  </ul>
+  <section>
+    <h2><span class="num">01</span>我们不收集任何个人信息</h2>
+    <p>「彩票夹-号码记录」（以下简称「本应用」）是一款帮助用户记录自己已购买的彩票号码、并在开奖后进行核对的工具。本应用没有任何形式的用户信息收集行为，具体而言：</p>
+    <ul class="body">
+      <li>我们<strong>没有自己的服务器</strong>，不存在接收或保存用户数据的后端系统；</li>
+      <li>无需注册、无需登录，不要求您提供姓名、手机号、邮箱或任何其他身份信息；</li>
+      <li>不获取设备标识符（如 IDFA、IDFV）、广告标识、地理位置、通讯录、日历或麦克风；</li>
+      <li>不对您的使用行为进行任何形式的跟踪、画像或统计。</li>
+    </ul>
+  </section>
 
-  <h2>二、数据存储方式</h2>
-  <p>您在本应用中产生的全部数据，<strong>仅保存在您的设备本地</strong>，包括但不限于：</p>
-  <ul>
-    <li>您录入或扫描导入的彩票号码、期号、倍数与投入金额；</li>
-    <li>照片识别得到的结果，以及您对识别结果所做的修改；</li>
-    <li>核对结果、盈亏统计与您自行填写的备注。</li>
-  </ul>
-  <p>上述数据不会离开您的设备，开发者<strong>无法以任何方式访问、读取或恢复</strong>这些数据。</p>
-  <p><strong>请注意：</strong>由于数据只存在于本机，卸载本应用会一并删除全部记录，且无法找回。如果您需要长期保留或更换设备，请先在「设置 → 备份」中导出备份文件并妥善保存。备份文件由您自行选择保存位置，导出过程同样不经过任何服务器。</p>
+  <section>
+    <h2><span class="num">02</span>数据存储方式</h2>
+    <p>您在本应用中产生的全部数据，<strong>仅保存在您的设备本地</strong>，包括但不限于：</p>
+    <ul class="body">
+      <li>您录入或扫描导入的彩票号码、期号、倍数与投入金额；</li>
+      <li>照片识别得到的结果，以及您对识别结果所做的修改；</li>
+      <li>核对结果、盈亏统计与您自行填写的备注。</li>
+    </ul>
+    <p>上述数据不会离开您的设备，开发者<strong>无法以任何方式访问、读取或恢复</strong>这些数据。</p>
+    <div class="notice">
+      <p><strong>请注意：</strong>由于数据只存在于本机，卸载本应用会一并删除全部记录，且无法找回。如果您需要长期保留或更换设备，请先在「设置 → 备份」中导出备份文件并妥善保存。备份文件由您自行选择保存位置，导出过程同样不经过任何服务器。</p>
+    </div>
+  </section>
 
-  <h2>三、权限说明</h2>
-  <p>本应用仅在实现具体功能时申请必要权限，且用途严格限定如下：</p>
-  <ul>
-    <li><strong>相机权限</strong>：仅在您主动点击拍照按钮时调用，用于拍摄纸质彩票。应用不会在后台或未经您操作的情况下启用相机。</li>
-    <li><strong>照片权限</strong>：仅用于读取您本人主动选择的那一张图片，本应用不会浏览、扫描或读取您相册中的其他内容。</li>
-  </ul>
-  <p>票面号码的<strong>文字识别全部在您的设备本地完成</strong>，使用的是 Apple 系统内置的图像识别能力。照片及其识别结果<strong>不会上传到任何服务器</strong>，识别完成后照片即被释放，本应用不会留存原始照片。</p>
+  <section>
+    <h2><span class="num">03</span>权限说明</h2>
+    <p>本应用仅在实现具体功能时申请必要权限，且用途严格限定如下：</p>
+    <ul class="body">
+      <li><strong>相机权限</strong>：仅在您主动点击拍照按钮时调用，用于拍摄纸质彩票。应用不会在后台或未经您操作的情况下启用相机。</li>
+      <li><strong>照片权限</strong>：仅用于读取您本人主动选择的那一张图片，本应用不会浏览、扫描或读取您相册中的其他内容。</li>
+    </ul>
+    <p>票面号码的<strong>文字识别全部在您的设备本地完成</strong>，使用的是 Apple 系统内置的图像识别能力。照片及其识别结果<strong>不会上传到任何服务器</strong>，识别完成后照片即被释放，本应用不会留存原始照片。</p>
+  </section>
 
-  <h2>四、第三方服务</h2>
-  <p>本应用<strong>未集成任何第三方广告、统计或数据分析 SDK</strong>，不存在任何形式的数据外传或数据共享，也不会将您的信息出售、出租或披露给任何第三方。</p>
-  <p>为了显示开奖号码，本应用会从一个<strong>公开的、只读的</strong>开奖数据地址读取各彩种的开奖结果。该请求仅用于获取公开的开奖信息，<strong>不包含您的任何个人信息或使用数据</strong>，也不会携带任何可用于识别您身份的标识。</p>
+  <section>
+    <h2><span class="num">04</span>第三方服务</h2>
+    <p>本应用<strong>未集成任何第三方广告、统计或数据分析 SDK</strong>，不存在任何形式的数据外传或数据共享，也不会将您的信息出售、出租或披露给任何第三方。</p>
+    <p>为了显示开奖号码，本应用会从一个<strong>公开的、只读的</strong>开奖数据地址读取各彩种的开奖结果。该请求仅用于获取公开的开奖信息，<strong>不包含您的任何个人信息或使用数据</strong>，也不会携带任何可用于识别您身份的标识。</p>
+  </section>
 
-  <h2>五、儿童隐私</h2>
-  <p>本应用不面向儿童设计，也不适合儿童使用。我们不会有意收集任何儿童的个人信息。如果您认为有儿童向我们提供了信息，请通过下方邮箱联系我们，我们将立即处理。</p>
+  <section>
+    <h2><span class="num">05</span>儿童隐私</h2>
+    <p>本应用不面向儿童设计，也不适合儿童使用。我们不会有意收集任何儿童的个人信息。如果您认为有儿童向我们提供了信息，请通过下方邮箱联系我们，我们将立即处理。</p>
+  </section>
 
-  <h2>六、政策变更</h2>
-  <p>本隐私政策如有更新，我们将在本页面公布修订后的全文并同步更新页首的生效日期。请您不时查阅本页面以了解最新内容。若变更涉及重大事项，我们会在应用内以显著方式提示。</p>
+  <section>
+    <h2><span class="num">06</span>政策变更</h2>
+    <p>本隐私政策如有更新，我们将在本页面公布修订后的全文并同步更新页首的生效日期。请您不时查阅本页面以了解最新内容。若变更涉及重大事项，我们会在应用内以显著方式提示。</p>
+  </section>
 
-  <h2>七、联系我们</h2>
-  <p>如果您对本隐私政策有任何疑问、意见或建议，欢迎通过以下方式与我们联系：</p>
-  <p>电子邮箱：<a href="mailto:wenjinliuu@outlook.com">wenjinliuu@outlook.com</a></p>
+  <section>
+    <h2><span class="num">07</span>联系我们</h2>
+    <p>如果您对本隐私政策有任何疑问、意见或建议，欢迎通过以下方式与我们联系：</p>
+    <a class="contact" href="mailto:wenjinliuu@outlook.com">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="2" y="4" width="16" height="12" rx="2.5"/><path d="m2.7 5.4 7.3 5 7.3-5"/>
+      </svg>
+      wenjinliuu@outlook.com
+    </a>
+  </section>
 
   <footer>
-    <p>彩票夹-号码记录 · 本应用仅用于记录您已在正规渠道购买的彩票，不销售、不代购彩票。</p>
+    <p>彩票夹-号码记录 · 本应用仅用于记录您已在正规渠道购买的彩票，不销售、不代购彩票。请理性购彩。</p>
   </footer>
 
-</main>
+</div>
 </body>
 </html>
