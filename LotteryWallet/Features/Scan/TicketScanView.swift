@@ -142,7 +142,20 @@ struct TicketScanView: View {
 
     // MARK: - 入口
 
+    /// 入口。
+    ///
+    /// 用 ScrollView 兜底：半屏抽屉的高度是固定的，而这一页有图标、两段说明、
+    /// 三个按钮，还可能多一条错误提示 —— 小屏上会顶出去，被裁掉的正好是
+    /// 最底下那个「手动录入」。
     private var intro: some View {
+        ScrollView {
+            introContent
+                .frame(minHeight: 420)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    private var introContent: some View {
         VStack(spacing: 16) {
             Spacer(minLength: 0)
             Image(systemName: "doc.viewfinder")

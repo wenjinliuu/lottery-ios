@@ -9,9 +9,9 @@ struct RootView: View {
     @Environment(\.modelContext) private var context
 
     @State private var selection: MainTab = .home
-    @State private var isEntryPresented = false
-    @State private var isScanPresented = false
-    @State private var wantsManualEntry = false
+    /// 当前开着的抽屉，以及关掉它之后要接着开的那张。
+    @State private var activeSheet: RootSheet?
+    @State private var queuedSheet: RootSheet?
     @State private var toast: ToastMessage?
     @State private var celebrationTrigger = 0
 
@@ -25,7 +25,7 @@ struct RootView: View {
             get: { selection },
             set: { newValue in
                 if newValue == .scan {
-                    isScanPresented = true
+                    activeSheet = .scan
                 } else {
                     selection = newValue
                 }
@@ -66,20 +66,29 @@ struct RootView: View {
             .accessibilityLabel("扫描彩票")
         }
 
-        // 标签栏常驻。滚动时收进左下角那个胶囊虽然是系统能力，
-        // 但三个标签本来就一直要用，收起来只是让人多点一次。
+        // **只挂一个 sheet 出口。**
         //
-        // 「扫描 / 录入」跟着标签栏走，不再由首页和票夹各挂一份悬浮胶囊：
-        // 它是全局动作，两个页面各放一枚既重复又压内容。
-        // 从扫描抽屉里跳到手动录入：不能在关闭的同一帧就去开另一张 sheet，
-        // 前一张还在收，后一张会被吞掉。记个待办，等它真的关完再开。
-        .sheet(isPresented: $isScanPresented, onDismiss: {
-            if wantsManualEntry {
-                wantsManualEntry = false
-                isEntryPresented = true
+        // 手动录入之前彻底点不动，原因不在按钮也不在回调 —— 而是
+        // `EntryFlowView` 的那个 `.sheet` 在一次重构里被我连带删掉了：
+        // `isEntryPresented` 照样置为 true，只是**没有任何东西在监听它**。
+        //
+        // 两张抽屉合并成一个 `.sheet(item:)`，用枚举驱动。这样既不会再有
+        // 「某一张的 sheet 修饰符不知不觉丢了」，也顺带绕开了同一视图上挂
+        // 多个 sheet 的不确定行为。
+        //
+        // 抽屉之间的接力放在 `onDismiss` 里：那时候前一张已经真的关完，
+        // 后一张才开得起来 —— 在关闭的同一帧就去开下一张会被吞掉。
+        .sheet(item: $activeSheet, onDismiss: {
+            guard let next = queuedSheet else { return }
+            queuedSheet = nil
+            activeSheet = next
+        }) { sheet in
+            switch sheet {
+            case .scan:
+                TicketScanView(onManualEntry: { queuedSheet = .entry })
+            case .entry:
+                EntryFlowView()
             }
-        }) {
-            TicketScanView(onManualEntry: { wantsManualEntry = true })
         }
         // 这里**不能**用 withAnimation 包住状态变更。
         // withAnimation 开的是一个全局事务，整棵视图树在这一帧里的所有变化
@@ -148,6 +157,12 @@ struct RootView: View {
             celebrationTrigger += 1
         }
     }
+}
+
+/// 根视图上唯一那个 sheet 出口能开的两张抽屉。
+enum RootSheet: String, Identifiable {
+    case scan, entry
+    var id: String { rawValue }
 }
 
 enum MainTab: Hashable {
