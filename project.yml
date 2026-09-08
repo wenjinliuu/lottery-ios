@@ -6,6 +6,9 @@ options:
   createIntermediateGroups: true
   groupSortPosition: top
   generateEmptyDirectories: false
+  fileTypes:
+    "icon":
+      file: true
 
 settings:
   base:
