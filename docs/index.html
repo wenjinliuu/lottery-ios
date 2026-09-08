@@ -236,6 +236,8 @@
 
   .contact svg { flex: none; width: 17px; height: 17px; }
 
+  .textlink { color: var(--accent); font-weight: 600; text-decoration: none; }
+
   footer {
     margin-top: 46px;
     padding-top: 22px;
@@ -245,7 +247,8 @@
     line-height: 1.7;
   }
 
-  footer p { margin: 0; }
+  footer p { margin: 0 0 8px; }
+  footer p:last-child { margin-bottom: 0; }
 
   @media (max-width: 400px) {
     body { font-size: 16px; }
@@ -353,6 +356,7 @@
   </section>
 
   <footer>
+    <p><a class="textlink" href="support.html">技术支持与常见问题</a></p>
     <p>彩票夹-号码记录 · 本应用仅用于记录您已在正规渠道购买的彩票，不销售、不代购彩票。请理性购彩。</p>
   </footer>
 

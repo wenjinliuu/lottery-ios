@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="彩票夹-号码记录 技术支持页：常见问题、使用说明与联系方式。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101014" media="(prefers-color-scheme: dark)">
+<title>彩票夹-号码记录 技术支持</title>
+<style>
+  /* 与隐私政策页共用同一套配色与排版，配色取自 App 图标本身。 */
+  :root {
+    --bg:      #ffffff;
+    --surface: #f5f6f8;
+    --raised:  #ffffff;
+    --text:    #16171a;
+    --muted:   #6b7280;
+    --faint:   #9aa1ab;
+    --rule:    #e6e8ec;
+    --accent:  #3b82f6;
+    --accent-soft: rgba(59, 130, 246, 0.10);
+    --warn:    #b45309;
+    --warn-soft: rgba(180, 83, 9, 0.09);
+    --shadow:  0 1px 2px rgba(16, 17, 20, 0.05), 0 8px 24px rgba(16, 17, 20, 0.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:      #101014;
+      --surface: #17181d;
+      --raised:  #1b1c22;
+      --text:    #ececf0;
+      --muted:   #9aa0aa;
+      --faint:   #71767f;
+      --rule:    #2a2d34;
+      --accent:  #7cbcff;
+      --accent-soft: rgba(124, 188, 255, 0.13);
+      --warn:    #f0b357;
+      --warn-soft: rgba(240, 179, 87, 0.11);
+      --shadow:  none;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    padding: 0 20px calc(72px + env(safe-area-inset-bottom));
+    background: var(--bg);
+    color: var(--text);
+    /* 全部是系统自带字体，不引用任何外部字体文件 */
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue",
+                 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-size: 17px;
+    line-height: 1.8;
+    word-break: break-word;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 700px; margin: 0 auto; }
+
+  /* ---------- 页头 ---------- */
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 44px 0 26px;
+  }
+
+  .mark {
+    flex: none;
+    width: 60px;
+    height: 60px;
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+
+  .mark svg { display: block; width: 100%; height: 100%; }
+
+  .title h1 {
+    font-size: 1.42em;
+    line-height: 1.35;
+    letter-spacing: -0.015em;
+    margin: 0;
+    font-weight: 700;
+  }
+
+  .title .app {
+    display: block;
+    font-size: 0.62em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+    margin-bottom: 1px;
+  }
+
+  .lede {
+    margin: 0;
+    padding: 0 0 30px;
+    color: var(--muted);
+    font-size: 0.92em;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  /* ---------- 置顶联系区 ----------
+     技术支持页的第一职责是「怎么找到人」，所以联系方式放在最前面，
+     而不是压在页面最底下。 */
+
+  .reach {
+    margin: 30px 0 8px;
+    padding: 20px;
+    background: var(--surface);
+    border-radius: 16px;
+  }
+
+  .reach h2 {
+    font-size: 0.78em;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    color: var(--faint);
+    margin: 0 0 10px;
+    border: 0;
+    padding: 0;
+    display: block;
+  }
+
+  .reach p {
+    margin: 0 0 14px;
+    font-size: 0.94em;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+
+  /* 联系方式做成可点的一块，手机上直接拉起邮件 */
+  .contact {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 18px;
+    background: var(--raised);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+    word-break: break-all;
+  }
+
+  .contact svg { flex: none; width: 17px; height: 17px; }
+
+  /* ---------- 正文 ---------- */
+
+  section {
+    padding-top: 34px;
+    margin-top: 34px;
+    border-top: 1px solid var(--rule);
+  }
+
+  h2 {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 1.1em;
+    line-height: 1.5;
+    font-weight: 700;
+    margin: 0 0 14px;
+  }
+
+  .num {
+    flex: none;
+    font-size: 0.78em;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    opacity: 0.85;
+  }
+
+  p { margin: 0 0 14px; }
+  p:last-child { margin-bottom: 0; }
+
+  ul.body {
+    margin: 0 0 14px;
+    padding-left: 1.3em;
+  }
+
+  ul.body li { margin-bottom: 9px; }
+  ul.body li:last-child { margin-bottom: 0; }
+
+  strong { font-weight: 600; }
+
+  /* ---------- 常见问题 ----------
+     每一条都是「一个问题 + 一个能立刻照做的答案」，不写成流水账。 */
+
+  .faq {
+    margin-top: 4px;
+    border-top: 1px solid var(--rule);
+  }
+
+  .faq details {
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .faq summary {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 15px 0;
+    font-weight: 600;
+    line-height: 1.6;
+    cursor: pointer;
+    list-style: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .faq summary::-webkit-details-marker { display: none; }
+
+  /* 用一个会转向的小箭头代替默认三角，纯 CSS，无脚本 */
+  .faq summary::before {
+    content: "";
+    flex: none;
+    width: 7px;
+    height: 7px;
+    margin-top: 8px;
+    border-right: 2px solid var(--accent);
+    border-bottom: 2px solid var(--accent);
+    transform: rotate(-45deg);
+    transition: transform 0.18s ease;
+  }
+
+  .faq details[open] > summary::before { transform: rotate(45deg); }
+
+  .faq .answer {
+    padding: 0 0 18px 17px;
+    color: var(--muted);
+    font-size: 0.95em;
+    line-height: 1.75;
+  }
+
+  .faq .answer p { margin: 0 0 12px; }
+  .faq .answer p:last-child { margin-bottom: 0; }
+  .faq .answer ul { margin: 0 0 12px; padding-left: 1.25em; }
+  .faq .answer li { margin-bottom: 7px; }
+  .faq .answer li:last-child { margin-bottom: 0; }
+  .faq .answer strong { color: var(--text); font-weight: 600; }
+
+  /* 会真正伤到用户的那条信息，单独给视觉分量 */
+  .notice {
+    margin: 18px 0 0;
+    padding: 14px 16px;
+    background: var(--warn-soft);
+    border-left: 3px solid var(--warn);
+    border-radius: 4px 12px 12px 4px;
+  }
+
+  .notice p { font-size: 0.94em; line-height: 1.7; }
+  .notice strong { color: var(--warn); }
+
+  .textlink { color: var(--accent); font-weight: 600; text-decoration: none; }
+
+  footer {
+    margin-top: 46px;
+    padding-top: 22px;
+    border-top: 1px solid var(--rule);
+    color: var(--faint);
+    font-size: 0.85em;
+    line-height: 1.7;
+  }
+
+  footer p { margin: 0 0 8px; }
+  footer p:last-child { margin-bottom: 0; }
+
+  @media (max-width: 400px) {
+    body { font-size: 16px; }
+    header { gap: 13px; padding-top: 34px; }
+    .mark { width: 52px; height: 52px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="mark" aria-hidden="true">
+      <!-- 内联的 App 图标：主球 + 幸运星，路径取自仓库里的 DesignAssets/AppIcon -->
+      <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="512" cy="512" r="348" fill="var(--accent)"/>
+        <path fill="#FFFFFF" d="M512 362c21.667 0 29.583 86.667 50.417 107.5C583.667 491.167 662 493.25 662 514.083s-78.333 22.917-99.583 44.584C541.583 579.5 533.667 666.167 512 666.167s-29.583-86.667-50.417-107.5C440.333 537 362 534.917 362 514.083s78.333-22.916 99.583-44.583C482.417 448.667 490.333 362 512 362Z"/>
+      </svg>
+    </div>
+    <div class="title">
+      <h1><span class="app">彩票夹-号码记录</span>技术支持</h1>
+    </div>
+  </header>
+
+  <p class="lede">本页提供本应用的使用说明、常见问题解答与联系方式。如果下面的内容没有解决您的问题，欢迎直接发邮件给我们。</p>
+
+  <div class="reach">
+    <h2>联系我们</h2>
+    <p>邮件是唯一的支持渠道，我们会在收到后尽快回复（通常为 1 至 3 个工作日）。为便于定位问题，建议在邮件中附上：设备型号、iOS 版本、应用版本号（可在「设置 → 关于」中查看），以及问题的截图或复现步骤。</p>
+    <a class="contact" href="mailto:wenjinliuu@outlook.com">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="2" y="4" width="16" height="12" rx="2.5"/><path d="m2.7 5.4 7.3 5 7.3-5"/>
+      </svg>
+      wenjinliuu@outlook.com
+    </a>
+  </div>
+
+  <section>
+    <h2><span class="num">01</span>这是一款什么应用</h2>
+    <p>「彩票夹-号码记录」是一款<strong>号码记录与核对工具</strong>。它帮助您把已经在正规渠道购买的彩票号码记下来，在开奖后自动比对中奖情况，并统计一段时间内的投入与回报。</p>
+    <p>本应用<strong>不销售彩票、不代购彩票、不提供任何购彩入口</strong>，也不含任何形式的选号预测或走势推荐。所有号码均由您自行录入或从纸质彩票拍照识别得到。</p>
+    <p>目前支持的彩种共八个：双色球、大乐透、福彩 3D、排列 3、排列 5、七乐彩、七星彩、快乐 8。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">02</span>常见问题</h2>
+    <div class="faq">
+
+      <details>
+        <summary>怎么把一张纸质彩票录进去？</summary>
+        <div class="answer">
+          <p>有两种方式，都在底部标签栏右侧的<strong>扫描按钮</strong>里：</p>
+          <ul>
+            <li><strong>拍照识别</strong>：拍摄或从相册选择一张票面照片，拖动四个角把彩票框出来，应用会做透视与水平矫正后识别号码。识别完成会进入复核页，您可以逐注核对并修改，确认无误再保存。</li>
+            <li><strong>手动录入</strong>：在扫描页里选择「手动录入」，自己选彩种、期号和号码。</li>
+          </ul>
+          <p>识别结果<strong>请务必在复核页核对一遍再保存</strong>——票面褶皱、反光或打印偏淡都可能让个别数字识别错误。</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>识别不准或者提示「没有识别到彩票」怎么办？</summary>
+        <div class="answer">
+          <p>识别在您的设备本机完成，成功率主要取决于照片质量。可以试试：</p>
+          <ul>
+            <li>把票面<strong>压平</strong>，避免褶皱和卷边；</li>
+            <li>光线均匀，避开正上方的强光源和反光；</li>
+            <li>裁切时把四个角<strong>贴着票面边缘</strong>放，不要框进桌面或其他票；</li>
+            <li>一次只框<strong>一张</strong>彩票，多张请分次拍摄；</li>
+            <li>票面太旧、油墨太淡时，改用手动录入更快。</li>
+          </ul>
+          <p>如果同一张票反复识别失败，欢迎把照片发到上面的邮箱，我们会用它改进识别效果。</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>支持复式和胆拖吗？</summary>
+        <div class="answer">
+          <p><strong>双色球</strong>和<strong>大乐透</strong>支持复式与胆拖投注的录入和中奖计算，大乐透另外支持追加投注与多期票。</p>
+          <p>福彩 3D 与排列 3 支持直选、组三、组六；快乐 8 支持选一到选十各档玩法。</p>
+          <p>排列 5、七星彩目前<strong>仅支持单式</strong>录入。</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>开奖号码从哪来？多久更新一次？</summary>
+        <div class="answer">
+          <p>开奖号码取自公开的开奖数据源，应用启动时会自动获取，也可以在「设置 → 刷新开奖数据」中手动更新。开奖日历列出了各彩种全年的开奖日与期号，遇到春节、国庆等休市会按官方安排顺延。</p>
+          <p><strong>本应用展示的开奖信息与中奖计算结果仅供参考，一切以官方公布和实体站点兑奖结果为准。</strong>如果发现某一期号码有误或缺失，请邮件告知我们。</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>算出来的中奖金额准吗？</summary>
+        <div class="answer">
+          <p>固定奖级（如双色球四至六等奖、大乐透四至九等奖、3D 与排列 3 各玩法）的金额是确定的，计算结果可靠。</p>
+          <p>一、二等奖等<strong>浮动奖级</strong>的奖金由当期销量和中奖注数决定，应用无法预先得知，因此只标记中奖等级、不给出具体金额。此外，单注奖金超过一万元需要依法缴纳个人所得税，应用显示的是<strong>税前</strong>金额。</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>数据存在哪里？换手机怎么迁移？</summary>
+        <div class="answer">
+          <p>所有记录都<strong>只保存在您的手机本地</strong>，没有账号体系，也不会同步到任何服务器。</p>
+          <p>换设备或想长期留存时，请在「设置 → 数据备份」中导出备份文件，保存到「文件」App、iCloud 云盘或任意您方便的位置，在新设备上再从同一处导入即可。</p>
+          <div class="notice">
+            <p><strong>请注意：</strong>由于数据只存在本机，<strong>卸载应用会一并删除全部记录且无法找回</strong>。卸载或更换设备前请先导出备份。</p>
+          </div>
+        </div>
+      </details>
+
+      <details>
+        <summary>为什么要相机和相册权限？</summary>
+        <div class="answer">
+          <p>相机权限仅在您主动点击拍照时调用，用于拍摄纸质彩票；相册权限仅用于读取您本人选中的那一张图片。</p>
+          <p>票面文字识别<strong>全部在设备本机完成</strong>，照片不会上传到任何服务器，识别结束后即被释放。详见<a class="textlink" href="index.html">隐私政策</a>。</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>应用里没有我想要的功能，可以提建议吗？</summary>
+        <div class="answer">
+          <p>非常欢迎。功能建议、体验问题、识别错误的票面照片，都可以直接发到上面的邮箱。反馈会逐条看，被采纳的改动会在后续版本里更新。</p>
+        </div>
+      </details>
+
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">03</span>理性购彩提示</h2>
+    <p>彩票是一种以娱乐为目的的活动，中奖具有偶然性，任何号码、任何统计方法都无法提高中奖概率。请在自身经济能力允许的范围内适度参与，不要把购彩当作投资或收入来源。</p>
+    <p>未满 18 周岁者不得购买彩票或兑奖。如果您或身边的人已经出现难以自控的投注行为，请及时向家人、朋友或专业机构寻求帮助。</p>
+  </section>
+
+  <footer>
+    <p><a class="textlink" href="index.html">隐私政策</a></p>
+    <p>彩票夹-号码记录 · 本应用仅用于记录您已在正规渠道购买的彩票，不销售、不代购彩票。请理性购彩。</p>
+  </footer>
+
+</div>
+</body>
+</html>
