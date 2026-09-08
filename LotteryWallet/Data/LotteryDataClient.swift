@@ -38,6 +38,22 @@ actor LotteryDataClient {
         try await load("health.json", cacheKey: "health")
     }
 
+    /// 整年开奖日历。文件是按年预生成的静态文件，缓存下来跨年才会变。
+    func fetchDrawCalendar(year: Int) async throws -> DrawCalendarYear {
+        try await load("calendar/\(year).json", cacheKey: "calendar-\(year)")
+    }
+
+    /// 某个彩种某一年的**全部**开奖记录。
+    ///
+    /// `draws/{game}.json` 只有最近 50 期，补核对几个月前的老票根本够不着。
+    /// 仓库另有 `by-year/{game}/{year}.json` 存整年，格式和 50 期那份一模一样。
+    func fetchYearDraws(for game: GameKey, year: Int) async throws -> [Draw] {
+        let payload: RemoteHistoryPayload = try await load(
+            "by-year/\(game.remoteKey)/\(year).json",
+            cacheKey: "by-year-\(game.remoteKey)-\(year)")
+        return (payload.draws ?? []).compactMap { Draw(remote: $0, gameKey: game) }
+    }
+
     // MARK: - 网络 + 磁盘缓存
 
     /// 先走网络；失败时回退到最近一次成功缓存，让离线也能看到开奖号。

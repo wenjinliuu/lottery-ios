@@ -74,6 +74,11 @@ struct BackupService {
             "price": record.price,
             "multiple": record.multiple,
             "status": record.statusRaw,
+            // 命中标记要一起带走。它虽然是核对算出来的派生数据，但要重算就得
+            // 拿到那一期的开奖号 —— 而备份可能是几个月后、在另一台机器上恢复的，
+            // 那时候旧期次的开奖数据未必还取得到。少了它，整票的号码球就没有
+            // 命中效果，看起来像从来没核对过。
+            "matched": record.matched.reduce(into: [String: [Bool]]()) { $0[$1.key.rawValue] = $1.value },
             "resultText": record.resultText,
             "prizeAmount": record.prizeAmount,
             "prizeName": record.prizeName,
@@ -177,15 +182,31 @@ struct BackupService {
             record.targetBasisIssue = target.basisIssue
             record.targetResolutionReason = target.resolutionReason
             record.prizeName = string(row["prizeName"]) ?? ""
-            // 命中标记不从备份带入：口径可能和当前规则不一致，
-            // 导入后统一由核对流程重新算一遍。
-            record.matched = [:]
+            // 命中标记优先从备份带回来。带不回来（老版本备份里没有这个字段）
+            // 也不要紧，启动时的核对流程会按开奖号补一次 —— 但那一步需要能
+            // 取到对应期次的开奖数据，所以能带就带。
+            record.matched = Self.matchedFlags(row["matched"])
             record.refreshProfitDay()
             record.updatedAt = DateText.parse(string(row["updatedAt"]) ?? "") ?? Date()
         }
 
         try context.save()
         return (inserted, updated)
+    }
+
+    /// 备份里的命中标记：`{"red": [true, false, ...], "blue": [true]}`。
+    private static func matchedFlags(_ value: Any?) -> [SectionKey: [Bool]] {
+        guard let raw = value as? [String: Any] else { return [:] }
+        var result: [SectionKey: [Bool]] = [:]
+        for (key, flags) in raw {
+            guard let section = SectionKey(rawValue: key) else { continue }
+            if let list = flags as? [Bool] {
+                result[section] = list
+            } else if let numbers = flags as? [NSNumber] {
+                result[section] = numbers.map { $0.boolValue }
+            }
+        }
+        return result
     }
 
     private static func ticket(from numbers: [String: Any], fallbackPlayMode: String, entryLabel: String) -> Ticket {

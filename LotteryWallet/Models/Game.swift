@@ -80,8 +80,20 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         }
     }
 
-    /// 单注价格，八个彩种当前都是 2 元。
+    /// 单注基本价格，八个彩种都是 2 元。
     var unitPrice: Double { 2 }
+
+    /// 实际单注价格。
+    ///
+    /// 大乐透**追加投注是 3 元一注**（2 元基本 + 1 元追加），不是 2 元。
+    /// 之前一律按 2 元记账，追加票的投入被少记三分之一，
+    /// 连带盈亏、公益金、首页方格图全都偏。
+    ///
+    /// 这条可以用票面反推验证：样票里那张 11 个前区拖号的胆拖票展开是 10 注、
+    /// 合计 20 元 —— 正好 2 元一注，说明它**不是**追加票；追加的话应该是 30 元。
+    func unitPrice(addOn: Bool) -> Double {
+        self == .dlt && addOn ? 3 : 2
+    }
 
     /// 支持"注数"快捷选择的彩种，与 web 版 `COUNT_GAMES` 一致。
     var supportsMultiTicketCount: Bool {
@@ -118,12 +130,51 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         }
     }
 
-    /// 开奖号的号码区定义，多数与投注票相同，七乐彩多一个特别号。
+    /// 票面上要显示的玩法标签。
+    ///
+    /// 大乐透的「追加」原来在票夹里完全看不见 —— 票面只显示录入方式
+    /// （随机/普通/复式/胆拖），玩法字段虽然存了却没有任何地方读它。
+    func playLabel(playMode: String, addOn: Bool) -> String {
+        switch self {
+        case .dlt: return addOn ? "追加" : "普通"
+        case .k8: return Int(playMode).map { "选\(ChineseNumber.text($0))" } ?? ""
+        case .fc3d, .pl3:
+            switch playMode {
+            case "single": return "直选"
+            case "group3": return "组三"
+            case "group6": return "组六"
+            default: return ""
+            }
+        default: return ""
+        }
+    }
+
+    /// 投注时这个号码区实际要选几个号。
+    ///
+    /// 快乐8 的 `section.count` 是**开奖**开出的 20 个号，投注选几个由玩法决定
+    /// （选一 … 选十）。其余彩种两者一致。
+    func pickCount(for section: GameSection, playMode: String) -> Int {
+        guard self == .k8 else { return section.count }
+        return Int(playMode) ?? section.count
+    }
+
+    /// 开奖号的号码区定义。
+    ///
+    /// 注意数字型彩种：`Draw.convertNumbers` 把开奖数字统一存进 `.nums`，
+    /// 而投注票用的是 `.nums3` / `.nums5`。两边键名不一致的后果是
+    /// 首页的排列3、排列5、福彩3D 卡片上**一颗球都画不出来**。
+    /// 开奖号这一侧必须按仓库实际写入的键来声明。
     var drawSections: [GameSection] {
         switch self {
         case .qlc:
             [GameSection(key: .nums7, label: "基本号", count: 7, color: .yellow, range: 1...30),
              GameSection(key: .special, label: "特别号", count: 1, color: .k8orange, range: 1...30)]
+        case .fc3d:
+            [GameSection(key: .nums, label: "号码", count: 3, color: .fc3d, range: 0...9)]
+        case .pl3:
+            [GameSection(key: .nums, label: "号码", count: 3, color: .plum, range: 0...9)]
+        case .pl5:
+            [GameSection(key: .nums, label: "号码", count: 5, color: .plum, range: 0...9)]
         default:
             sections
         }

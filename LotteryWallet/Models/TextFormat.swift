@@ -14,23 +14,48 @@ enum MoneyText {
         return number
     }
 
-    /// "1,234 元" 形式。
-    static func format(_ value: Double) -> String {
+    /// NumberFormatter 的构造很贵。列表里每张票、每个 KPI 都要格式化金额，
+    /// 一屏就是几十上百次；每次新建一个 formatter 足以在滚动时掉帧。
+    /// 整数和小数各留一个常驻实例。
+    private static let integerFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
-        formatter.maximumFractionDigits = value == value.rounded() ? 0 : 2
-        let text = formatter.string(from: NSNumber(value: value)) ?? String(value)
-        return "\(text)元"
+        formatter.maximumFractionDigits = 0
+        return formatter
+    }()
+
+    private static let decimalFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        return formatter
+    }()
+
+    /// 千分位数字，不带单位。
+    static func grouped(_ value: Double) -> String {
+        guard value.isFinite else { return "0" }
+        let formatter = value == value.rounded() ? integerFormatter : decimalFormatter
+        return formatter.string(from: NSNumber(value: value)) ?? String(value)
     }
 
-    /// 紧凑写法，用于图表刻度和 KPI。
+    /// "1,234元" 形式。
+    static func format(_ value: Double) -> String {
+        "\(grouped(value))元"
+    }
+
+    /// 紧凑写法，用于图表刻度和 KPI。不带单位。
     static func compact(_ value: Double) -> String {
+        guard value.isFinite else { return "0" }
         let absolute = abs(value)
         if absolute >= 100_000_000 { return String(format: "%.2f亿", value / 100_000_000) }
         if absolute >= 10_000 { return String(format: "%.1f万", value / 10_000) }
-        if value == value.rounded() { return String(Int(value)) }
+        // Int(_:) 对超出 Int64 的 Double 会直接崩，这里走 formatter 更稳。
+        if value == value.rounded() { return grouped(value) }
         return String(format: "%.1f", value)
     }
+
+    /// 紧凑写法 + "元"，避免各处自己拼字符串拼出 "1.2万 元" 这种带空格的写法。
+    static func compactYuan(_ value: Double) -> String { "\(compact(value))元" }
 }
 
 /// 中文数字，用于快乐8 的"选七中五"奖级匹配。
@@ -86,26 +111,36 @@ enum DateText {
         return nil
     }
 
+    /// 展示用的两个 formatter 也必须常驻。统计页的「每日明细」一屏就要格式化
+    /// 上百个日期，每次新建 DateFormatter 会把一整帧吃光。
+    private static let monthDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = chinaTimeZone
+        formatter.dateFormat = "MM-dd"
+        return formatter
+    }()
+
+    private static let friendlyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = chinaTimeZone
+        formatter.dateFormat = "M月d日 HH:mm"
+        return formatter
+    }()
+
     static func day(_ date: Date) -> String { dayFormatter.string(from: date) }
 
     /// "08-31" 形式，卡片副标题用。
     static func monthDay(_ raw: String) -> String {
         guard let date = parse(raw) else { return raw }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.timeZone = chinaTimeZone
-        formatter.dateFormat = "MM-dd"
-        return formatter.string(from: date)
+        return monthDayFormatter.string(from: date)
     }
 
     /// "8月31日 20:30" 形式。
     static func friendly(_ raw: String) -> String {
         guard let date = parse(raw) else { return raw }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.timeZone = chinaTimeZone
-        formatter.dateFormat = "M月d日 HH:mm"
-        return formatter.string(from: date)
+        return friendlyFormatter.string(from: date)
     }
 
     /// 东八区的"今天"，用于判断今日开奖安排。

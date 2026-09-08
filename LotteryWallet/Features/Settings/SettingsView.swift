@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.modelContext) private var context
     @Environment(\.showToast) private var showToast
+    @Environment(\.celebrate) private var celebrate
     @Query private var records: [TicketRecord]
 
     @State private var isExporting = false
@@ -52,7 +53,7 @@ struct SettingsView: View {
                     LabeledContent {
                         Text(drawStore.calendar == nil ? "未获取" : "正常")
                             .font(.footnote)
-                            .foregroundStyle(drawStore.calendar == nil ? .orange : .secondary)
+                            .foregroundStyle(drawStore.calendar == nil ? Palette.warning : Color.secondary)
                     } label: {
                         row("calendar", .red, "开奖日历")
                     }
@@ -136,9 +137,9 @@ struct SettingsView: View {
                 switch result {
                 case .success:
                     settings.lastBackupAt = Date()
-                    showToast("备份已保存", symbol: "square.and.arrow.up")
+                    showToast("备份已保存", symbol: "square.and.arrow.up", feedback: .success)
                 case .failure:
-                    showToast("导出取消或失败", symbol: "exclamationmark.triangle")
+                    showToast("导出取消或失败", symbol: "exclamationmark.triangle", feedback: .error)
                 }
             }
             .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
@@ -163,7 +164,10 @@ struct SettingsView: View {
 
     private var busyOverlay: some View {
         ZStack {
-            Color.black.opacity(0.12).ignoresSafeArea()
+            // 12% 的黑在深色模式下几乎看不出来，用材质两种模式都能压住底下的内容
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
             VStack(spacing: 12) {
                 ProgressView()
                 Text(busyLabel)
@@ -172,7 +176,10 @@ struct SettingsView: View {
             }
             .padding(24)
             .background(Palette.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: .black.opacity(0.15), radius: 16, y: 6)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(busyLabel)
     }
 
     private var backupFooter: String {
@@ -200,7 +207,7 @@ struct SettingsView: View {
     private func export() {
         let service = BackupService(context: context)
         guard let data = try? service.exportData(records: records) else {
-            showToast("生成备份失败", symbol: "exclamationmark.triangle")
+            showToast("生成备份失败", symbol: "exclamationmark.triangle", feedback: .error)
             return
         }
         exportDocument = BackupDocument(data: data)
@@ -231,11 +238,13 @@ struct SettingsView: View {
                 await drawStore.loadAllHistories()
                 let service = RecordService(context: context, drawStore: drawStore)
                 _ = try? service.reconcileInferredTargets()
-                _ = try? service.checkAll()
+                let checked = try? service.checkAll()
 
-                showToast("已导入 \(outcome.inserted + outcome.updated) 条记录", symbol: "square.and.arrow.down")
+                showToast("已导入 \(outcome.inserted + outcome.updated) 条记录", symbol: "square.and.arrow.down", feedback: .success)
+                // 导入一份旧备份常常一次核出好几注中奖，值得放一次烟花
+                if let checked, checked.won > 0 { celebrate() }
             } catch {
-                showToast(error.localizedDescription, symbol: "exclamationmark.triangle")
+                showToast(error.localizedDescription, symbol: "exclamationmark.triangle", feedback: .error)
             }
         }
     }
@@ -243,9 +252,9 @@ struct SettingsView: View {
     private func clearAll() {
         do {
             try RecordService(context: context, drawStore: drawStore).deleteAll()
-            showToast("已清空全部记录", symbol: "trash")
+            showToast("已清空全部记录", symbol: "trash", feedback: .success)
         } catch {
-            showToast("清空失败", symbol: "exclamationmark.triangle")
+            showToast("清空失败", symbol: "exclamationmark.triangle", feedback: .error)
         }
     }
 }

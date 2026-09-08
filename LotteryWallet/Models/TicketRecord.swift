@@ -193,8 +193,22 @@ final class TicketRecord {
         }
         set {
             matchedCache = newValue
-            matchedData = (try? JSONEncoder().encode(newValue)) ?? Data()
+            // 空字典必须存成**空 Data**，不能存成 `{}` 那两个字节。
+            //
+            // 「这条记录有没有命中标记」全靠 `matchedData` 是不是空来判断，
+            // 而导入恢复时写的正是空字典。存成 `{}` 的话这个判断永远为 false，
+            // 补标记的整条路径一次都不会触发 —— 上一版的修复就是这么白做的。
+            matchedData = newValue.isEmpty ? Data() : ((try? JSONEncoder().encode(newValue)) ?? Data())
         }
+    }
+
+    /// 有没有可用的命中标记。
+    ///
+    /// **不要直接看 `matchedData.isEmpty`。** 老数据里存着 `{}`，
+    /// 字节非空但内容是空的，光看长度会把它当成「已经有标记」。
+    var hasMatches: Bool {
+        guard !matchedData.isEmpty else { return false }
+        return !matched.isEmpty
     }
 
     /// 这一注的投入金额。

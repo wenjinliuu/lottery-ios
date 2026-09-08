@@ -21,10 +21,10 @@ LotteryWallet/
   Rules/PrizeRules.swift        奖级判定（对照 web/rules.js 逐条移植）
   Data/                         数据仓库客户端、开奖状态、票据服务、备份
   Resources/AppIcon.icon/       Xcode 直接编译的 Icon Composer 分层图标
-  Features/Home                 首页：盈亏折线、开奖轮播、本月概览、往期开奖
-  Features/Wallet               票夹：电子票列表、筛选、核对
-  Features/Entry                录入：随机 / 普通 / 复式 / 胆拖
-  Features/Scan                 Vision 扫票与复核
+  Features/Home                 首页：逐日盈亏方格图、开奖轮播、本月概览、往期开奖
+  Features/Wallet               票夹：电子票列表、筛选、排序、核对
+  Features/Entry                录入：手选 / 复式 / 胆拖，整票预览，期次选择日历
+  Features/Scan                 扫票：人工框选 → 透视矫正 → 水平矫正 → Vision 识别 → 复核
   Features/Stats                统计
   Features/Settings             设置、备份、关于
 Tests/LotteryWalletTests/       奖级、组合展开、票面解析的单元测试
@@ -48,6 +48,31 @@ brew install xcodegen
 修改图形时先更新两个 SVG，再用 Apple Icon Composer 或 `icon-composer-mcp@1.1.0`
 同步 `.icon` 包，并运行 `App Icon Preview` workflow。该 workflow 会返回六种苹果真实渲染、
 营销 PNG 和一份完整 `.icon` 包作为 Artifact。编译产生的 `Assets.car`、IPA 不回写源码。
+
+## 开奖日历
+
+期号和开奖日期不在 App 里推算，来自数据仓库预生成的静态文件
+`public_data/calendar/{year}.json`（八个彩种、全年每一期）。生成规则已用真实
+开奖记录逐期比对验证；休市日单独维护在 `calendar/closures.json`，每年 12 月
+补一次次年的春节日期即可（国庆固定 10-01 至 10-04）。
+
+App 侧只读不算：`LotteryDataClient.fetchDrawCalendar(year:)` 拉取并缓存，
+`DrawStore.nextDrawTarget` 顺着期次表找第一期还没停售的 —— 过了当期截止时间
+自动落到下一期。
+
+## 扫票流程
+
+1. 拍照或选图
+2. **人工框出票面**（矩形检测只提供四个角的初始位置，最终由用户确认）
+3. 透视矫正 —— 按四个角把票拉成正矩形
+4. 水平矫正 —— 量文字基线角度的中位数再转回来，透视矫正保证不了这一步
+5. 放大到短边 1500px，Vision 本机识别
+6. 按票面标签解析（红单/红复/红胆/红拖、前区胆/前区拖…），用票面「合计 N 元」
+   反查注数做交叉验证
+7. 逐张复核，号码球可点开改
+
+一次一张票。解析规则由 23 张真实样票的单元测试锁定，每张都用票面印的金额
+当独立答案验注数。
 
 ## 液态玻璃写在哪里
 

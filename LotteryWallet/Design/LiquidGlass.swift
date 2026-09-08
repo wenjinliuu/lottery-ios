@@ -62,19 +62,44 @@ struct GlassGroup<Content: View>: View {
 }
 
 /// 主操作按钮（"确认已购买并加入票夹"这类）。
+///
+/// `foreground` 必须和 `tint` 成对给：彩种色里黄、琥珀这些浅底压白字只有 2:1，
+/// 深色模式下强调色本身就是浅蓝，白字同样读不清。
+/// 调用方一律传 `game.onTint` 或 `Palette.onAccent`。
 struct ProminentGlassButton: ButtonStyle {
     var tint: Color
+    var foreground: Color = Palette.onAccent
+    /// 亮色彩种（七乐彩黄、七星彩琥珀）需要一圈描边把按钮边缘勾出来，
+    /// 否则白字白边糊在浅色底上。
+    var stroke: Color = .clear
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.headline)
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 15)
-            .background(tint, in: Capsule())
-            .opacity(configuration.isPressed ? 0.86 : 1)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .animation(.spring(response: 0.3, dampingFraction: 0.75), value: configuration.isPressed)
+        StyleBody(configuration: configuration, tint: tint, foreground: foreground, stroke: stroke)
+    }
+
+    /// ButtonStyle 本身不是 View，读不到 `isEnabled`，只能套一层真正的 View。
+    ///
+    /// 名字不能叫 `Body`：`ButtonStyle` 有个同名的关联类型，嵌套类型会被
+    /// 当成它的见证类型，和 `makeBody` 的不透明返回类型冲突，协议直接不成立。
+    struct StyleBody: View {
+        let configuration: ButtonStyleConfiguration
+        let tint: Color
+        let foreground: Color
+        var stroke: Color = .clear
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            configuration.label
+                .font(.headline)
+                .foregroundStyle(foreground)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .background(tint, in: Capsule())
+                .overlay(Capsule().strokeBorder(stroke, lineWidth: 1))
+                .opacity(isEnabled ? (configuration.isPressed ? 0.86 : 1) : 0.4)
+                .scaleEffect(configuration.isPressed ? 0.98 : 1)
+                .animation(.spring(response: 0.3, dampingFraction: 0.75), value: configuration.isPressed)
+        }
     }
 }
 
@@ -83,14 +108,37 @@ struct SecondaryGlassButton: ButtonStyle {
     var tint: Color
 
     func makeBody(configuration: Configuration) -> some View {
+        StyleBody(configuration: configuration, tint: tint)
+    }
+
+    /// 同上，不能叫 `Body`。
+    struct StyleBody: View {
+        let configuration: ButtonStyleConfiguration
+        let tint: Color
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            configuration.label
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tint)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .background(tint.opacity(0.12), in: Capsule())
+                .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.4)
+                .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+        }
+    }
+}
+
+/// 图标按钮的按下反馈。
+/// Apple 的第一条规则就是「在 pointer-down 的那一刻就给反馈」——
+/// 等到抬手才有反应，界面就是死的。
+struct PressableIcon: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-            .background(tint.opacity(0.12), in: Capsule())
-            .opacity(configuration.isPressed ? 0.7 : 1)
-            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.9 : 1)
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .animation(.spring(duration: 0.22, bounce: 0), value: configuration.isPressed)
     }
 }
 

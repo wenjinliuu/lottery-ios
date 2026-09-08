@@ -7,27 +7,21 @@ struct DrawHistoryView: View {
 
     @State private var game: GameKey = .ssq
 
-    private var history: [Draw] {
-        drawStore.draws(for: game)
-    }
-
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    gameTabs
-                    if history.isEmpty {
-                        ProgressView("正在读取往期开奖")
-                            .padding(.top, 60)
-                    } else {
-                        ForEach(history) { draw in
-                            DrawHistoryRow(draw: draw)
-                        }
+            VStack(spacing: 10) {
+                gameTabs
+                    .padding(.horizontal, 16)
+                // 彩种之间用分页 TabView 而不是只换内容：这样左右滑动就能切彩种，
+                // 不必每次都回到顶上的芯片条去点。竖向滚动仍然归各页自己。
+                TabView(selection: $game) {
+                    ForEach(GameKey.ordered) { item in
+                        page(for: item).tag(item)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 40)
+                .tabViewStyle(.page(indexDisplayMode: .never))
             }
+            .padding(.top, 8)
             .background(Palette.canvas)
             .navigationTitle("往期开奖")
             .navigationBarTitleDisplayMode(.inline)
@@ -36,35 +30,76 @@ struct DrawHistoryView: View {
                     Button("完成") { dismiss() }
                 }
             }
-            .task(id: game) { await drawStore.loadHistory(for: game) }
         }
     }
 
+    @ViewBuilder
+    private func page(for item: GameKey) -> some View {
+        let rows = drawStore.draws(for: item)
+        // 「还没拉过」和「拉过但是空的」是两回事。只按当前选中的彩种判断
+        // 是否在加载，滑到还没加载的那一页会直接看到「网络没连上」的空状态 ——
+        // 明明只是还没轮到它。
+        let hasLoaded = drawStore.attemptedHistoryGames.contains(item)
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                if !rows.isEmpty {
+                    ForEach(rows) { draw in
+                        DrawHistoryRow(draw: draw)
+                    }
+                } else if !hasLoaded {
+                    ProgressView("正在读取往期开奖")
+                        .padding(.top, 60)
+                } else {
+                    // 拉取失败或该彩种确实没有数据时，原来会一直转圈，
+                    // 用户既不知道出了什么事，也没有重试的入口。
+                    ContentUnavailableView {
+                        Label("暂时没有往期数据", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text("可能是网络没连上，或者数据仓库还没有这个彩种的往期记录。")
+                    } actions: {
+                        Button("重试") { Task { await drawStore.reloadHistory(for: item) } }
+                            .buttonStyle(SecondaryGlassButton(tint: item.tint))
+                    }
+                    .padding(.top, 40)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 40)
+        }
+        // 每一页管自己那份数据，滑过去就开始拉
+        .task(id: item) { await drawStore.loadHistory(for: item) }
+    }
+
+    /// 彩种切换条。
+    ///
+    /// 这里刻意**不用玻璃**：本项目的分层原则是玻璃只属于悬浮在内容之上的导航层，
+    /// 这排芯片跟着内容一起滚，早期版本给它套 glassPill，选中态的渐变被玻璃糊掉，
+    /// 白字压上去也读不清。改成和票夹筛选条一致的实心芯片。
     private var gameTabs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            GlassGroup(spacing: 10) {
-                HStack(spacing: 8) {
-                    ForEach(GameKey.ordered) { item in
-                        Button {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { game = item }
-                        } label: {
-                            Text(item.label)
-                                .font(.footnote.weight(.bold))
-                                .foregroundStyle(game == item ? .white : Color.primary)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                        }
-                        .buttonStyle(.plain)
-                        .background {
-                            if game == item { Capsule().fill(item.gradient) }
-                        }
-                        .glassPill(tint: game == item ? item.tint : nil)
+            HStack(spacing: 8) {
+                ForEach(GameKey.ordered) { item in
+                    let isOn = game == item
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { game = item }
+                    } label: {
+                        Text(item.label)
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(isOn ? item.onTint : Color.primary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(isOn ? AnyShapeStyle(item.tint) : AnyShapeStyle(Palette.card),
+                                        in: Capsule())
+                            .overlay(Capsule().strokeBorder(isOn ? item.accent.solidStroke : .clear, lineWidth: 1))
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
                 }
-                .padding(.vertical, 2)
             }
+            .padding(.vertical, 2)
         }
         .scrollClipDisabled()
+        .accessibilityHint("也可以在下方左右滑动切换彩种")
     }
 }
 
@@ -76,23 +111,24 @@ struct DrawHistoryRow: View {
             HStack {
                 Text("第 \(draw.expect) 期")
                     .font(.subheadline.weight(.bold))
-                Spacer()
+                    .monospacedDigit()
+                Spacer(minLength: 8)
                 Text(DateText.monthDay(draw.openDate))
                     .font(.caption)
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                DrawNumbersView(draw: draw, size: 28)
-            }
-            .scrollClipDisabled()
+            // 往期这里要看全号码，所以不限制颗数，只让球径自适应缩小
+            DrawNumbersView(draw: draw, size: 28)
             if let first = draw.firstPrize, first.winningCount > 0 {
-                Text("一等奖 \(first.winningCount) 注" + (first.amount > 0 ? " · \(MoneyText.compact(first.amount))元/注" : ""))
+                Text("一等奖 \(first.winningCount) 注"
+                     + (first.amount > 0 ? " · \(MoneyText.compactYuan(first.amount))/注" : ""))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // contentCard 自己就带 16pt 内边距，外面再加一层等于 32pt，
+        // 卡片里的内容会比首页窄一大截。
         .contentCard(cornerRadius: 20)
     }
 }
