@@ -24,10 +24,23 @@ struct RootView: View {
         Binding(
             get: { selection },
             set: { newValue in
-                if newValue == .scan {
-                    activeSheet = .scan
-                } else {
+                guard newValue == .scan else {
                     selection = newValue
+                    return
+                }
+                // **抽屉不能在这里当场打开。**
+                //
+                // 这个 setter 是 SwiftUI 在自己的更新过程里调用的。在它里面写
+                // `activeSheet`，等于在一次布局中途改另一处状态 —— 系统只好
+                // 当场再跑一轮更新，屏幕上就是抽屉背后那道闪。抽屉是半透明的
+                // 玻璃，背面重画一次看得清清楚楚。
+                //
+                // 挪到下一轮 runloop：这次更新先老老实实收尾（选中值原样退回
+                // 首页），抽屉再单独作为一次状态变更弹出来。
+                guard activeSheet == nil else { return }
+                Task { @MainActor in
+                    guard activeSheet == nil else { return }
+                    activeSheet = .scan
                 }
             }
         )
@@ -59,7 +72,13 @@ struct RootView: View {
             // 它不承载页面：选中的那一刻在 `tabSelection` 里就被拦下来了，
             // 所以既不会切页面，也不会弹出搜索框。
             Tab("扫描", systemImage: "camera.viewfinder", value: MainTab.scan, role: .search) {
-                Color.clear
+                // 这一页永远不会被真正看到，但**不能留成 Color.clear**。
+                //
+                // 系统标签栏为了点起来跟手，会先把选中值切过来、再去问绑定要
+                // 结果，被退回时已经画过一帧。透明的一帧会直接露出窗口底色，
+                // 隔着半透明抽屉就是一道白闪；铺上和三个页面同样的画布色，
+                // 这一帧和退回后的画面是同一个颜色，看不出来。
+                Palette.canvas.ignoresSafeArea()
             }
             // 这个位置在系统眼里仍然是「标签」，读屏会念成标签而不是按钮。
             // 用无障碍标签把它的实际作用说清楚。
