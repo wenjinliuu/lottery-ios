@@ -13,29 +13,7 @@
   ],
   "groups" : [
     {
-      "blur-material" : 0.1,
-      "hidden" : false,
-      "layers" : [
-        {
-          "glass" : true,
-          "hidden" : false,
-          "image-name" : "LuckyStar.svg",
-          "name" : "LuckyStar"
-        }
-      ],
-      "lighting" : "individual",
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.16
-      },
-      "specular" : true,
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.08
-      }
-    },
-    {
-      "blur-material" : 0.18,
+      "blur-material" : 0.12,
       "hidden" : false,
       "layers" : [
         {
@@ -48,25 +26,95 @@
             {
               "appearance" : "dark",
               "value" : {
-                "solid" : "display-p3:0.48627,0.73725,1.00000,1.00000"
+                "solid" : "display-p3:0.47451,0.70980,1.00000,1.00000"
               }
             }
           ],
           "glass" : true,
           "hidden" : false,
-          "image-name" : "Orb.svg",
-          "name" : "Orb"
+          "image-name" : "FrontTicket.svg",
+          "name" : "FrontTicket"
         }
       ],
-      "lighting" : "combined",
+      "lighting" : "individual",
       "shadow" : {
         "kind" : "layer-color",
-        "opacity" : 0.24
+        "opacity" : 0.18
       },
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.16
+        "value" : 0.12
+      }
+    },
+    {
+      "blur-material" : 0.12,
+      "hidden" : false,
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "display-p3:0.93725,0.26667,0.26667,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "display-p3:1.00000,0.41961,0.44706,1.00000"
+              }
+            }
+          ],
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "MiddleTicket.svg",
+          "name" : "MiddleTicket"
+        }
+      ],
+      "lighting" : "individual",
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.16
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.1
+      }
+    },
+    {
+      "blur-material" : 0.12,
+      "hidden" : false,
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "display-p3:1.00000,0.61176,0.20392,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "display-p3:1.00000,0.71373,0.36078,1.00000"
+              }
+            }
+          ],
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "BackTicket.svg",
+          "name" : "BackTicket"
+        }
+      ],
+      "lighting" : "individual",
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.14
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.09
       }
     }
   ],

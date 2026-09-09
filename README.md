@@ -41,13 +41,12 @@ brew install xcodegen
 
 ## App 图标交接
 
-图标已采用 A 方案：项目主蓝圆球（`#3B82F6`）与白色幸运星。原始图层在
-`DesignAssets/AppIcon/`，可编译的分层包在 `LotteryWallet/Resources/AppIcon.icon/`；
-后续开发无需重复生成，正常运行 Build 或 TestFlight workflow 就会自动带入最新版图标。
+图标已定稿为 12 号“十八度开阔扇”：蓝、红、橙三张等尺寸票据以左侧缺口圆心作为共同旋转支点，角度依次为 `+12° / -6° / -24°`。因此三层叠放后，左侧始终合成一个干净的圆形缺口。
 
-修改图形时先更新两个 SVG，再用 Apple Icon Composer 或 `icon-composer-mcp@1.1.0`
-同步 `.icon` 包，并运行 `App Icon Preview` workflow。该 workflow 会返回六种苹果真实渲染、
-营销 PNG 和一份完整 `.icon` 包作为 Artifact。编译产生的 `Assets.car`、IPA 不回写源码。
+原始图层在 `DesignAssets/AppIcon/`，可编译的分层包在
+`LotteryWallet/Resources/AppIcon.icon/`。三个 SVG 只保存几何与项目色，不预制圆角蒙版、高光、阴影或玻璃效果；这些材质由 `icon.json` 和 Apple Icon Composer 统一渲染。
+
+修改图形时同步更新两处 SVG，然后运行 `App Icon Preview` workflow。它会验证 `.icon` 包，并返回 Default、Dark、Tinted、Clear 六种苹果真实渲染、营销 PNG 和完整 `.icon` 包作为 Artifact。正常 Build 与 TestFlight workflow 会直接编译当前 `AppIcon.icon`，生成物不会回写源码。
 
 ## 开奖日历
 
