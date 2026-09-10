@@ -186,6 +186,12 @@ struct BackupService {
             // 也不要紧，启动时的核对流程会按开奖号补一次 —— 但那一步需要能
             // 取到对应期次的开奖数据，所以能带就带。
             record.matched = Self.matchedFlags(row["matched"])
+            // 备份里的已结算记录一律当成「看过了」。
+            // 否则导一份几百条的老备份进来，票夹会瞬间冒出几百条「新结果」，
+            // 而那些结果用户在导出前就已经看过了。
+            if record.status.hasResult && record.resultSeenAt == nil {
+                record.resultSeenAt = record.updatedAt
+            }
             record.refreshProfitDay()
             record.updatedAt = DateText.parse(string(row["updatedAt"]) ?? "") ?? Date()
         }

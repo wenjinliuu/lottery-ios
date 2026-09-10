@@ -33,7 +33,7 @@ targets:
         # 对外版本号。必须和 App Store Connect 里那条版本记录写的一样，
         # 否则上传的包挂不到那条记录下面。改版本只改这一行；
         # 构建号由 CI 用 run number 覆盖，不写死在这里。
-        MARKETING_VERSION: "1.2"
+        MARKETING_VERSION: "1.2.0"
         CURRENT_PROJECT_VERSION: "1"
         SUPPORTS_MACCATALYST: NO
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO

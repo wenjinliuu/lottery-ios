@@ -12,14 +12,16 @@ struct TicketScanView: View {
     /// 手动录入是它里面的一个分支。
     var onManualEntry: (() -> Void)?
 
-    @Environment(\.dismiss) private var dismiss
+    // 抽屉是自绘的（见 Design/Drawer.swift），不是系统 sheet，
+    // 所以关闭动作走 drawerDismiss。调用方式和 \.dismiss 一样。
+    @Environment(\.drawerDismiss) private var dismiss
+    @Environment(\.drawerExpand) private var expandDrawer
     @Environment(\.modelContext) private var context
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.showToast) private var showToast
     @Environment(\.celebrate) private var celebrate
 
     @State private var stage: Stage = .intro
-    @State private var detent: PresentationDetent = .medium
     @State private var isCameraPresented = false
     @State private var photoItem: PhotosPickerItem?
     @State private var preview: UIImage?
@@ -98,18 +100,16 @@ struct TicketScanView: View {
                 Text(errorText ?? "")
             }
         }
-        // 抽屉：入口半屏，进复核自动长到整屏
-        .presentationDetents(stage == .review ? [.large] : [.medium, .large], selection: $detent)
-        .presentationDragIndicator(.visible)
-        // 抽屉本身就是一层玻璃，底下的内容透上来 —— 它是浮在票夹之上的
-        // 一个临时工作台，不是另一个页面。
-        .presentationBackground(.regularMaterial)
-        .presentationCornerRadius(28)
+        // 抽屉：入口半屏，一旦开始处理图片就长到整屏。
+        // 高度归抽屉那一层管，这里只声明「这个阶段该多高」，
+        // 各处再单独去改高度就会漏掉分支（老代码里 reset 之后就没缩回去）。
+        .onChange(of: stage) { _, value in
+            expandDrawer(value == .intro ? .medium : .large)
+        }
         .fullScreenCover(isPresented: $isCameraPresented) {
             CameraPicker { image in
                 preview = image
                 stage = .crop
-                detent = .large
             }
             .ignoresSafeArea()
         }
@@ -134,7 +134,6 @@ struct TicketScanView: View {
                 }
                 preview = image
                 stage = .crop
-                detent = .large
             }
         }
         .task { await drawStore.loadYearCalendars() }
@@ -743,7 +742,6 @@ struct TicketScanView: View {
             ticketImages = page.images
             globalWarnings = page.result.warnings
             stage = .review
-            detent = .large
         } catch {
             errorText = error.localizedDescription
             stage = .intro
@@ -752,7 +750,6 @@ struct TicketScanView: View {
 
     private func reset() {
         stage = .intro
-        detent = .medium
         preview = nil
         croppedPreview = nil
         photoItem = nil

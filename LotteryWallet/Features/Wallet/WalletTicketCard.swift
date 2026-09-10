@@ -48,7 +48,12 @@ struct WalletTicketCard: View {
         // 中奖的票自己一直在放小烟花，不用等用户去点。
         // 中奖是几个月才遇上一次的事，它值得一直亮着。
         .overlay {
-            if card.status == .won { TicketSparkleOverlay() }
+            if card.status == .won {
+                // 负 padding 把画布撑得比卡片大一圈，火星才能越出边缘一点点。
+                // 幅度只有十几点，不会糊到隔壁卡片上（卡片间距 12）。
+                TicketSparkleOverlay()
+                    .padding(-TicketSparkleOverlay.overflow)
+            }
         }
         .contentShape(Rectangle())
         // 烟花只在「刚核出中奖」那一瞬间放的话，基本没人看得到 ——

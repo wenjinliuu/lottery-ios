@@ -8,7 +8,9 @@ import SwiftData
 /// 也没法像在彩票站那样把好几注打在同一张票上。现在手选可以攒候选注，
 /// 复式和胆拖则按真实票面的排版（红单/红复、前区胆/前区拖…）画出来。
 struct EntryFlowView: View {
-    @Environment(\.dismiss) private var dismiss
+    // 录入页装在自绘抽屉里（见 Design/Drawer.swift），关闭走 drawerDismiss
+    @Environment(\.drawerDismiss) private var dismiss
+    @Environment(\.drawerExpand) private var expandDrawer
     @Environment(\.modelContext) private var context
     @Environment(DrawStore.self) private var drawStore
     @Environment(AppSettings.self) private var settings

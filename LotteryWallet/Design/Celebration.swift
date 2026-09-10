@@ -132,124 +132,171 @@ private struct BurstView: View {
 
 /// 中奖彩票卡片上持续绽放的小烟花。
 ///
-/// 三版才调对：
-/// - 第一版圆点原地放大淡出 —— 那是 loading spinner 的语言，不是烟花。
-/// - 第二版改成从一点迸开的一簇，方向对了，但四处同时放、又快又小，
-///   看上去像静电噪点。
+/// 前几版都是用 SwiftUI 的视图动画摆圆点：一簇 `Circle` 各自 `offset` 出去再淡出。
+/// 结果就是用户说的「像在涂小球」—— 火星匀速滑到终点、同时熄灭，
+/// 既没有初速衰减，也没有下坠，读起来是一组滑块而不是一次爆炸。
 ///
-/// 这一版：
-/// 1. **有先后**。四朵各自独立，起爆时刻错开，而且每朵的间歇长短不同 ——
-///    它们会慢慢互相错开，永远凑不出一个固定的节拍。这就是「随机」的来源，
-///    而不是每帧摇一次骰子（那样很贵）。
-/// 2. **慢下来、放大**。单朵绽放 1.5 秒（原来 0.85），火星最大 5pt
-///    （原来 3.4），飞得也更远。慢和大才看得清是在「绽开」。
-/// 3. 一朵放完要静默好几秒。任何时刻屏幕上通常只有一朵在动。
+/// 这一版换成 `TimelineView` + `Canvas` 的粒子模拟。差别在于：
 ///
-/// 时序用 `phaseAnimator` 表达：**等待 → 亮起 → 飞散**三相循环。
-/// `repeatForever` 做不到这件事 —— 它的周期就是动画本身的时长，
-/// 加 delay 只是推迟第一次，之后每 1.5 秒还是会重放一遍，四朵立刻挤在一起。
+/// 1. **有物理**。每粒火星带初速，速度按指数阻力衰减，同时叠一个重力加速度 ——
+///    所以它是「先冲出去、慢下来、然后往下坠」，这正是真烟花的轮廓。
+/// 2. **有拖尾**。同一粒在稍早的两个时刻各画一次、更小更淡，就是拖尾。
+/// 3. **每一轮都不一样**。位置、角度、初速、颜色都由
+///    （第几朵，第几轮，第几粒）哈希出来，所以第二轮和第一轮长得不同，
+///    但完全确定、不需要每帧摇骰子，也不需要任何 @State。
+/// 4. **错峰**。三朵的周期是 3.7 / 4.9 / 6.1 秒 —— 刻意取互质的小数，
+///    它们的相位永远对不齐，凑不出固定节拍。
+///
+/// 起爆点允许落在卡片边缘外一点（见 `TicketSparkleOverlay` 的负 padding），
+/// 火星可以越出卡片一小截，但幅度控制在十几点以内，不会糊到隔壁卡片上。
 struct TicketSparkleOverlay: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// 一朵烟花：起爆点、起爆时刻、间歇、颜色和五粒火星各自的方向。
-    private struct Burst: Identifiable {
-        let id: Int
-        let x: CGFloat
-        let y: CGFloat
-        /// 第一次起爆前等多久。
-        let delay: Double
-        /// 两次起爆之间的静默。刻意各不相同，好让四朵慢慢错开。
-        let rest: Double
-        let colors: [BallColor]
-        /// 五粒火星的角度（弧度）。刻意不均分 —— 均分看着像齿轮。
-        let angles: [Double]
-        let spread: CGFloat
+    /// 允许越出卡片边缘的量。画布比卡片大一圈，火星才能飞出去一点。
+    static let overflow: CGFloat = 14
+
+    /// 一朵烟花的静态参数。位置和颜色每一轮再随机，这里只定节拍。
+    private struct Shell {
+        let period: Double
+        /// 首次起爆前的相位偏移，三朵一开始就是错开的。
+        let phase: Double
+        let count: Int
     }
 
-    private static let burstDuration: Double = 1.5
-
-    private static let bursts: [Burst] = [
-        Burst(id: 0, x: 0.11, y: 0.20, delay: 0.2, rest: 4.7,
-              colors: [.red, .yellow, .k8orange],
-              angles: [-2.5, -1.5, -0.4, 0.7, 2.0], spread: 26),
-        Burst(id: 1, x: 0.89, y: 0.30, delay: 1.7, rest: 5.3,
-              colors: [.blue, .plum, .fc3d],
-              angles: [-2.9, -1.9, -0.8, 0.5, 2.4], spread: 22),
-        Burst(id: 2, x: 0.24, y: 0.83, delay: 3.4, rest: 4.9,
-              colors: [.yellow, .amber, .red],
-              angles: [-2.2, -1.1, 0.2, 1.4, 2.7], spread: 28),
-        Burst(id: 3, x: 0.78, y: 0.78, delay: 5.1, rest: 5.8,
-              colors: [.plum, .k8orange, .blue],
-              angles: [-2.7, -1.3, 0.0, 1.1, 2.2], spread: 24)
+    private static let shells: [Shell] = [
+        Shell(period: 3.7, phase: 0.0, count: 9),
+        Shell(period: 4.9, phase: 1.6, count: 8),
+        Shell(period: 6.1, phase: 3.1, count: 10)
     ]
 
+    /// 单朵从起爆到熄灭的时长。
+    private static let life: Double = 1.35
+
     var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                ForEach(Self.bursts) { burst in
-                    BurstCluster(burst: burst, size: proxy.size, duration: Self.burstDuration)
+        // 减弱动效下彻底不画。常驻动画对前庭敏感的人是最难受的一类，
+        // 这里不是「减小幅度」能解决的，直接不放。
+        if reduceMotion {
+            Color.clear
+        } else {
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { timeline in
+                Canvas(opaque: false, rendersAsynchronously: false) { context, size in
+                    draw(in: &context, size: size, now: timeline.date.timeIntervalSinceReferenceDate)
                 }
             }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        // 减弱动效下彻底不画 —— 常驻动画对前庭敏感的人是最难受的一类。
-        .opacity(reduceMotion ? 0 : 1)
     }
 
-    /// 一朵。等到 `delay` 之后才开始循环，四朵的起点因此错开。
-    private struct BurstCluster: View {
-        let burst: Burst
-        let size: CGSize
-        let duration: Double
+    private func draw(in context: inout GraphicsContext, size: CGSize, now: Double) {
+        // 让不同卡片的烟花也彼此错开：用卡片宽度做一点相位扰动。
+        // 否则一屏好几张中奖票会整齐划一地一起炸。
+        let skew = Double(size.width).truncatingRemainder(dividingBy: 7.0) * 0.31
 
-        @Environment(\.accessibilityReduceMotion) private var reduceMotion
-        @State private var isLive = false
+        for (shellIndex, shell) in Self.shells.enumerated() {
+            let elapsed = now - shell.phase - skew
+            let cycle = (elapsed / shell.period).rounded(.down)
+            let local = elapsed - cycle * shell.period
+            guard local >= 0, local < Self.life else { continue }
 
-        var body: some View {
-            ZStack {
-                if isLive {
-                    ForEach(Array(burst.angles.enumerated()), id: \.offset) { index, angle in
-                        spark(angle: angle, index: index)
-                    }
-                }
-            }
-            .task {
-                guard !reduceMotion else { return }
-                try? await Task.sleep(for: .seconds(burst.delay))
-                isLive = true
-            }
+            let round = Int(cycle)
+            draw(shell: shell,
+                 shellIndex: shellIndex,
+                 round: round,
+                 age: local,
+                 in: &context,
+                 size: size)
+        }
+    }
+
+    private func draw(shell: Shell,
+                      shellIndex: Int,
+                      round: Int,
+                      age: Double,
+                      in context: inout GraphicsContext,
+                      size: CGSize) {
+        let pad = Self.overflow
+        // 起爆点落在卡片内部靠中间的区域。太贴边的话半朵都在画布外，
+        // 看起来像是从旁边飘进来的。
+        let origin = CGPoint(
+            x: pad + CGFloat(0.14 + 0.72 * rnd(shellIndex, round, 901)) * (size.width - pad * 2),
+            y: pad + CGFloat(0.18 + 0.60 * rnd(shellIndex, round, 902)) * (size.height - pad * 2)
+        )
+        // 整朵的基准半径，让每一轮有大有小
+        let power = 0.78 + 0.44 * rnd(shellIndex, round, 903)
+        let hueShift = Int(rnd(shellIndex, round, 904) * 8)
+
+        // 起爆瞬间的一点白光。没有这一下，粒子像是凭空出现的。
+        if age < 0.10 {
+            let flash = 1 - age / 0.10
+            let radius = 3.0 + 5.0 * flash
+            context.fill(
+                Path(ellipseIn: CGRect(x: origin.x - radius, y: origin.y - radius,
+                                       width: radius * 2, height: radius * 2)),
+                with: .color(.white.opacity(0.55 * flash))
+            )
         }
 
-        private func spark(angle: Double, index: Int) -> some View {
-            // 同一朵里每粒飞得远近不同，看起来才是炸开而不是齐步走
-            let distance = burst.spread * (0.62 + CGFloat(index % 3) * 0.19)
-            let diameter: CGFloat = 5 - CGFloat(index % 2) * 1.1
-            let origin = CGPoint(x: size.width * burst.x, y: size.height * burst.y)
-            let color = burst.colors[index % burst.colors.count].accentColor
+        for particle in 0..<shell.count {
+            // 角度不均分：均分看着像齿轮
+            let base = Double(particle) / Double(shell.count) * 2 * .pi
+            let angle = base + (rnd(shellIndex, round, particle) - 0.5) * 0.9
+            let speed = (62.0 + 46.0 * rnd(shellIndex, round, particle + 200)) * power
+            let color = BallColor.festive[(particle + shellIndex * 3 + hueShift) % BallColor.festive.count]
+            let scale = 0.72 + 0.55 * rnd(shellIndex, round, particle + 400)
 
-            return Circle()
-                .fill(color)
-                .frame(width: diameter, height: diameter)
-                .position(origin)
-                // 0 = 静默（不可见）、1 = 亮起、2 = 飞散
-                .phaseAnimator([0, 1, 2]) { view, phase in
-                    view
-                        // 从看得见的大小起步再缩小 —— 现实里没有东西是从「无」冒出来的
-                        .scaleEffect(phase == 2 ? 0.3 : 1.15)
-                        .opacity(phase == 1 ? 1 : 0)
-                        .offset(x: phase == 2 ? cos(angle) * distance : 0,
-                                // 末段带一点下坠，火星就是这么熄的
-                                y: phase == 2 ? sin(angle) * distance + 7 : 0)
-                } animation: { phase in
-                    switch phase {
-                    case 1: .linear(duration: 0.01)      // 亮起：瞬间
-                    case 2: .easeOut(duration: duration) // 飞散
-                    // 回到静默：这一段全程不可见，长短决定了两朵之间的间歇。
-                    // 同一朵里五粒的间歇差一点点，下一轮的形状就会不一样。
-                    default: .linear(duration: burst.rest + Double(index) * 0.07)
-                    }
-                }
+            // 拖尾：同一粒在稍早的两个时刻再画一次，更小更淡
+            for (step, trail) in [(0.0, 1.0), (0.055, 0.42), (0.11, 0.18)] {
+                let t = age - step
+                guard t > 0 else { continue }
+                let point = position(origin: origin, angle: angle, speed: speed, t: t)
+                guard let alpha = fade(age: t, particle: particle), alpha > 0.02 else { continue }
+                let radius = (1.5 + 2.1 * scale) * (1 - 0.45 * t / Self.life) * (0.55 + 0.45 * trail)
+                guard radius > 0.2 else { continue }
+                context.fill(
+                    Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius,
+                                           width: radius * 2, height: radius * 2)),
+                    with: .color(color.opacity(alpha * trail))
+                )
+            }
         }
+    }
+
+    /// 位移 = 初速在指数阻力下的积分 + 重力。
+    ///
+    /// 阻力项 `v0 * (1 - e^{-kt}) / k` 让火星冲出去之后迅速慢下来，
+    /// 而不是匀速滑到终点 —— 这一项是「涂小球」和「炸开」的分界线。
+    /// 重力项让末段自然下坠。
+    private func position(origin: CGPoint, angle: Double, speed: Double, t: Double) -> CGPoint {
+        let drag = 3.1
+        let travel = speed * (1 - exp(-drag * t)) / drag
+        let gravity = 96.0
+        return CGPoint(
+            x: origin.x + CGFloat(cos(angle) * travel),
+            y: origin.y + CGFloat(sin(angle) * travel + 0.5 * gravity * t * t)
+        )
+    }
+
+    /// 亮度：整体按寿命淡出，叠一层高频闪烁，火星才有「余烬」的质感。
+    private func fade(age: Double, particle: Int) -> Double? {
+        guard age < Self.life else { return nil }
+        let remain = 1 - age / Self.life
+        let base = pow(remain, 1.7)
+        let twinkle = 0.78 + 0.22 * sin(age * 19 + Double(particle) * 1.7)
+        return base * twinkle
+    }
+
+    /// 由「第几朵 / 第几轮 / 第几粒」确定地哈希出一个 0..<1 的数。
+    ///
+    /// 用哈希而不是 `Double.random`：Canvas 每帧都会重画，随机数必须
+    /// 对同一粒火星在整段寿命里保持一致，否则它每帧都会跳到别处。
+    private func rnd(_ a: Int, _ b: Int, _ c: Int) -> Double {
+        var x = UInt64(bitPattern: Int64(a &* 73_856_093 ^ b &* 19_349_663 ^ c &* 83_492_791))
+        x ^= x >> 33
+        x = x &* 0xFF51_AFD7_ED55_8CCD
+        x ^= x >> 33
+        x = x &* 0xC4CE_B9FE_1A85_EC53
+        x ^= x >> 33
+        return Double(x % 100_000) / 100_000.0
     }
 }

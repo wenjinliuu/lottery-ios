@@ -131,6 +131,43 @@ struct RecordService {
         return (checked, won)
     }
 
+    // MARK: - 已读
+
+    /// 把这些电子票的结果标记成「用户已经看过」。
+    ///
+    /// 只有已经出结果的才写。等开奖的票没有结果可看，提前标上会让它
+    /// 出结果的那一刻直接沉进历史区 —— 正好是这次要修的那个毛病。
+    @discardableResult
+    func markResultsSeen(batchIds: Set<String>, at moment: Date = Date()) -> Int {
+        guard !batchIds.isEmpty else { return 0 }
+        let now = moment
+        var touched = 0
+        for record in allRecords()
+        where batchIds.contains(record.batchId) && record.resultSeenAt == nil && record.status.hasResult {
+            record.resultSeenAt = now
+            touched += 1
+        }
+        // 这里刻意**不动** updatedAt：已读是阅读状态，不是这条记录的内容变化。
+        if touched > 0 { try? context.save() }
+        return touched
+    }
+
+    /// 升级到带已读状态的版本时，把历史记录一次性标成已看过。
+    ///
+    /// 不做这一步的话，老用户升级后一进票夹，几百张陈年老票全挤在
+    /// 「新结果」区、角标显示 300+ —— 全是他早就看过的东西。
+    @discardableResult
+    func backfillSeenForExistingRecords(at moment: Date = Date()) -> Int {
+        var touched = 0
+        for record in allRecords() where record.resultSeenAt == nil && record.status.hasResult {
+            // 用当初核对写库的时刻，而不是现在 —— 这样它在历史区里的位置也合理
+            record.resultSeenAt = record.updatedAt
+            touched += 1
+        }
+        if touched > 0 { try? context.save() }
+        return touched
+    }
+
     /// 只补命中标记，**不动**状态和奖金。
     ///
     /// 这一步刻意不走 `apply`。已结算的记录里状态和奖金是当初核对出来、
@@ -280,6 +317,8 @@ struct TicketCard: Identifiable, Hashable {
     let lines: [Line]
     /// 复制号码用的全文，同样提前拼好。
     let copyText: String
+    /// 已经出结果、但用户还没看过。票夹靠它把「新结果」单独分一区。
+    let isNewResult: Bool
 
     var netProfit: Double { prize - cost }
 
@@ -348,6 +387,9 @@ extension TicketCard {
                                          addOn: first?.ticket.addOn ?? false)
         count = records.count
         createdAt = batch.createdAt
+        // 整张票里只要还有一注的结果没被看过，这张票就还算「新结果」。
+        // 已经出结果才谈得上看没看 —— 没开奖的票不该占着新结果那一区。
+        isNewResult = batch.status.hasResult && records.contains { $0.resultSeenAt == nil }
 
         var costSum = 0.0
         var prizeSum = 0.0
@@ -386,15 +428,41 @@ extension TicketCard {
             + (omitted > 0 ? "\n…另有 \(omitted) 注未列出" : "")
     }
 
-    /// 记录变化时一次性把全部电子票抽成快照。
+    /// 票夹的三个分区。
+    ///
+    /// 老版本只分「待核对 / 已核对」两段，漏掉了中间那个真正要紧的状态：
+    /// **已经出结果、但用户还没看过**。结果一落地，票就按开奖日降序插回历史堆里，
+    /// 首屏只画 10 张，于是刚核对完的那张常常当场掉出屏幕 ——
+    /// 用户打开 App 想看的恰恰就是它。
+    enum Zone: Int, CaseIterable {
+        /// 还没开奖 / 还没核对出结果。
+        case waiting = 0
+        /// 出了结果，用户还没看过。
+        case fresh = 1
+        /// 看过了，归档。
+        case history = 2
+
+        var title: String {
+            switch self {
+            case .waiting: "等开奖"
+            case .fresh: "新结果"
+            case .history: "已看过"
+            }
+        }
+    }
+
+    var zone: Zone {
+        guard status.hasResult else { return .waiting }
+        return isNewResult ? .fresh : .history
+    }
+
     /// 票夹的排序键。
     ///
-    /// 待核对的排在最前面，且**开奖日升序** —— 最近就要开的那一期排最上，
-    /// 它是唯一还需要用户操心的东西。已核对的跟在后面，**开奖日降序**，
-    /// 刚出结果的在上。同一天之内按创建时间倒序。
+    /// 等开奖那一区**开奖日升序** —— 最近就要开的排最上，它是唯一还要人操心的。
+    /// 另外两区都是**开奖日降序**，刚出结果的在上。同一天之内按创建时间倒序。
     var sortKey: (group: Int, date: String, created: Date) {
         let day = openDate.isEmpty ? DateText.day(createdAt) : openDate
-        return (status == .pending ? 0 : 1, day, createdAt)
+        return (zone.rawValue, day, createdAt)
     }
 
     static func orderForWallet(_ cards: [TicketCard]) -> [TicketCard] {
@@ -402,8 +470,8 @@ extension TicketCard {
             let a = lhs.sortKey, b = rhs.sortKey
             if a.group != b.group { return a.group < b.group }
             if a.date != b.date {
-                // 待核对升序（快开的在上），已核对降序（刚开的在上）
-                return a.group == 0 ? a.date < b.date : a.date > b.date
+                // 等开奖升序（快开的在上），出了结果的降序（刚开的在上）
+                return a.group == Zone.waiting.rawValue ? a.date < b.date : a.date > b.date
             }
             return a.created > b.created
         }

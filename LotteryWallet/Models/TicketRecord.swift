@@ -15,6 +15,10 @@ enum RecordStatus: String, Codable, Sendable, CaseIterable {
     /// 已经有最终结论、不需要重复核对的状态。
     var isFinal: Bool { self != .pending }
 
+    /// 有没有「结果」可以给用户看。
+    /// 奖金待公布也算 —— 中没中已经知道了，这正是用户最想看的那一句。
+    var hasResult: Bool { self != .pending }
+
     var label: String {
         switch self {
         case .pending: "待核对"
@@ -90,6 +94,16 @@ final class TicketRecord {
     var createdAt: Date
     var updatedAt: Date
 
+    /// 用户**看到过这条结果**的时刻。nil 表示还没看过。
+    ///
+    /// 票夹的排序靠它分区：还没看过的结果留在上面，看过的才沉到历史里。
+    /// 不用「结算后停留 N 小时」那种时间窗 —— 人出差一周回来，
+    /// 恰恰是最想看结果的时候，而时间窗那时已经把它们全冲下去了。
+    /// 该由「看没看」决定，不该由「过了多久」决定。
+    ///
+    /// 待开奖的票没有结果可看，这个字段对它们没有意义。
+    var resultSeenAt: Date?
+
     /// 计入盈亏的日期（yyyy-MM-dd），写入时算好。
     /// 统计要按天分组，如果每次都去解析日期字符串，几百条记录就能拖垮一帧。
     var profitDay: String
@@ -138,6 +152,8 @@ final class TicketRecord {
         self.source = source
         self.createdAt = createdAt
         self.updatedAt = createdAt
+        // 新票还没开奖，谈不上看没看过结果
+        self.resultSeenAt = nil
         self.profitDay = TicketRecord.profitDay(openDate: target.openDate,
                                                 openTime: target.openTime,
                                                 createdAt: createdAt)

@@ -19,16 +19,73 @@ struct WalletView: View {
     /// 筛选结果也存下来。放在 body 里当计算属性的话，每帧都要把全部电子票过一遍。
     @State private var visibleCards: [TicketCard] = []
 
-    /// 首屏只画这么多张。一张电子票是一整块带号码球的卡片，
+    /// **进页面时冻结下来的顺序**（batchId → 名次）。
+    ///
+    /// 票夹开着的时候顺序一律按这份来，哪怕期间自动核对把某张票从
+    /// 「等开奖」变成了「中奖」。原来是记录一变就整列重排，于是开奖那一刻
+    /// 卡片在用户眼皮底下跳走 —— 这是最不该发生的一种位移。
+    /// 卡片内容照常更新（状态、金额、命中球、烟花），只是**位置不动**。
+    @State private var frozenRank: [String: Int] = [:]
+    /// 下一次 rebuild 要不要重新冻结。进页面、下拉刷新时置位。
+    @State private var needsRefreeze = true
+    /// 这次停留期间**滚进过屏幕**的新结果。离开页面时一次性写库。
+    ///
+    /// 不在滚到的当场写：写库会触发 @Query 刷新、进而重建快照，
+    /// 等于一边滚一边让列表在手底下变。
+    @State private var seenThisVisit: Set<String> = []
+
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// 首屏一共画这么多张。一张电子票是一整块带号码球的卡片，
     /// 几十上百张一次性铺开，进票夹那一下明显要卡。
-    static let previewLimit = 10
+    static let previewLimit = 12
+    /// 分区配额。一刀切 prefix 的话，新结果一多就把历史全挤出首屏，
+    /// 反过来等开奖攒了十几张时，用户连昨晚的结果都看不到。
+    static let waitingQuota = 5
+    static let freshQuota = 5
 
     private var previewCards: [TicketCard] {
-        Array(visibleCards.prefix(Self.previewLimit))
+        guard filter == .all else { return Array(visibleCards.prefix(Self.previewLimit)) }
+        var taken: [TicketCard] = []
+        var used: [TicketCard.Zone: Int] = [:]
+        // 先按配额收等开奖和新结果，剩下的名额留给历史
+        for card in visibleCards where card.zone != .history {
+            let quota = card.zone == .waiting ? Self.waitingQuota : Self.freshQuota
+            guard used[card.zone, default: 0] < quota else { continue }
+            used[card.zone, default: 0] += 1
+            taken.append(card)
+        }
+        for card in visibleCards where card.zone == .history {
+            guard taken.count < Self.previewLimit else { break }
+            taken.append(card)
+        }
+        // visibleCards 本来就是按分区排好的，所以 taken 的顺序天然是对的
+        return taken
     }
 
     private var overflowCount: Int {
-        Swift.max(visibleCards.count - Self.previewLimit, 0)
+        Swift.max(visibleCards.count - previewCards.count, 0)
+    }
+
+    /// 每一区各有多少张（分区标题上的数字要的是**全部**，不是首屏那几张）。
+    private var zoneTotals: [TicketCard.Zone: Int] {
+        visibleCards.reduce(into: [:]) { $0[$1.zone, default: 0] += 1 }
+    }
+
+    /// 首屏要画的东西：卡片，外加分区之间插进去的标题。
+    private var previewRows: [WalletRow] {
+        guard filter == .all else { return previewCards.map { .card($0) } }
+        let totals = zoneTotals
+        var rows: [WalletRow] = []
+        var current: TicketCard.Zone?
+        for card in previewCards {
+            if card.zone != current {
+                current = card.zone
+                rows.append(.header(card.zone, totals[card.zone] ?? 0))
+            }
+            rows.append(.card(card))
+        }
+        return rows
     }
 
     var body: some View {
@@ -39,8 +96,18 @@ struct WalletView: View {
                     if visibleCards.isEmpty {
                         emptyState
                     } else {
-                        ForEach(previewCards) { item in
-                            ticketCard(item)
+                        ForEach(previewRows) { row in
+                            switch row {
+                            case let .header(zone, total):
+                                zoneHeader(zone, total: total)
+                            case let .card(item):
+                                ticketCard(item)
+                                    // 滚进屏幕 = 用户有机会看到了。先记下来，
+                                    // 离开页面时才真正写库。
+                                    .onAppear {
+                                        if item.isNewResult { seenThisVisit.insert(item.id) }
+                                    }
+                            }
                         }
                         if overflowCount > 0 { moreButton }
                     }
@@ -69,9 +136,23 @@ struct WalletView: View {
             .refreshable {
                 await drawStore.refresh()
                 await recheck(silent: true)
+                // 用户主动下拉，就是明确要看最新的一屏 —— 这时候重排是他要的
+                commitSeen()
+                needsRefreeze = true
+                rebuild()
             }
             .task(id: RecordsToken(records)) { rebuild() }
             .onChange(of: filter) { _, _ in applyFilter() }
+            // 每次进票夹重新排一次；页面开着的期间不动
+            .onAppear {
+                needsRefreeze = true
+                rebuild()
+            }
+            .onDisappear { commitSeen() }
+            // 切到后台也算看完了这一轮，否则用户直接上划退出，已读就丢了
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { commitSeen() }
+            }
         }
     }
 
@@ -121,7 +202,13 @@ struct WalletView: View {
     }
 
     private func rebuild() {
-        let snapshot = TicketCard.orderForWallet(TicketCard.snapshot(records))
+        let natural = TicketCard.orderForWallet(TicketCard.snapshot(records))
+        if needsRefreeze {
+            frozenRank = Dictionary(uniqueKeysWithValues:
+                natural.enumerated().map { ($0.element.id, $0.offset) })
+            needsRefreeze = false
+        }
+        let snapshot = applyFrozenOrder(natural)
         cards = snapshot
         var tally: [WalletFilter: Int] = [:]
         for item in WalletFilter.allCases {
@@ -133,6 +220,46 @@ struct WalletView: View {
 
     private func applyFilter() {
         visibleCards = filter == .all ? cards : cards.filter { filter.matches($0.status) }
+    }
+
+    /// 把自然顺序按这次停留冻结下来的名次重排。
+    ///
+    /// 冻结名单里没有的（这一屏刚录进来的新票）排到最前面 —— 用户刚加完票，
+    /// 期待它出现在最上面，而不是按开奖日插到某个中间位置。
+    private func applyFrozenOrder(_ natural: [TicketCard]) -> [TicketCard] {
+        guard !frozenRank.isEmpty else { return natural }
+        return natural.enumerated().sorted { lhs, rhs in
+            switch (frozenRank[lhs.element.id], frozenRank[rhs.element.id]) {
+            case let (left?, right?): return left < right
+            case (nil, _?): return true
+            case (_?, nil): return false
+            default: return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
+    }
+
+    /// 把这次停留期间看过的新结果写进库。
+    private func commitSeen() {
+        guard !seenThisVisit.isEmpty else { return }
+        let batch = seenThisVisit
+        seenThisVisit = []
+        RecordService(context: context, drawStore: drawStore).markResultsSeen(batchIds: batch)
+    }
+
+    private func zoneHeader(_ zone: TicketCard.Zone, total: Int) -> some View {
+        HStack(spacing: 6) {
+            Text(zone.title)
+                .font(.subheadline.weight(.semibold))
+            Text("\(total)")
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(zone.title)，共 \(total) 张")
     }
 
     // MARK: - 筛选
@@ -248,7 +375,20 @@ struct WalletView: View {
     }
 }
 
-/// 完整电子票列表。票夹首屏只放前 10 张，其余在这里翻。
+/// 首屏列表里的一行：卡片，或者卡片之间的分区标题。
+enum WalletRow: Identifiable {
+    case header(TicketCard.Zone, Int)
+    case card(TicketCard)
+
+    var id: String {
+        switch self {
+        case let .header(zone, _): "zone-\(zone.rawValue)"
+        case let .card(card): card.id
+        }
+    }
+}
+
+/// 完整电子票列表。票夹首屏只放前几张，其余在这里翻。
 /// 完整票列表。
 ///
 /// 这一页原来只是把票铺开，**顶上的筛选条没跟过来** —— 首页只放十张，
@@ -262,8 +402,11 @@ struct WalletAllTicketsView: View {
     var onCelebrate: (() -> Void)?
 
     @Environment(DrawStore.self) private var drawStore
+    @Environment(\.modelContext) private var context
     @State private var status: WalletFilter = .all
     @State private var game: GameKey?
+    /// 和首屏一样：滚到过就算看过，离开这一页时统一写库。
+    @State private var seenThisVisit: Set<String> = []
 
     /// 出现过的彩种。没买过的彩种不该占着筛选条。
     private var games: [GameKey] {
@@ -299,6 +442,9 @@ struct WalletAllTicketsView: View {
                         onCelebrate: onCelebrate,
                         draw: drawStore.draw(for: item.game, expect: item.expect)
                     )
+                    .onAppear {
+                        if item.isNewResult { seenThisVisit.insert(item.id) }
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -309,6 +455,12 @@ struct WalletAllTicketsView: View {
         .navigationTitle("全部电子票")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { status = initialFilter }
+        .onDisappear {
+            guard !seenThisVisit.isEmpty else { return }
+            let batch = seenThisVisit
+            seenThisVisit = []
+            RecordService(context: context, drawStore: drawStore).markResultsSeen(batchIds: batch)
+        }
     }
 
     /// 两条筛选：状态一条，彩种一条。

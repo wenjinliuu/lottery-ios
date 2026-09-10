@@ -8,6 +8,16 @@ struct RootView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.modelContext) private var context
 
+    /// 票夹角标要的数字：出了结果、用户还没看过的票有几张。
+    ///
+    /// 只查未读那几条，不是把全表拉进根视图 —— 这个查询平时是空的，
+    /// 只有开奖核对落地的那一刻才会变，不会让根视图跟着记录数量抖。
+    @Query(filter: #Predicate<TicketRecord> { $0.resultSeenAt == nil && $0.statusRaw != "pending" })
+    private var unseenRecords: [TicketRecord]
+
+    /// 角标按**张**算，不是按注 —— 票夹里一张票就是一张卡片。
+    private var unseenCount: Int { Set(unseenRecords.map(\.batchId)).count }
+
     @State private var selection: MainTab = .home
     /// 当前开着的抽屉，以及关掉它之后要接着开的那张。
     @State private var activeSheet: RootSheet?
@@ -55,6 +65,9 @@ struct RootView: View {
             Tab("票夹", systemImage: "wallet.bifold", value: MainTab.wallet) {
                 WalletView()
             }
+            // 有新结果就在标签上挂个数字。用户不进票夹也知道昨晚开奖核对完了没有，
+            // 这才是「打开就想知道有没有核对」的正解。
+            .badge(unseenCount)
 
             Tab("设置", systemImage: "gearshape", value: MainTab.settings) {
                 SettingsView()
@@ -85,28 +98,32 @@ struct RootView: View {
             .accessibilityLabel("扫描彩票")
         }
 
-        // **只挂一个 sheet 出口。**
+        // **抽屉不走系统 sheet。**
         //
-        // 手动录入之前彻底点不动，原因不在按钮也不在回调 —— 而是
-        // `EntryFlowView` 的那个 `.sheet` 在一次重构里被我连带删掉了：
-        // `isEntryPresented` 照样置为 true，只是**没有任何东西在监听它**。
+        // 系统 sheet 弹出时会把呈现方一起做动画（缩小、压暗、加圆角），
+        // 而扫描抽屉是半透明的，背面那一层看得一清二楚 —— 每次点扫描，
+        // 首页/票夹/设置都跟着抖一下。这个行为没有开关可关。
         //
-        // 两张抽屉合并成一个 `.sheet(item:)`，用枚举驱动。这样既不会再有
-        // 「某一张的 sheet 修饰符不知不觉丢了」，也顺带绕开了同一视图上挂
-        // 多个 sheet 的不确定行为。
+        // 换成自绘的一层 overlay 之后，抽屉只是盖在上面，**底下那棵视图树
+        // 一帧都不会重画**。实现见 `Design/Drawer.swift`。
         //
-        // 抽屉之间的接力放在 `onDismiss` 里：那时候前一张已经真的关完，
-        // 后一张才开得起来 —— 在关闭的同一帧就去开下一张会被吞掉。
-        .sheet(item: $activeSheet, onDismiss: {
-            guard let next = queuedSheet else { return }
-            queuedSheet = nil
-            activeSheet = next
-        }) { sheet in
-            switch sheet {
-            case .scan:
-                TicketScanView(onManualEntry: { queuedSheet = .entry })
-            case .entry:
-                EntryFlowView()
+        // 两张抽屉仍然共用一个出口、用枚举驱动：既不会再有「某一张的修饰符
+        // 不知不觉丢了」（手动录入就是这么点不动的），也不用担心同一视图上
+        // 挂多个呈现器的那些不确定行为。
+        //
+        // 抽屉之间的接力放在 `onDismissed` 里 —— 那时候前一张已经真的落下去了。
+        .overlay {
+            DrawerLayer(item: $activeSheet, onDismissed: {
+                guard let next = queuedSheet else { return }
+                queuedSheet = nil
+                activeSheet = next
+            }) { sheet in
+                switch sheet {
+                case .scan:
+                    TicketScanView(onManualEntry: { queuedSheet = .entry })
+                case .entry:
+                    EntryFlowView()
+                }
             }
         }
         // 这里**不能**用 withAnimation 包住状态变更。
@@ -162,6 +179,14 @@ struct RootView: View {
     /// 这一步必须发生在首帧之后。早期版本在 `.task` 里同步跑完全部核对，
     /// 记录一多首帧就画不出来，被系统看门狗当成无响应 —— 表现就是"打不开"。
     private func runStartupChecks() async {
+        // 回填要在自动核对**之前**跑，而且和 autoCheck 开关无关：
+        // 它修的是「已读状态是后加的」这件事，跟用不用自动核对没有关系。
+        // 顺序反了的话，这次刚核对出来的新结果会被一起标成已看过。
+        await Task.yield()
+        if !settings.seenBackfilled {
+            RecordService(context: context, drawStore: drawStore).backfillSeenForExistingRecords()
+            settings.seenBackfilled = true
+        }
         guard settings.autoCheck else { return }
         // 让出一次主线程，确保界面已经画出来
         await Task.yield()

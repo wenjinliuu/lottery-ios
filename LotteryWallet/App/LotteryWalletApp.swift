@@ -43,6 +43,12 @@ final class AppSettings {
         didSet { defaults.set(responsibleAcknowledged, forKey: Keys.responsible) }
     }
 
+    /// 「结果已读」这个状态是后加的，老库里全是 nil。
+    /// 首次启动时回填一次，之后不再重复扫全表。
+    var seenBackfilled: Bool {
+        didSet { defaults.set(seenBackfilled, forKey: Keys.seenBackfilled) }
+    }
+
     private let defaults = UserDefaults.standard
 
     private enum Keys {
@@ -50,6 +56,7 @@ final class AppSettings {
         static let appearance = "lottery.appearance"
         static let lastBackup = "lottery.lastBackupAt"
         static let responsible = "lottery.responsibleAck"
+        static let seenBackfilled = "lottery.resultSeenBackfilled.v1"
     }
 
     init() {
@@ -58,6 +65,7 @@ final class AppSettings {
         let stamp = defaults.double(forKey: Keys.lastBackup)
         lastBackupAt = stamp > 0 ? Date(timeIntervalSince1970: stamp) : nil
         responsibleAcknowledged = defaults.bool(forKey: Keys.responsible)
+        seenBackfilled = defaults.bool(forKey: Keys.seenBackfilled)
     }
 
     var colorScheme: ColorScheme? {

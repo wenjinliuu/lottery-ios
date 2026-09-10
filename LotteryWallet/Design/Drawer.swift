@@ -1,0 +1,191 @@
+import SwiftUI
+
+/// 自绘的底部抽屉。
+///
+/// 为什么不用系统的 `.sheet`：
+///
+/// 系统 sheet 在弹出时会把**呈现方**一起做动画 —— 缩小、压暗、加圆角。
+/// 扫描抽屉是半透明玻璃，背面那一层看得清清楚楚，于是每次点扫描，
+/// 首页/票夹/设置都跟着抖一下。这个行为 SwiftUI 没有开关可关：
+/// `presentationBackground`、`presentationBackgroundInteraction` 管的都不是它。
+///
+/// 所以这里干脆不走系统呈现：抽屉只是根视图上的一层 overlay，
+/// 遮罩淡入、面板上滑，**底下那棵视图树一帧都不会重画**。
+///
+/// 代价是拖拽、高度切换这些要自己写 —— 都在这个文件里，见下。
+enum DrawerHeight {
+    case medium
+    case large
+
+    /// 屏幕可用高度里占多少。
+    func points(in available: CGFloat) -> CGFloat {
+        switch self {
+        case .medium: available * 0.58
+        case .large: available * 0.94
+        }
+    }
+}
+
+/// 关掉当前抽屉。放在环境里，抽屉内容不必层层传闭包。
+///
+/// 名字和用法都对齐 `@Environment(\.dismiss)`，这样抽屉里的页面
+/// 只要换一行 `@Environment` 声明，原来的 `dismiss()` 调用一句都不用改。
+struct DrawerDismissAction {
+    let handler: () -> Void
+    func callAsFunction() { handler() }
+}
+
+/// 让抽屉里的页面自己把抽屉撑高（比如扫完进复核页要整屏）。
+struct DrawerExpandAction {
+    let handler: (DrawerHeight) -> Void
+    func callAsFunction(_ height: DrawerHeight) { handler(height) }
+}
+
+private struct DrawerDismissKey: EnvironmentKey {
+    static let defaultValue = DrawerDismissAction {}
+}
+
+private struct DrawerExpandKey: EnvironmentKey {
+    static let defaultValue = DrawerExpandAction { _ in }
+}
+
+extension EnvironmentValues {
+    var drawerDismiss: DrawerDismissAction {
+        get { self[DrawerDismissKey.self] }
+        set { self[DrawerDismissKey.self] = newValue }
+    }
+
+    var drawerExpand: DrawerExpandAction {
+        get { self[DrawerExpandKey.self] }
+        set { self[DrawerExpandKey.self] = newValue }
+    }
+}
+
+/// 抽屉这一层。挂在根视图的 overlay 上，由一个可选值驱动，用法同 `.sheet(item:)`。
+struct DrawerLayer<Item: Identifiable & Equatable, Content: View>: View {
+    @Binding var item: Item?
+    /// 抽屉**真正关完之后**才回调。抽屉之间接力要等这一刻，
+    /// 在关闭动画开始的同一帧去开下一张会被吞掉。
+    var onDismissed: () -> Void = {}
+    @ViewBuilder var content: (Item) -> Content
+
+    /// 正在画的那一张。它比 `item` 多活一段 —— 关闭动画要跑完。
+    @State private var rendered: Item?
+    @State private var shown = false
+    @State private var height: DrawerHeight = .medium
+    /// 手指当前拖出来的位移。不参与隐式动画，要跟手。
+    @State private var drag: CGFloat = 0
+
+    private static var rise: Animation { .spring(duration: 0.42, bounce: 0.12) }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let available = proxy.size.height
+            ZStack(alignment: .bottom) {
+                if let rendered {
+                    dimmer
+                    panel(for: rendered, available: available)
+                        .offset(y: shown ? drag : available + 120)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // 只让「开/关」和「高度」两件事带动画。`drag` 不在这里，
+            // 它要一比一跟着手指，回弹时另外用 withAnimation 显式动画。
+            .animation(Self.rise, value: shown)
+            .animation(Self.rise, value: height)
+        }
+        // 这里**不加** .ignoresSafeArea(.keyboard)：录入页里有要打字的地方，
+        // 抽屉得跟着键盘抬起来，否则输入框会被键盘压住。
+        .onChange(of: item) { _, new in
+            if let new {
+                rendered = new
+                height = .medium
+                drag = 0
+                shown = true
+            } else if rendered != nil {
+                shown = false
+            }
+        }
+        .onChange(of: shown) { _, isShown in
+            guard !isShown else { return }
+            // 等落下去之后再把内容拆掉，否则关到一半整块就消失了
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.42))
+                guard !shown else { return }
+                rendered = nil
+                onDismissed()
+            }
+        }
+    }
+
+    private var dimmer: some View {
+        Color.black
+            .opacity(shown ? 0.32 : 0)
+            .ignoresSafeArea()
+            .contentShape(Rectangle())
+            .onTapGesture { close() }
+            .accessibilityLabel("关闭")
+            .accessibilityAddTraits(.isButton)
+    }
+
+    private func panel(for value: Item, available: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            grabber(available: available)
+            content(value)
+                .environment(\.drawerDismiss, DrawerDismissAction { close() })
+                .environment(\.drawerExpand, DrawerExpandAction { height = $0 })
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(height: height.points(in: available))
+        .background(alignment: .top) {
+            // 多画 240pt 藏到屏幕下面，这样 Home 指示条那一条也被盖住，
+            // 不用去算安全区，拖拽时也不会在底下露出一条缝。
+            UnevenRoundedRectangle(topLeadingRadius: 26, topTrailingRadius: 26,
+                                   style: .continuous)
+                .fill(Palette.canvas)
+                .frame(height: height.points(in: available) + 240)
+                .shadow(color: .black.opacity(0.20), radius: 24, y: -6)
+        }
+        .clipped()
+    }
+
+    /// 抓手。
+    ///
+    /// 拖拽手势**只挂在这一条**，不挂整块面板 —— 挂整块的话，
+    /// 内容里的 ScrollView 就抢不到滑动手势了，复核页会变得没法滚。
+    private func grabber(available: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            Capsule()
+                .fill(Color.primary.opacity(0.22))
+                .frame(width: 38, height: 5)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 26)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 2)
+                .onChanged { value in
+                    let dy = value.translation.height
+                    // 往上拖给阻尼，别让它能被拽出屏幕顶
+                    drag = dy > 0 ? dy : dy * 0.22
+                }
+                .onEnded { value in
+                    let dy = value.translation.height
+                    let flick = value.predictedEndTranslation.height
+                    if dy > 120 || flick > 340 {
+                        close()
+                        return
+                    }
+                    if dy < -50 || flick < -220 { height = .large }
+                    withAnimation(Self.rise) { drag = 0 }
+                }
+        )
+        .accessibilityHidden(true)
+    }
+
+    private func close() {
+        withAnimation(Self.rise) { drag = 0 }
+        item = nil
+        shown = false
+    }
+}
