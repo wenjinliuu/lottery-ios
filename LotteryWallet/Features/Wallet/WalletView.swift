@@ -26,8 +26,21 @@ struct WalletView: View {
     /// 卡片在用户眼皮底下跳走 —— 这是最不该发生的一种位移。
     /// 卡片内容照常更新（状态、金额、命中球、烟花），只是**位置不动**。
     @State private var frozenRank: [String: Int] = [:]
-    /// 下一次 rebuild 要不要重新冻结。进页面、下拉刷新时置位。
+    /// **分区也一起冻结。**
+    ///
+    /// 只冻名次不冻分区的话，卡片被标成已读之后位置没动、分区却变了，
+    /// 于是「新结果」那一段里会混进一张标着历史的卡，分组标题当场错乱。
+    @State private var frozenZone: [String: TicketCard.Zone] = [:]
+    /// 下一次 rebuild 要不要重新冻结。
     @State private var needsRefreeze = true
+    /// 上次重排的时刻，用来判断这次回来算不算「新的一次查看」。
+    @State private var lastFreezeAt: Date?
+    /// 离开多久以上，回来才重排。
+    ///
+    /// 从票夹点去设置看一眼再切回来，不该把「新结果」那一区当场清空 ——
+    /// 用户根本没来得及看。只有隔了一会儿再回来，或者 App 进过后台，
+    /// 才算真正的下一次查看。
+    private static let refreezeAfter: TimeInterval = 180
     /// 这次停留期间**滚进过屏幕**的新结果。离开页面时一次性写库。
     ///
     /// 不在滚到的当场写：写库会触发 @Query 刷新、进而重建快照，
@@ -48,14 +61,15 @@ struct WalletView: View {
         guard filter == .all else { return Array(visibleCards.prefix(Self.previewLimit)) }
         var taken: [TicketCard] = []
         var used: [TicketCard.Zone: Int] = [:]
-        // 先按配额收等开奖和新结果，剩下的名额留给历史
-        for card in visibleCards where card.zone != .history {
-            let quota = card.zone == .waiting ? Self.waitingQuota : Self.freshQuota
-            guard used[card.zone, default: 0] < quota else { continue }
-            used[card.zone, default: 0] += 1
+        // 先按配额收新结果和等开奖，剩下的名额留给历史
+        for card in visibleCards where zone(of: card) != .history {
+            let here = zone(of: card)
+            let quota = here == .waiting ? Self.waitingQuota : Self.freshQuota
+            guard used[here, default: 0] < quota else { continue }
+            used[here, default: 0] += 1
             taken.append(card)
         }
-        for card in visibleCards where card.zone == .history {
+        for card in visibleCards where zone(of: card) == .history {
             guard taken.count < Self.previewLimit else { break }
             taken.append(card)
         }
@@ -67,9 +81,14 @@ struct WalletView: View {
         Swift.max(visibleCards.count - previewCards.count, 0)
     }
 
+    /// 这张卡这次停留期间显示在哪一区。冻结过就按冻结的来。
+    private func zone(of card: TicketCard) -> TicketCard.Zone {
+        frozenZone[card.id] ?? card.zone
+    }
+
     /// 每一区各有多少张（分区标题上的数字要的是**全部**，不是首屏那几张）。
     private var zoneTotals: [TicketCard.Zone: Int] {
-        visibleCards.reduce(into: [:]) { $0[$1.zone, default: 0] += 1 }
+        visibleCards.reduce(into: [:]) { $0[zone(of: $1), default: 0] += 1 }
     }
 
     /// 首屏要画的东西：卡片，外加分区之间插进去的标题。
@@ -79,9 +98,10 @@ struct WalletView: View {
         var rows: [WalletRow] = []
         var current: TicketCard.Zone?
         for card in previewCards {
-            if card.zone != current {
-                current = card.zone
-                rows.append(.header(card.zone, totals[card.zone] ?? 0))
+            let here = zone(of: card)
+            if here != current {
+                current = here
+                rows.append(.header(here, totals[here] ?? 0))
             }
             rows.append(.card(card))
         }
@@ -143,15 +163,27 @@ struct WalletView: View {
             }
             .task(id: RecordsToken(records)) { rebuild() }
             .onChange(of: filter) { _, _ in applyFilter() }
-            // 每次进票夹重新排一次；页面开着的期间不动
+            // 进票夹时**有条件地**重排：第一次进来、或者离开够久了才重排。
+            // 每次切回来都重排的话，去设置看一眼再回来，「新结果」那一区
+            // 就当场空了 —— 用户根本没来得及看完。
             .onAppear {
-                needsRefreeze = true
+                if let last = lastFreezeAt {
+                    needsRefreeze = Date().timeIntervalSince(last) > Self.refreezeAfter
+                } else {
+                    needsRefreeze = true
+                }
                 rebuild()
             }
             .onDisappear { commitSeen() }
-            // 切到后台也算看完了这一轮，否则用户直接上划退出，已读就丢了
             .onChange(of: scenePhase) { _, phase in
-                if phase != .active { commitSeen() }
+                // 切到后台也算看完了这一轮，否则用户直接上划退出，已读就丢了
+                if phase != .active {
+                    commitSeen()
+                    return
+                }
+                // 从后台回来是明确的「重新开始看」，这一次一定重排
+                needsRefreeze = true
+                rebuild()
             }
         }
     }
@@ -206,7 +238,9 @@ struct WalletView: View {
         if needsRefreeze {
             frozenRank = Dictionary(uniqueKeysWithValues:
                 natural.enumerated().map { ($0.element.id, $0.offset) })
+            frozenZone = Dictionary(uniqueKeysWithValues: natural.map { ($0.id, $0.zone) })
             needsRefreeze = false
+            lastFreezeAt = Date()
         }
         let snapshot = applyFrozenOrder(natural)
         cards = snapshot

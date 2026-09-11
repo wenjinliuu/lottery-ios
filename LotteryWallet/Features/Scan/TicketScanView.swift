@@ -170,6 +170,10 @@ struct TicketScanView: View {
                     .padding(.horizontal, 28)
             }
 
+            // 进入拍照之前先把预期摆正：这东西会认错，你得自己核。
+            DisclaimerBanner(text: Disclaimer.scanIntro)
+                .padding(.horizontal, 22)
+
             if let errorText {
                 Label(errorText, systemImage: "exclamationmark.triangle")
                     .font(.footnote)
@@ -286,6 +290,7 @@ struct TicketScanView: View {
                     // 「一个字都没认出来」和「认出字但拼不成票」是完全不同的两件事，
                     // 前者要重拍，后者只要重裁。把原文摆出来才分得清。
                     if !rawText.isEmpty { rawTextCard }
+                    DisclaimerNote(text: Disclaimer.card, alignment: .center)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -314,6 +319,10 @@ struct TicketScanView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     photoCard
+                    // 复核页是保存前的最后一道关口，提示摆在号码**上面**，
+                    // 不能放页脚 —— 人是从上往下核对的，看完才提醒就晚了。
+                    DisclaimerBanner(text: Disclaimer.review,
+                                     icon: "checklist.unchecked")
                     ForEach(globalWarnings, id: \.self) { warning in
                         warningRow(warning)
                     }

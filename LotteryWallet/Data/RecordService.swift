@@ -435,17 +435,18 @@ extension TicketCard {
     /// 首屏只画 10 张，于是刚核对完的那张常常当场掉出屏幕 ——
     /// 用户打开 App 想看的恰恰就是它。
     enum Zone: Int, CaseIterable {
+        /// 出了结果，用户还没看过。**排在最上面** ——
+        /// 打开 App 的第一诉求是「昨晚那张中没中」，不是「明天开哪几期」。
+        case fresh = 0
         /// 还没开奖 / 还没核对出结果。
-        case waiting = 0
-        /// 出了结果，用户还没看过。
-        case fresh = 1
+        case waiting = 1
         /// 看过了，归档。
         case history = 2
 
         var title: String {
             switch self {
-            case .waiting: "等开奖"
             case .fresh: "新结果"
+            case .waiting: "等开奖"
             case .history: "已看过"
             }
         }

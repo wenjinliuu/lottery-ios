@@ -1,4 +1,4 @@
-# 彩票夹 iOS
+# 对个号 iOS
 
 `lottery-web` 的 iOS 原生版：SwiftUI + Liquid Glass，本地优先的彩票记录与自动核对工具。
 不销售、不代购彩票，只帮你把已经买好的票记下来、按官方开奖数据核对。

@@ -40,7 +40,7 @@ targets:
     info:
       path: LotteryWallet/Resources/Info.plist
       properties:
-        CFBundleDisplayName: 彩票夹
+        CFBundleDisplayName: 对个号
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen:

@@ -132,6 +132,9 @@ struct EntryFlowView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) { saveBar }
+            // 抽屉是自绘的，录入页一上来就要整屏 —— 这里再确认一次，
+            // 免得从扫描抽屉接力过来时沿用了半屏高度。
+            .onAppear { expandDrawer(.large) }
             .sheet(isPresented: $isIssuePickerPresented) {
                 IssuePickerSheet(game: game, current: target.expect) { issue in
                     pickedIssue = issue
@@ -456,6 +459,11 @@ struct EntryFlowView: View {
                     .foregroundStyle(game.tint)
             }
             .padding(.horizontal, 16)
+
+            // 就摆在「确认已购买」这颗按钮上方 —— 这一刻正是最需要说清
+            // 「本应用不卖票、你录的是你已经买到手的票」的时刻。
+            DisclaimerNote(text: Disclaimer.entry)
+                .padding(.horizontal, 16)
 
             Button("确认已购买并加入票夹") {
                 if settings.responsibleAcknowledged {

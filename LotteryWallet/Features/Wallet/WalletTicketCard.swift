@@ -43,6 +43,7 @@ struct WalletTicketCard: View {
                 lines
                 TicketDivider(tint: game.tint)
                 footer
+                disclaimer
             }
         }
         // 中奖的票自己一直在放小烟花，不用等用户去点。
@@ -219,5 +220,14 @@ struct WalletTicketCard: View {
             .fixedSize()
         }
         .padding(.top, 10)
+    }
+
+    /// 每张票底部都要有的一行小字。
+    ///
+    /// 放在卡片**里面**而不是页面某处：用户截图、分享、或者只是盯着某一张票看的
+    /// 时候，这句话都得跟着那张票 —— 兑奖依据是他手里那张纸，不是这里的记录。
+    private var disclaimer: some View {
+        DisclaimerNote(text: Disclaimer.card)
+            .padding(.top, 8)
     }
 }

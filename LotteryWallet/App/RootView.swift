@@ -38,20 +38,22 @@ struct RootView: View {
                     selection = newValue
                     return
                 }
-                // **抽屉不能在这里当场打开。**
+                // **必须在这里同步改一处状态。**
                 //
-                // 这个 setter 是 SwiftUI 在自己的更新过程里调用的。在它里面写
-                // `activeSheet`，等于在一次布局中途改另一处状态 —— 系统只好
-                // 当场再跑一轮更新，屏幕上就是抽屉背后那道闪。抽屉是半透明的
-                // 玻璃，背面重画一次看得清清楚楚。
+                // 系统标签栏为了点起来跟手，会先把选中态切到「扫描」，再回头
+                // 问绑定要结果。它什么时候回读？—— 下一次视图更新的时候。
+                // 上一版把开抽屉推到了下一轮 runloop，于是这一帧里**什么状态
+                // 都没变**，SwiftUI 没有理由重跑 body，绑定也就没人回读：
+                // 「扫描」那一页就这么真的留在了屏幕上，用户看到的是一整片
+                // 画布底色把首页盖住了。
                 //
-                // 挪到下一轮 runloop：这次更新先老老实实收尾（选中值原样退回
-                // 首页），抽屉再单独作为一次状态变更弹出来。
+                // 同步写 `activeSheet` 就是那个「变一下」：body 立刻重跑，
+                // TabView 回读到 `.home`，选中态当场退回去。
+                //
+                // 当初推迟是为了躲系统 sheet 的背景缩放动画 —— 而抽屉现在是
+                // 自绘的 overlay，那个动画根本不存在了，这条绕路也就没必要了。
                 guard activeSheet == nil else { return }
-                Task { @MainActor in
-                    guard activeSheet == nil else { return }
-                    activeSheet = .scan
-                }
+                activeSheet = .scan
             }
         )
     }
@@ -113,7 +115,10 @@ struct RootView: View {
         //
         // 抽屉之间的接力放在 `onDismissed` 里 —— 那时候前一张已经真的落下去了。
         .overlay {
-            DrawerLayer(item: $activeSheet, onDismissed: {
+            DrawerLayer(item: $activeSheet, initialHeight: { sheet in
+                // 扫描入口只是选张照片，半屏就够；手动录入一上来就要整套选号盘。
+                sheet == .entry ? .large : .medium
+            }, onDismissed: {
                 guard let next = queuedSheet else { return }
                 queuedSheet = nil
                 activeSheet = next

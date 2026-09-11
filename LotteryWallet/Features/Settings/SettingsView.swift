@@ -279,10 +279,28 @@ struct BackupDocument: FileDocument {
 }
 
 struct AboutView: View {
+    static let privacyURL = URL(string: "https://wenjinliuu.github.io/lottery-ios/")!
+    static let supportURL = URL(string: "https://wenjinliuu.github.io/lottery-ios/support.html")!
+
+    private func linkRow(_ title: String, systemImage: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .frame(width: 20)
+            Text(title)
+            Spacer(minLength: 0)
+            Image(systemName: "arrow.up.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("彩票夹")
+                Text("对个号")
                     .font(.largeTitle.weight(.bold))
                 Text("本地优先的彩票记录与核对工具。所有票据只保存在这台设备上，不上传服务器，也没有账号体系。")
                 Divider()
@@ -292,6 +310,21 @@ struct AboutView: View {
                 Text("开奖数据")
                     .font(.headline)
                 Text("开奖号码与开奖日历读取自公开数据仓库 lottery-data-repo，应用只做只读访问。彩票照片的号码识别全部在本机完成，照片不会离开设备，也不会被保存。")
+
+                Divider()
+                // 隐私政策要能在 App 内点得到 —— 这是审核明确看的一项，
+                // 只写在 App Store 商店页上是不够的。技术支持同理。
+                Text("更多")
+                    .font(.headline)
+                Link(destination: AboutView.privacyURL) {
+                    linkRow("隐私政策", systemImage: "hand.raised")
+                }
+                Link(destination: AboutView.supportURL) {
+                    linkRow("技术支持与常见问题", systemImage: "questionmark.circle")
+                }
+                Text("以上两个链接会在浏览器中打开，页面为纯静态内容，不会收集任何信息。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             .font(.subheadline)
             .padding(20)

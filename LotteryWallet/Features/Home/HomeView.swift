@@ -199,7 +199,7 @@ struct HomeView: View {
             // 这几个字必须有，而且必须在开奖号码旁边：数据是从第三方接口抓来的，
             // 抓错、延迟、口径不一致都可能发生，而彩票是真金白银的事。
             // 放在设置页里没人会看到 —— 它只在人正盯着开奖号的时候才有意义。
-            Text("开奖信息仅供参考，请以官方公布为准")
+            Text(Disclaimer.draw)
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity)

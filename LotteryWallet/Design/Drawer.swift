@@ -21,7 +21,7 @@ enum DrawerHeight {
     func points(in available: CGFloat) -> CGFloat {
         switch self {
         case .medium: available * 0.58
-        case .large: available * 0.94
+        case .large: available * 0.96
         }
     }
 }
@@ -64,6 +64,11 @@ extension EnvironmentValues {
 /// 抽屉这一层。挂在根视图的 overlay 上，由一个可选值驱动，用法同 `.sheet(item:)`。
 struct DrawerLayer<Item: Identifiable & Equatable, Content: View>: View {
     @Binding var item: Item?
+    /// 每一张抽屉一上来该有多高。
+    ///
+    /// 一律从半屏起步、再让内容自己撑大是不行的：录入页一打开就需要整屏，
+    /// 那样会先闪一下半屏再长高。所以开哪一张、多高，开之前就定好。
+    var initialHeight: (Item) -> DrawerHeight = { _ in .medium }
     /// 抽屉**真正关完之后**才回调。抽屉之间接力要等这一刻，
     /// 在关闭动画开始的同一帧去开下一张会被吞掉。
     var onDismissed: () -> Void = {}
@@ -99,7 +104,7 @@ struct DrawerLayer<Item: Identifiable & Equatable, Content: View>: View {
         .onChange(of: item) { _, new in
             if let new {
                 rendered = new
-                height = .medium
+                height = initialHeight(new)
                 drag = 0
                 shown = true
             } else if rendered != nil {
@@ -135,6 +140,12 @@ struct DrawerLayer<Item: Identifiable & Equatable, Content: View>: View {
                 .environment(\.drawerDismiss, DrawerDismissAction { close() })
                 .environment(\.drawerExpand, DrawerExpandAction { height = $0 })
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // 只裁内容，**不能裁整块面板**：面板的背景刻意向下多画了
+                // 240pt 去盖住 Home 指示条那一带，裁了就会在底部露出一条缝，
+                // 透出下面的标签栏 —— 就是那条来路不明的横条。
+                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 26,
+                                                  topTrailingRadius: 26,
+                                                  style: .continuous))
         }
         .frame(height: height.points(in: available))
         .background(alignment: .top) {
@@ -146,7 +157,6 @@ struct DrawerLayer<Item: Identifiable & Equatable, Content: View>: View {
                 .frame(height: height.points(in: available) + 240)
                 .shadow(color: .black.opacity(0.20), radius: 24, y: -6)
         }
-        .clipped()
     }
 
     /// 抓手。
