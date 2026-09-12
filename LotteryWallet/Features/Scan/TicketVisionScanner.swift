@@ -155,7 +155,10 @@ enum TicketVisionScanner {
 
     /// 号码行行首允许出现的标签。
     private static let rowLabelPrefix =
-        "^\\s*(?:组[六三选]|单选|直选|[A-Ea-e\\u{0410}-\\u{0415}]\\s*[.。·:、)]|[①-⑮]|[(（]\\s*\\d{1,2}\\s*[)）])\\s*[:：]?\\s*"
+        // 字符类里直接写西里尔字面量。**不能写 `\\u{0410}`** ——
+        // 那是 Swift 的字符串转义语法，ICU 正则不认，整个模式会静默失效，
+        // 于是所有标签都摘不掉，`组六: U 7` 这种行永远被判成"不是号码行"。
+        "^\\s*(?:组[六三选]|单选|直选|[A-Ea-eАВСЕ]\\s*[.。·:、)]|[①-⑮]|[(（]\\s*\\d{1,2}\\s*[)）])\\s*[:：]?\\s*"
 
     private static func isHan(_ character: Character) -> Bool {
         guard let scalar = character.unicodeScalars.first else { return false }

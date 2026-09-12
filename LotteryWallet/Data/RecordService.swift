@@ -387,11 +387,28 @@ struct TicketCard: Identifiable, Hashable {
                                    dan: dan.count == union.count ? [] : dan,
                                    hits: hits))
         }
-        // 每个区都没多选，说明这其实是一组单式，不必按整票显示
-        let expanded = zones.contains { zone in
-            (game.sections.first { $0.key == zone.key }?.count ?? 0) < zone.selected.count
+        // **注数必须正好等于这组选号的展开数**，否则这不是一张复式/胆拖票。
+        //
+        // 只看「有没有某个区多选了」是不够的：手选两注 1-6 和 7-12，
+        // 红球并集是 12 个，同样"多选了"，会被画成一张 12 选 6 的复式 ——
+        // 而那其实是两注互不相干的单式。
+        // 真正的复式/胆拖，展开数和记录条数必然对得上（7 红复式展开 7 注，
+        // 2 胆 5 拖选 4 展开 5 注）；拿两注拼出来的并集展开是 924 注，对不上。
+        return combinations(of: zones, game: game) == records.count ? zones : []
+    }
+
+    private static func combinations(of zones: [WholeZone], game: GameKey) -> Int {
+        var total = 1
+        for section in game.sections {
+            guard let zone = zones.first(where: { $0.key == section.key }) else { continue }
+            // 胆码是定下的，真正要组合的是拖码里挑剩下的那几个位置
+            let free = zone.selected.count - zone.dan.count
+            let need = section.count - zone.dan.count
+            guard need >= 0 else { return 0 }
+            total *= TicketBuilder.binomial(free, need)
+            if total == 0 { return 0 }
         }
-        return expanded ? zones : []
+        return total
     }
 
     /// 快照时最多留几注。收起看 5 注、展开看 50 注，再多也不画。

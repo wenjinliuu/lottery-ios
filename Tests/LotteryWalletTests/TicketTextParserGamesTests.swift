@@ -354,20 +354,42 @@ final class WholeTicketDerivationTests: XCTestCase {
 
     /// 胆拖：出现在每一注里的就是胆码。
     func testDantuoTicketFindsDanNumbers() {
-        // 胆码 1、2 固定，拖码 3/4/5 里选 4 个中的 4 个组合
-        let tuo = [3, 4, 5, 6]
+        // 2 胆（1、2）+ 5 拖（3…7）里选 4 个 —— 展开正好 5 注，每注 6 个红球
+        let tuo = [3, 4, 5, 6, 7]
         let records = tuo.map { dropped in
             record([1, 2] + tuo.filter { $0 != dropped }, [9])
         }
+        XCTAssertEqual(records.count, 5)
         let red = TicketCard.wholeZones(records, game: .ssq).first { $0.key == .red }
-        XCTAssertEqual(red?.selected, [1, 2, 3, 4, 5, 6])
+        XCTAssertEqual(red?.selected, [1, 2, 3, 4, 5, 6, 7])
         XCTAssertEqual(red?.dan, [1, 2])
     }
 
-    /// 一组真正的单式（每注号码各不相同、每个区都刚好选满）不该被当成整票。
+    /// 两注互不相干的单式**也会**让并集"多选"，但它不是复式票。
+    ///
+    /// 这一条是这套推导最关键的边界：光看「有没有某个区多选了」会把
+    /// 手选的两注 1-6 和 7-12 画成一张 12 选 6 的复式。真正的判据是
+    /// **注数要等于这组选号的展开数** —— 12 选 6 展开是 924 注，不是 2 注。
     func testPlainSingleLinesAreNotTreatedAsWholeTicket() {
         let records = [record([1, 2, 3, 4, 5, 6], [1]),
                        record([7, 8, 9, 10, 11, 12], [2])]
         XCTAssertTrue(TicketCard.wholeZones(records, game: .ssq).isEmpty)
+    }
+
+    /// 双色球 7 红 + 2 蓝的复式：展开 C(7,6) × C(2,1) = 14 注。
+    /// 两个区一起参与组合数校验，漏掉蓝球那一维就会算错。
+    func testSystemTicketAcrossTwoZones() {
+        let reds = [1, 2, 3, 4, 5, 6, 7]
+        var records: [TicketRecord] = []
+        for skip in 0..<7 {
+            for blue in [8, 9] {
+                records.append(record(reds.enumerated().filter { $0.offset != skip }.map(\.element),
+                                      [blue]))
+            }
+        }
+        XCTAssertEqual(records.count, 14)
+        let zones = TicketCard.wholeZones(records, game: .ssq)
+        XCTAssertEqual(zones.first { $0.key == .red }?.selected, reds)
+        XCTAssertEqual(zones.first { $0.key == .blue }?.selected, [8, 9])
     }
 }
