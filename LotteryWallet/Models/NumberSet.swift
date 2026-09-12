@@ -15,6 +15,19 @@ struct NumberSet: Codable, Hashable, Sendable {
         set { values[key] = newValue }
     }
 
+    /// 「这一位没认出来」。
+    ///
+    /// 只在扫描识别到导入之前这一段存在：`DigitRowReader` 按坐标算出
+    /// 票面上那一位在哪儿，但值没认出来，于是把这个占位值放进去。
+    /// 复核页画成一颗问号球让用户点一下补上，**补齐之前不允许导入** ——
+    /// 所以它永远不会进票夹、不会参与核对、不会写进备份。
+    static let unknown = -1
+
+    /// 有没有哪一位还是问号。
+    var hasUnknown: Bool {
+        values.values.contains { $0.contains { $0 < 0 } }
+    }
+
     /// 单值号码区（蓝球、特别号）的便捷读取。
     func first(_ key: SectionKey) -> Int? { values[key]?.first }
 

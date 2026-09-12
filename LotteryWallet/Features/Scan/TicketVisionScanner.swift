@@ -49,8 +49,8 @@ enum TicketVisionScanner {
         var result = TicketTextParser.parse(await mergedText(image: image, base: fragments))
         if result.tickets.isEmpty {
             // 再放大一遍重试。裁切之后还认不出，多半是原图本身就糊。
-            if let upscaled = upscale(image, factor: 1.6),
-               let retry = try? await recognizeFragments(in: upscaled) {
+            if let bigger = upscaled(image, factor: 1.6),
+               let retry = try? await recognizeFragments(in: bigger) {
                 let second = TicketTextParser.parse(LayoutSegmenter.lines(retry))
                 if !second.tickets.isEmpty { result = second }
             }
@@ -81,6 +81,11 @@ enum TicketVisionScanner {
     ///
     /// 所以号码行单独再认一遍：图放大两倍、**只挂英数模型**。
     /// 非号码行（彩种名、玩法、期号、金额）仍然用中文那一遍的结果。
+    ///
+    /// 一位一个数字的那几个彩种（排列3/5、福彩3D、七星彩）还要更进一步：
+    /// 先交给 `DigitRowReader` **按坐标补位** —— 这些票的号码没有任何
+    /// 纠错冗余（值域 0-9 意味着任何数字字符都合法），文本层面已经无路可走，
+    /// 只能靠"数字是等距印的"这条几何线索。
     static func mergedText(image: UIImage, base: [TextFragment]) async -> String {
         let baseRows = LayoutSegmenter.rows(base)
         let originals = baseRows.map(LayoutSegmenter.join)
@@ -93,9 +98,14 @@ enum TicketVisionScanner {
                 result.append(original)
                 continue
             }
-            let better = await bestDigitReading(image: image,
-                                                band: LayoutSegmenter.band(row),
-                                                columns: LayoutSegmenter.columns(row))
+            let band = LayoutSegmenter.band(row)
+            let columns = LayoutSegmenter.columns(row)
+            if let positional = await positionalReading(image: image, band: band, columns: columns,
+                                                        original: original, game: game) {
+                result.append(graft(prefix: original, digits: positional))
+                continue
+            }
+            let better = await bestDigitReading(image: image, band: band, columns: columns)
             guard let better, isImprovement(better, over: original, game: game) else {
                 result.append(original)
                 continue
@@ -103,6 +113,59 @@ enum TicketVisionScanner {
             result.append(graft(prefix: original, digits: better))
         }
         return result.joined(separator: "\n")
+    }
+
+    /// 一位一个数字的彩种，一行该有几个字符。
+    ///
+    /// 只有**每一位都恰好印一个字符**的彩种才摆得上栅格。
+    /// 七乐彩、快乐8 印的是两位数，双色球、大乐透还带分隔符，都不适用 ——
+    /// 它们本来也不需要：两位数 + 窄值域 + 定长注本身就带着纠错冗余。
+    ///
+    /// 七星彩算七个字符：特别号是 0-9 的时候成立（大约七成的票），
+    /// 印成两位（10-14）时栅格自己会判不成立，安全退回文本那一遍。
+    static func positionalDigitCount(_ game: GameKey) -> Int? {
+        switch game {
+        case .fc3d, .pl3: 3
+        case .pl5: 5
+        case .qxc: 7
+        default: nil
+        }
+    }
+
+    /// 按坐标补位读一行，读得成才返回。
+    ///
+    /// 采纳的规矩很紧，因为这一步会**改写**号码：
+    /// - 每一位都认出来了 —— 一律采纳。位置是从等距栅格算出来的，
+    ///   比"整行文本认出几个数字"可靠得多。
+    /// - 还剩问号 —— 只有当原来这一行**根本读不成一注**时才采纳。
+    ///   本来好好的一行，绝不能被换成带问号的。
+    private static func positionalReading(image: UIImage,
+                                          band: ClosedRange<CGFloat>,
+                                          columns: ClosedRange<CGFloat>,
+                                          original: String,
+                                          game: GameKey?) async -> String? {
+        guard let game, let expected = positionalDigitCount(game) else { return nil }
+        // 只在「行首带着注序号/玩法标签」或者「整行除了数字什么都没有」的行上动手。
+        // 票面上的 `2.00` 同样是三个数字，不设这道闸，每张排列3 都会凭空多出一注。
+        let body = original.replacingOccurrences(of: Self.rowLabelPrefix,
+                                                 with: "", options: .regularExpression)
+        let hasLabel = original.range(of: Self.rowLabelPrefix, options: .regularExpression) != nil
+        guard hasLabel || TicketTextParser.isBareNumberLine(body) else { return nil }
+
+        guard let slots = await DigitRowReader.read(image: image, band: band,
+                                                    columns: columns, expected: expected)
+        else { return nil }
+        let text = slotText(slots)
+        guard slots.contains(where: { $0 == nil }) else { return text }
+        guard TicketTextParser.singleLineForTesting(body, game: game) == nil else { return nil }
+        // 一半以上都是问号就别拿出来丢人了，那多半根本不是号码行
+        guard slots.compactMap({ $0 }).count * 2 >= slots.count else { return nil }
+        return text
+    }
+
+    /// 栅格铺成文本。认不出的那一位写成 `?`，由解析器带到复核页去。
+    static func slotText(_ slots: [Int?]) -> String {
+        slots.map { slot in slot.map { String($0) } ?? "?" }.joined(separator: " ")
     }
 
     /// 二次识别的结果该不该采纳。
@@ -149,10 +212,32 @@ enum TicketVisionScanner {
     private static func bestDigitReading(image: UIImage,
                                          band: ClosedRange<CGFloat>,
                                          columns: ClosedRange<CGFloat>) async -> String? {
+        guard let rowStrip = strip(image, band: band, columns: columns) else { return nil }
+
+        var tokens: [DigitToken] = []
+        // 一条窄带很小，放大三倍也不贵；两个倍数各认一遍，**按位置取并集**。
+        for factor in [3.0, 5.0] as [CGFloat] {
+            let slice = UIImage(cgImage: rowStrip, scale: 1, orientation: .up)
+            guard let big = upscaled(slice, factor: factor),
+                  let fragments = try? await recognizeFragments(in: big, languages: ["en-US"]) else { continue }
+            merge(digitTokens(in: fragments), into: &tokens)
+        }
+        guard !tokens.isEmpty else { return nil }
+        return tokens.sorted { $0.box.minX < $1.box.minX }
+            .map(\.text)
+            .joined(separator: " ")
+    }
+
+    /// 把某一行单独裁成一条窄带。
+    ///
+    /// 横向卡在这一行自己那一段（`columns` 已经把右边那一竖排机号挡在外面），
+    /// 上下各留半行余量 —— 贴着字边切会把笔画削掉，反而更难认。
+    static func strip(_ image: UIImage,
+                      band: ClosedRange<CGFloat>,
+                      columns: ClosedRange<CGFloat>) -> CGImage? {
         guard let cgImage = image.cgImage else { return nil }
         let width = CGFloat(cgImage.width)
         let height = CGFloat(cgImage.height)
-        // 上下各留半行余量，免得贴着字边切，笔画被削掉反而更难认
         let padY = Swift.max((band.upperBound - band.lowerBound) * 0.45, 0.004)
         // 左右放宽一点，接住首尾那个可能整块没认出来的数字
         let padX = Swift.max((columns.upperBound - columns.lowerBound) * 0.08, 0.03)
@@ -163,20 +248,52 @@ enum TicketVisionScanner {
         let right = Swift.min(columns.upperBound + padX, 1) * width
         let rect = CGRect(x: left, y: top, width: right - left, height: bottom - top)
             .intersection(CGRect(x: 0, y: 0, width: width, height: height))
-        guard rect.height > 8, rect.width > 24, let strip = cgImage.cropping(to: rect) else { return nil }
+        guard rect.height > 8, rect.width > 24 else { return nil }
+        return cgImage.cropping(to: rect)
+    }
 
-        var tokens: [DigitToken] = []
-        // 一条窄带很小，放大三倍也不贵；两个倍数各认一遍，**按位置取并集**。
-        for factor in [3.0, 5.0] as [CGFloat] {
-            let slice = UIImage(cgImage: strip, scale: 1, orientation: .up)
-            guard let big = upscale(slice, factor: factor),
-                  let fragments = try? await recognizeFragments(in: big, languages: ["en-US"]) else { continue }
-            merge(digitTokens(in: fragments), into: &tokens)
-        }
-        guard !tokens.isEmpty else { return nil }
-        return tokens.sorted { $0.box.minX < $1.box.minX }
-            .map(\.text)
-            .joined(separator: " ")
+    /// 一个认出来的数字字符及其位置。
+    struct DigitChar: Sendable {
+        let value: Int
+        /// 归一化坐标，原点左下角。
+        let box: CGRect
+    }
+
+    /// 认出图里每一个**数字字符**及其位置。
+    ///
+    /// 和 `recognizeFragments` 的区别在于按字符取框（`boundingBox(for:)`）。
+    /// 按坐标补位要知道"第几位在哪儿"，整块文本的框给不了这个 ——
+    /// Vision 有时把一整排号码当成一个碎片返回，那个框横跨整行。
+    static func recognizeDigits(in image: UIImage,
+                                fast: Bool = false) async -> [DigitChar] {
+        guard let cgImage = image.cgImage else { return [] }
+        let orientation = cgOrientation(image.imageOrientation)
+        let results: [DigitChar] = await Task.detached(priority: .userInitiated) {
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = fast ? .fast : .accurate
+            request.recognitionLanguages = ["en-US"]
+            request.usesLanguageCorrection = false
+            request.minimumTextHeight = 0.02
+            let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation)
+            guard (try? handler.perform([request])) != nil else { return [] }
+
+            var chars: [DigitChar] = []
+            for observation in request.results ?? [] {
+                guard let candidate = observation.topCandidates(1).first else { continue }
+                let text = candidate.string
+                var index = text.startIndex
+                while index < text.endIndex {
+                    let next = text.index(after: index)
+                    defer { index = next }
+                    guard let value = TicketTextParser.digitValue(text[index]) else { continue }
+                    guard let rect = try? candidate.boundingBox(for: index..<next),
+                          let box = rect?.boundingBox else { continue }
+                    chars.append(DigitChar(value: value, box: box))
+                }
+            }
+            return chars
+        }.value
+        return results.sorted { $0.box.midX < $1.box.midX }
     }
 
     /// 裁条里认出来的一小块数字。
@@ -247,18 +364,20 @@ enum TicketVisionScanner {
         text.filter(\.isNumber).count
     }
 
-    /// 保留原行开头的非数字部分（`A.`、`组六:`、`①`），号码换成数字那一遍的。
+    /// 保留原行开头的标签（`A.`、`组六:`、`①`），号码换成重认那一遍的。
     ///
-    /// 前缀必须留着 —— 玩法和注序号都在那里，而只认英数的那一遍读不出中文。
+    /// 标签必须留着 —— 玩法和注序号都在那里，而只认英数的那一遍读不出中文。
+    ///
+    /// 取的是**行首那个标签**，不是"第一个数字之前的全部内容"。
+    /// `组六: U 7` 里那个 `U` 是把 `1` 认错了的残渣，留着它整行就废了：
+    /// 拼出来的 `组六: U 1 8 9` 过不了"一位一个数字"那道闸，一注照样丢。
     private static func graft(prefix original: String, digits: String) -> String {
-        guard let firstDigit = original.firstIndex(where: { $0.isNumber || $0 == "-" }) else {
-            return digits
+        let body = digits.trimmingCharacters(in: .whitespaces)
+        guard let range = original.range(of: Self.rowLabelPrefix, options: .regularExpression) else {
+            return body
         }
-        let head = original[original.startIndex..<firstDigit]
-        // 纯空白的前缀没有意义，别在行首留一串空格
-        let trimmedHead = head.trimmingCharacters(in: .whitespaces)
-        guard !trimmedHead.isEmpty else { return digits }
-        return "\(trimmedHead) \(digits.trimmingCharacters(in: .whitespaces))"
+        let head = original[range].trimmingCharacters(in: .whitespaces)
+        return head.isEmpty ? body : "\(head) \(body)"
     }
 
     /// 票面最后一行**有意义的内容**通常带着这些词。
@@ -361,9 +480,19 @@ enum TicketVisionScanner {
         LayoutSegmenter.lines(try await recognizeFragments(in: image))
     }
 
-    private static func upscale(_ image: UIImage, factor: CGFloat) -> UIImage? {
-        let size = CGSize(width: image.size.width * factor, height: image.size.height * factor)
-        guard size.width < 8000, size.height < 8000 else { return nil }
+    /// 放大到 `factor` 倍，超限时**按比例收着放**而不是干脆不放。
+    ///
+    /// 上一版是超限直接返回 nil。票面本身已经被预处理放大过，
+    /// 于是"号码行再认一遍"这条路在大图上**整个静默跳过**了 ——
+    /// 明明是最该起作用的那些票。
+    static func upscaled(_ image: UIImage, factor: CGFloat) -> UIImage? {
+        let limit: CGFloat = 8000
+        let longest = Swift.max(image.size.width, image.size.height)
+        guard longest > 0 else { return nil }
+        let capped = Swift.min(factor, limit / longest)
+        // 已经够大了就原样用，总比一遍都不认强
+        guard capped > 1.05 else { return image }
+        let size = CGSize(width: image.size.width * capped, height: image.size.height * capped)
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { _ in
             image.draw(in: CGRect(origin: .zero, size: size))

@@ -10,6 +10,12 @@ struct NumberPadSection: View {
     let mode: EntryMode
     /// 胆拖模式下，当前点选的是胆码还是拖码。
     let danPicking: Bool
+    /// 允许某一位停在「没认出来」（问号）上。
+    ///
+    /// 只有扫描复核页会打开：识别出来的票可能有某一位是问号，
+    /// 滚轮得先能**显示**这个状态，用户才知道是哪一位要补。
+    /// 手动录入页没有这回事，那里每一位一开始就是 0。
+    var allowsUnknown: Bool = false
     /// 点不动的时候（选满了、胆码到上限）说一句为什么。
     /// 早期版本是静默 return，用户点第 5 个胆码时界面毫无反应，
     /// 只会以为是按钮坏了。
@@ -43,11 +49,22 @@ struct NumberPadSection: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Spacer(minLength: 4)
-            Text("已选 \(selection.selected.count)")
+            Text(countText)
                 .font(.caption2.weight(.semibold))
                 .monospacedDigit()
-                .foregroundStyle(selection.selected.count == required ? section.color.accentColor : .secondary)
+                .foregroundStyle(isSettled ? section.color.accentColor : .secondary)
         }
+    }
+
+    /// 数字型玩法按「补齐了几位」报，其余按「选了几个」报。
+    private var countText: String {
+        guard isDigitSection else { return "已选 \(selection.selected.count)" }
+        let unknown = selection.selected.filter { $0 < 0 }.count
+        return unknown > 0 ? "还差 \(unknown) 位" : "已填 \(selection.selected.count)"
+    }
+
+    private var isSettled: Bool {
+        selection.selected.count == required && !selection.selected.contains { $0 < 0 }
     }
 
     private var hint: String {
@@ -156,6 +173,15 @@ struct NumberPadSection: View {
             ForEach(0..<required, id: \.self) { index in
                 let current = digitBinding(index).wrappedValue
                 Picker("第 \(index + 1) 位", selection: digitBinding(index)) {
+                    // 问号这一行只在它**当前就是问号**的时候出现：
+                    // 「没认出来」是识别的结果，不是一个可以主动选的选项，
+                    // 用户拨走之后就不该再回得来。
+                    if allowsUnknown, current < 0 {
+                        Text("?")
+                            .font(.title3.weight(.heavy))
+                            .foregroundStyle(Palette.warning)
+                            .tag(NumberSet.unknown)
+                    }
                     ForEach(Array(section.range), id: \.self) { value in
                         // 滚轮停在中间的那个号就是选中的号，但系统的滚轮不会
                         // 把它和上下两个区分开，一眼看过去三个数字长得一样。
@@ -182,11 +208,17 @@ struct NumberPadSection: View {
         Binding(
             get: {
                 let values = selection.selected
-                return index < values.count ? values[index] : section.range.lowerBound
+                guard index < values.count else {
+                    return allowsUnknown ? NumberSet.unknown : section.range.lowerBound
+                }
+                return values[index]
             },
             set: { newValue in
                 var values = selection.selected
-                while values.count < required { values.append(section.range.lowerBound) }
+                // 补位用 `unknown` 而不是 0：少认出来的那几位要一直标着问号，
+                // 悄悄填 0 的话用户根本不知道有一位是瞎猜的。
+                let filler = allowsUnknown ? NumberSet.unknown : section.range.lowerBound
+                while values.count < required { values.append(filler) }
                 values[index] = newValue
                 selection.selected = Array(values.prefix(required))
             }

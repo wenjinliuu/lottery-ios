@@ -14,8 +14,12 @@ struct BallView: View {
     /// 号码区最大值大于 9 时补零到两位，数字型玩法（3D、排列3/5、七星彩）保持单位数。
     var padded: Bool = true
 
+    /// 这一位还没认出来（扫描识别用，见 `NumberSet.unknown`）。
+    private var isUnknown: Bool { value < 0 }
+
     private var label: String {
-        padded && value < 10 ? String(format: "%02d", value) : String(value)
+        if isUnknown { return "?" }
+        return padded && value < 10 ? String(format: "%02d", value) : String(value)
     }
 
     /// 未命中的球换成实心中性灰，而不是把彩色球调透明。
@@ -31,10 +35,17 @@ struct BallView: View {
         Text(label)
             .font(.system(size: size * 0.44, weight: .heavy, design: .rounded))
             .monospacedDigit()
-            .foregroundStyle(isHollow ? color.accentColor : (isDimmed ? Palette.missInk : Color.white))
+            .foregroundStyle(unknownOrRegularInk)
             .frame(width: size, height: size)
             .background {
-                if isHollow {
+                if isUnknown {
+                    // 虚线空心 + 警示色：一眼看得出「这一位要你补」，
+                    // 而不是像个普通号码球那样被划过去。
+                    Circle()
+                        .fill(Palette.warning.opacity(0.12))
+                        .overlay(Circle().strokeBorder(Palette.warning,
+                                                       style: StrokeStyle(lineWidth: 1.4, dash: [3, 2.5])))
+                } else if isHollow {
                     Circle()
                         .fill(color.accentColor.opacity(0.12))
                         .overlay(Circle().strokeBorder(color.accentColor.opacity(0.38), lineWidth: 1))
@@ -57,7 +68,19 @@ struct BallView: View {
                     radius: isHit ? 3 : 0, y: isHit ? 1.5 : 0)
             .scaleEffect(isHit ? 1.06 : 1)
             .animation(.spring(duration: 0.34, bounce: 0.25), value: isHit)
-            .accessibilityLabel(Text(isHit ? "\(label) 已命中" : (isDimmed ? "\(label) 未命中" : label)))
+            .accessibilityLabel(Text(accessibilityText))
+    }
+
+    private var unknownOrRegularInk: Color {
+        if isUnknown { return Palette.warning }
+        if isHollow { return color.accentColor }
+        return isDimmed ? Palette.missInk : Color.white
+    }
+
+    private var accessibilityText: String {
+        if isUnknown { return "这一位没认出来，点一下补" }
+        if isHit { return "\(label) 已命中" }
+        return isDimmed ? "\(label) 未命中" : label
     }
 }
 

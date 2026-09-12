@@ -84,6 +84,18 @@ struct ScannedTicket: Identifiable, Hashable {
 
     var count: Int { expandedLines.count }
 
+    /// 还有几位是问号 —— 票面上那一位没认出来，等着用户点一下补。
+    ///
+    /// 见 `DigitRowReader`：位置是按等距栅格算出来的，所以能确定
+    /// 「是第几位没认出来」，而不是把整注丢掉说"没有识别到彩票"。
+    var unknownCount: Int {
+        lines.reduce(0) { total, line in
+            total + line.values.values.reduce(0) { $0 + $1.filter { $0 < 0 }.count }
+        }
+    }
+
+    var hasUnknown: Bool { unknownCount > 0 }
+
     /// 单期金额。票面合计是 `periods` 期的总和。
     var costPerPeriod: Double { Double(count) * unitPrice * Double(multiple) }
     var totalCost: Double { costPerPeriod * Double(periods) }
@@ -232,6 +244,28 @@ enum TicketTextParser {
         return sawDigit
     }
 
+    /// 数字型号码行：一位一个号，`?` 表示**那一位没认出来**。
+    ///
+    /// 这个 `?` 是 `DigitRowReader` 按坐标补位的产物：栅格上那一格是空的，
+    /// 位置是算出来的，值没认出来。以前这种行只能整条丢掉 ——
+    /// 一张排列5 少认一位，用户看到的就是"没有识别到彩票"，
+    /// 明明另外四位都是对的。现在把它照实带下去，复核页标成问号让人点一下补。
+    ///
+    /// 顺序**不能排序也不能去重**：`0 4 4` 和 `4 0 4` 是两注不同的号。
+    static func positionalValues(in text: String, count: Int) -> [Int]? {
+        var values: [Int] = []
+        for character in text {
+            if character.isWhitespace { continue }
+            if character == "?" || character == "？" {
+                values.append(NumberSet.unknown)
+                continue
+            }
+            guard let value = digitValue(character) else { return nil }
+            values.append(value)
+        }
+        return values.count == count ? values : nil
+    }
+
     static func isAscendingUnique(_ values: [Int]) -> Bool {
         zip(values, values.dropFirst()).allSatisfy { $0 < $1 }
     }
@@ -364,15 +398,17 @@ enum TicketTextParser {
                                        game: GameKey,
                                        section: GameSection,
                                        multiple: Int?) -> (numbers: NumberSet, multiple: Int?)? {
+        // 排列3 / 排列5 / 3D：一位一个号，可以重复，顺序就是票面顺序，
+        // 而且可能带着 `?`（那一位没认出来）——所以要走位置那条路，
+        // 不能走"按 token 读出一堆号码再数个数"。
+        if section.isPositional {
+            guard let values = positionalValues(in: body, count: section.count) else { return nil }
+            return (NumberSet([section.key: values]), multiple)
+        }
+
         guard isBareNumberLine(body) else { return nil }
         let values = numbers(in: body, range: section.range)
         guard !values.isEmpty else { return nil }
-
-        if section.range.lowerBound == 0 {
-            // 排列3 / 排列5 / 3D：一位一个号，可以重复，顺序就是票面顺序。
-            guard values.count == section.count else { return nil }
-            return (NumberSet([section.key: values]), multiple)
-        }
 
         // 七乐彩固定 7 个；快乐8 的个数由玩法决定，这里先不卡死 ——
         // 调用方拿到玩法之后会再校一次，卡死了「选八」这种票一注都读不出来。
@@ -389,6 +425,17 @@ enum TicketTextParser {
                                   first: GameSection,
                                   second: GameSection,
                                   multiple: Int?) -> (numbers: NumberSet, multiple: Int?)? {
+        // 先按「一位一个字符」读 —— 特别号是 0-9 的那七成票走这条路，
+        // `?` 也只有在这条路上才有地方落。
+        if let values = positionalValues(in: body, count: first.count + second.count) {
+            let head = Array(values.prefix(first.count))
+            let tail = Array(values.suffix(second.count))
+            if head.allSatisfy({ $0 == NumberSet.unknown || first.range.contains($0) }),
+               tail.allSatisfy({ $0 == NumberSet.unknown || second.range.contains($0) }) {
+                return (NumberSet([first.key: head, second.key: tail]), multiple)
+            }
+        }
+        // 特别号印成两位（10-14）时上面读不成，退回按 token 读。
         guard isBareNumberLine(body) else { return nil }
         let all = numbers(in: body, range: 0...second.range.upperBound)
         guard all.count == first.count + second.count else { return nil }
@@ -569,6 +616,9 @@ enum TicketTextParser {
         }
         ticket.addOn = detectAddOn(block)
         ticket.periods = extractPeriods(block)
+        if ticket.hasUnknown {
+            ticket.warnings.append("有 \(ticket.unknownCount) 位号码没认出来，点那颗问号球补一下")
+        }
         return ticket.count > 0 || !selections.isEmpty ? ticket : nil
     }
 

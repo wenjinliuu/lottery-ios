@@ -775,6 +775,9 @@ struct TicketScanView: View {
     private var importBlocker: String? {
         if tickets.isEmpty { return "还没有可导入的票" }
         if tickets.contains(where: { $0.count == 0 }) { return "有票没读出号码，点进去补一下" }
+        if let ticket = tickets.first(where: \.hasUnknown) {
+            return "有 \(ticket.unknownCount) 位号码没认出来，点那颗问号球补上再导入"
+        }
         if tickets.contains(where: { $0.issue.isEmpty }) { return "有票还没选期号" }
         if let ticket = unresolvedPeriods.first {
             return "第 \(ticket.issue) 期往后 \(ticket.periods) 期没在开奖日历里查到，先把期号选对"
@@ -787,7 +790,7 @@ struct TicketScanView: View {
     private var totalLines: Int { tickets.reduce(0) { $0 + $1.count * $1.periods } }
     private var canImport: Bool {
         !tickets.isEmpty
-            && tickets.allSatisfy { $0.count > 0 && !$0.issue.isEmpty }
+            && tickets.allSatisfy { $0.count > 0 && !$0.issue.isEmpty && !$0.hasUnknown }
             && unresolvedPeriods.isEmpty
     }
 
@@ -995,9 +998,14 @@ private struct ScanLineEditor: View {
     @Environment(\.showToast) private var showToast
     @State private var selections: [SectionKey: SectionSelection] = [:]
 
+    /// 问号没补完就不能点「完成」。
+    ///
+    /// 光数个数是不够的：识别出来的那一注**位数本来就是齐的**，
+    /// 只是其中某一位是问号。不查这个，用户一路点"完成"就把 -1 存进去了。
     private var isComplete: Bool {
-        ticket.game.sections.allSatisfy {
-            (selections[$0.key]?.selected.count ?? 0) == $0.count
+        ticket.game.sections.allSatisfy { section in
+            let values = selections[section.key]?.selected ?? []
+            return values.count == section.count && !values.contains { $0 < 0 }
         }
     }
 
@@ -1013,6 +1021,7 @@ private struct ScanLineEditor: View {
                                          required: section.count,
                                          mode: .manual,
                                          danPicking: false,
+                                         allowsUnknown: true,
                                          onReject: { showToast($0, symbol: "hand.raised", feedback: .warning) })
                     }
                 }
