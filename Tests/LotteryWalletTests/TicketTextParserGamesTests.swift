@@ -191,8 +191,8 @@ final class TicketTextParserGamesTests: XCTestCase {
         XCTAssertEqual(tickets.count, 2)
         XCTAssertEqual(tickets.map(\.playMode), ["group6", "group3"])
         XCTAssertEqual(tickets.map(\.count), [2, 1])
-        XCTAssertEqual(tickets.first?.totalCost, 4, accuracy: 0.001)
-        XCTAssertEqual(tickets.dropFirst().first?.totalCost, 2, accuracy: 0.001)
+        // accuracy 版的 XCTAssertEqual 不收可选值，先摊平再比
+        XCTAssertEqual(tickets.map(\.totalCost), [4, 2])
         XCTAssertEqual(tickets.first?.lines.first?[.nums3], [0, 1, 5])
         XCTAssertEqual(tickets.dropFirst().first?.lines.first?[.nums3], [0, 4, 4])
     }
