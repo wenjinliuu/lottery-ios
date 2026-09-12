@@ -286,9 +286,10 @@ enum TicketVisionScanner {
                     let next = text.index(after: index)
                     defer { index = next }
                     guard let value = TicketTextParser.digitValue(text[index]) else { continue }
-                    guard let rect = try? candidate.boundingBox(for: index..<next),
-                          let box = rect?.boundingBox else { continue }
-                    chars.append(DigitChar(value: value, box: box))
+                    // `try?` 会把 `throws -> VNRectangleObservation?` 压成一层 optional，
+                    // 所以这里拿到的已经是非可选的观测结果，不要再点问号。
+                    guard let rect = try? candidate.boundingBox(for: index..<next) else { continue }
+                    chars.append(DigitChar(value: value, box: rect.boundingBox))
                 }
             }
             return chars
