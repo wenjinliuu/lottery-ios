@@ -161,6 +161,9 @@ enum TicketRegistration {
         } else {
             debug.notes.append("没框出期号那一行，票头区空着")
         }
+        if let foot = frame.footCorners {
+            debug.zones.append(.init(label: "票尾：开奖期·合计", corners: foot))
+        }
         if let left = frame.leftBoundary {
             debug.boundaries.append(.init(label: "左：注序号列右侧", x: left))
         } else {

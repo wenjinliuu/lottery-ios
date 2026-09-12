@@ -242,15 +242,88 @@ final class TicketFrameTests: XCTestCase {
 
     /// 同一个模式命中好几行时：上基准取最靠下的，下基准取最靠上的 ——
     /// 中间夹出来的那一块才是号码区。
-    func testAnchorLinePicksTheInnermost() {
+    func testAnchorRowPicksTheInnermost() {
         let fragments = [
             line("公益 上面那条", left: 0.3, right: 0.7, top: 0.60),
             line("公益 下面那条", left: 0.3, right: 0.7, top: 0.80)
         ]
-        let bottom = TicketFrame.anchorLine(fragments, matching: "公益", lowest: false)
-        XCTAssertEqual(bottom?.text, "公益 上面那条")
-        let lowest = TicketFrame.anchorLine(fragments, matching: "公益", lowest: true)
-        XCTAssertEqual(lowest?.text, "公益 下面那条")
+        let bottom = TicketFrame.anchorRow(fragments, matching: "公益", lowest: false)
+        XCTAssertEqual(bottom?.topLeft.y ?? -1, 0.60, accuracy: 1e-6)
+        let lowest = TicketFrame.anchorRow(fragments, matching: "公益", lowest: true)
+        XCTAssertEqual(lowest?.topLeft.y ?? -1, 0.80, accuracy: 1e-6)
+    }
+
+    /// **基准的单位是「一行」，不是「一个碎片」。**
+    ///
+    /// Vision 经常把一行切成好几块：七星彩那行机号
+    /// `110310-251461-120958-368897 772489` 是一块，行尾的 `Tc5xcQ` 是另一块。
+    /// 只拿匹配到的那一块当基准，基准线就短一截，右边的号码会被框在外面 ——
+    /// 真机上实测就是这么丢的。
+    func testAnchorRowJoinsSplitFragments() {
+        let fragments = [
+            line("110310-251461-120958-368897 772489", left: 0.10, right: 0.75, top: 0.25),
+            line("Tc5xcQ", left: 0.78, right: 0.92, top: 0.25),
+            line("① 3 9 5 4 7 7 13", left: 0.15, right: 0.85, top: 0.35)
+        ]
+        guard let row = TicketFrame.anchorRow(
+            fragments, matching: TicketFrame.TextAnchors.sportsLottery.top, lowest: true) else {
+            return XCTFail("机号行应该认得出来")
+        }
+        XCTAssertEqual(row.topLeft.x, 0.10, accuracy: 1e-6)
+        XCTAssertEqual(row.topRight.x, 0.92, accuracy: 1e-6, "行尾那小串字母要拼进来")
+        XCTAssertEqual(row.width, 0.82, accuracy: 1e-6)
+    }
+
+    /// 下基准优先取**宽**的那一行。
+    ///
+    /// 公益行居中而且短（只有票宽一半），外推到整个票宽时角度误差会被放大；
+    /// 它下面那行出票时间横跨整个印刷区，稳得多。
+    func testBottomAnchorPrefersTheWiderRow() {
+        let top = TicketFrame.TextRow(
+            topLeft: CGPoint(x: 0.1, y: 0.25), topRight: CGPoint(x: 0.9, y: 0.25),
+            bottomLeft: CGPoint(x: 0.1, y: 0.27), bottomRight: CGPoint(x: 0.9, y: 0.27))
+        let fragments = [
+            line("感谢您为公益事业贡献 3.70元", left: 0.35, right: 0.65, top: 0.70),
+            line("20-020689-102 00011 26/04/17 16:21:04", left: 0.1, right: 0.9, top: 0.80)
+        ]
+        guard let row = TicketFrame.bottomRow(
+            fragments, patterns: TicketFrame.TextAnchors.sportsLottery.bottom,
+            below: top) else {
+            return XCTFail("下基准应该挑得出来")
+        }
+        XCTAssertEqual(row.topLeft.y, 0.80, accuracy: 1e-6, "挑的是出票时间那一行")
+        XCTAssertEqual(row.width, 0.8, accuracy: 1e-6)
+    }
+
+    /// 宽的那行没有时，退回窄的 —— 有基准总比没有强。
+    func testBottomAnchorFallsBackToTheNarrowRow() {
+        let top = TicketFrame.TextRow(
+            topLeft: CGPoint(x: 0.1, y: 0.25), topRight: CGPoint(x: 0.9, y: 0.25),
+            bottomLeft: CGPoint(x: 0.1, y: 0.27), bottomRight: CGPoint(x: 0.9, y: 0.27))
+        let fragments = [line("感谢您为公益事业贡献", left: 0.35, right: 0.65, top: 0.70)]
+        let row = TicketFrame.bottomRow(
+            fragments, patterns: TicketFrame.TextAnchors.sportsLottery.bottom, below: top)
+        XCTAssertEqual(row?.topLeft.y ?? -1, 0.70, accuracy: 1e-6)
+    }
+
+    /// 票尾：号码区下边界那一行整个框出来。
+    ///
+    /// 福彩的 `开奖期:2026097 26-08-23  合计18元` 就在这一行 —— 下基准取的是
+    /// 它的上沿，不框出来的话开奖期和合计金额正好卡在号码区外面。
+    func testFootZoneCoversTheBottomAnchorRow() {
+        let fragments = [
+            line("7D92-04AE-1FB5-E411-B960/32798871/C084C", left: 0.1, right: 0.9, top: 0.25),
+            line("开奖期:2026097 26-08-23 合计18元", left: 0.1, right: 0.8, top: 0.60)
+        ]
+        guard let frame = TicketFrame.betweenTextLines(
+            fragments, anchors: .welfareLottery),
+            let foot = frame.footCorners, foot.count == 4 else {
+            return XCTFail("票尾没框出来")
+        }
+        XCTAssertEqual(foot[0], frame.bottomLeft, "票尾的左上角就是号码区的左下角")
+        XCTAssertEqual(foot[1], frame.bottomRight)
+        XCTAssertEqual(foot[2].y, 0.62, accuracy: 1e-6, "下沿罩住整行")
+        XCTAssertEqual(foot[3].y, 0.62, accuracy: 1e-6)
     }
 
     /// 上下颠倒（公益行跑到机号行上面）时不硬凑，返回 nil。

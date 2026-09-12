@@ -425,7 +425,7 @@ struct TicketScanView: View {
                     HStack(spacing: 10) {
                         legend(.green, "基准")
                         legend(.blue, "号码区")
-                        legend(.purple, "票头")
+                        legend(.purple, "票头/票尾")
                         legend(.pink, "格子")
                     }
                     .font(.caption2)

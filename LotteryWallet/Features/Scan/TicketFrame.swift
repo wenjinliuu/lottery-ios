@@ -36,23 +36,27 @@ struct TicketFrame: Equatable {
         let name: String
         /// 上基准：紧贴号码区上方那一行。
         let top: String
-        /// 下基准：号码区下方第一行固定内容。
-        let bottom: String
+        /// 下基准，按优先级排。前面的更宽、更适合当基准，取不到才退到后面。
+        let bottom: [String]
 
         /// 体彩：机号行（`110310-292261-111967-377226`）+ 公益行。
         ///
         /// 四张体彩真票（七星彩 ×2、排列3、排列5、大乐透）票面上都有这两行，
         /// 而且都在号码区的正上方和正下方。
         static let sportsLottery = TextAnchors(
-            name: "机号行 + 公益行",
+            name: "机号行 + 票底出票时间行",
             top: "\\d{6}\\s*-\\s*\\d{6}\\s*-\\s*\\d{6}",
-            bottom: "公益")
+            // 出票时间行横跨整个印刷区（`20-020689-102 00011 26/04/17 16:21:04`），
+            // 比居中的公益行宽一倍，当基准稳得多；公益行只是兜底。
+            bottom: ["\\d{1,2}\\s*:\\s*\\d{2}\\s*:\\s*\\d{2}", "公益"])
 
         /// 福彩：哈希行（`7D92-04AE-1FB5-E411-B960/32798871/C084C`）+ 开奖期行。
         static let welfareLottery = TextAnchors(
             name: "哈希行 + 开奖期行",
             top: "[0-9A-Fa-f]{4}(?:\\s*-\\s*[0-9A-Fa-f]{4}){3,4}\\s*/",
-            bottom: "开奖期")
+            // 开奖期行右边还印着合计金额，两个都是核奖要用的字段 ——
+            // 这一整行会被框成「票尾」，见 `footCorners`。
+            bottom: ["开奖期"])
 
         /// 先试哪一对。认不出彩种时两对都试 —— 正则本来就互不相容，
         /// 拿错了只会一条都匹配不上，不会认错。
@@ -90,6 +94,13 @@ struct TicketFrame: Equatable {
     ///
     /// 现在只标不读：标签路按硬约束三一行都不动。
     var headCorners: [CGPoint]?
+
+    /// 票尾区的四角：以号码区**下边界那条基准**为顶，往下罩住下基准那一整行。
+    ///
+    /// 福彩要的就是它：`开奖期:2026097 26-08-23   合计18元` —— 开奖期和合计金额
+    /// 都在这一行，而下基准取的是这一行的**上沿**，不框出来的话这行重要信息
+    /// 正好卡在号码区外面。和票头一样，和号码区共用同一条基准、严丝合缝。
+    var footCorners: [CGPoint]?
 
     var corners: [CGPoint] { [topLeft, topRight, bottomRight, bottomLeft] }
 
@@ -158,6 +169,54 @@ struct TicketFrame: Equatable {
 
     // MARK: - 文本行基准
 
+    /// 票面上**一整行**文字。
+    ///
+    /// Vision 经常把一行切成好几块：七星彩那行机号
+    /// `110310-251461-120958-368897 772489` 是一块，行尾的 `Tc5xcQ` 是另一块；
+    /// 排列5 的 `322558 v78Bcw` 同理。只拿"匹配到的那一块"当基准，
+    /// 基准线就短了一截 —— 右边的号码会被框在外面（实测就是这样）。
+    /// 所以基准的单位必须是**行**，不是碎片。
+    ///
+    /// 坐标是归一化、左上原点。
+    struct TextRow: Equatable {
+        var topLeft: CGPoint
+        var topRight: CGPoint
+        var bottomLeft: CGPoint
+        var bottomRight: CGPoint
+
+        var width: CGFloat { topRight.x - topLeft.x }
+
+        /// 把和 `anchor` 同一行的碎片全都拼进来。
+        ///
+        /// 同一行的判据是**纵向中心落在这一块自己的高度范围里** ——
+        /// 按框重叠判会把上下两行连起来（票面行距很窄），按中心判不会。
+        static func containing(_ anchor: TicketVisionScanner.TextFragment,
+                               in fragments: [TicketVisionScanner.TextFragment]) -> TextRow? {
+            let band = anchor.box.minY...anchor.box.maxY
+            let height = anchor.box.height
+            let sameRow = fragments.filter {
+                guard band.contains($0.box.midY) else { return false }
+                // 高度差太多的不是同一行的字，是压上来的图标或者整块的段落
+                return $0.box.height < height * 2.2
+            }
+            guard let leftmost = sameRow.min(by: { $0.box.minX < $1.box.minX }),
+                  let rightmost = sameRow.max(by: { $0.box.maxX < $1.box.maxX }),
+                  let (leftTop, _) = leftmost.topEdge,
+                  let (_, rightTop) = rightmost.topEdge,
+                  let (leftBottom, _) = leftmost.bottomEdge,
+                  let (_, rightBottom) = rightmost.bottomEdge else { return nil }
+            return TextRow(topLeft: leftTop, topRight: rightTop,
+                           bottomLeft: leftBottom, bottomRight: rightBottom)
+        }
+
+        /// 这一行所在的直线延长到某个横坐标。
+        static func extend(_ a: CGPoint, _ b: CGPoint, to x: CGFloat) -> CGPoint? {
+            let span = b.x - a.x
+            guard abs(span) > 1e-6 else { return nil }
+            return CGPoint(x: x, y: a.y + (x - a.x) / span * (b.y - a.y))
+        }
+    }
+
     /// 两行文字夹出来的号码区。
     ///
     /// 上基准取那一行的**下沿**，下基准取那一行的**上沿** —— 夹出来的正好是
@@ -165,23 +224,14 @@ struct TicketFrame: Equatable {
     /// 促销语，都留在区里不要紧：哪几行是投注号码，由墨迹投影去分（阶段 2），
     /// 不靠这一层去猜。
     ///
-    /// 横向按**上基准那一行**的宽度来 —— 机号行和哈希行都横跨整个印刷区，
-    /// 是票面上最宽的一行；下基准（公益行 / 开奖期行）居中而且短，
-    /// 拿它定宽度会把号码切掉，所以只取它的**方向**，把线延长过去。
-    static func between(top: TicketVisionScanner.TextFragment,
-                        bottom: TicketVisionScanner.TextFragment) -> TicketFrame? {
-        guard let (topLeft, topRight) = top.bottomEdge,
-              let (bottomLeftEdge, bottomRightEdge) = bottom.topEdge else { return nil }
+    /// 横向按**上基准那一行**的宽度来，下基准只取它的**方向**、把线延长过去。
+    /// 两条基准都要够宽：短的一行外推到整个票宽，角度上的一点点误差会被放大。
+    static func between(top: TextRow, bottom: TextRow) -> TicketFrame? {
+        let topLeft = top.bottomLeft
+        let topRight = top.bottomRight
         guard topRight.x - topLeft.x > 0.2 else { return nil }
-
-        // 下基准那条线延长到上基准的左右两端
-        func extend(_ a: CGPoint, _ b: CGPoint, to x: CGFloat) -> CGPoint? {
-            let span = b.x - a.x
-            guard abs(span) > 1e-6 else { return nil }
-            return CGPoint(x: x, y: a.y + (x - a.x) / span * (b.y - a.y))
-        }
-        guard let bottomLeft = extend(bottomLeftEdge, bottomRightEdge, to: topLeft.x),
-              let bottomRight = extend(bottomLeftEdge, bottomRightEdge, to: topRight.x)
+        guard let bottomLeft = TextRow.extend(bottom.topLeft, bottom.topRight, to: topLeft.x),
+              let bottomRight = TextRow.extend(bottom.topLeft, bottom.topRight, to: topRight.x)
         else { return nil }
 
         // 上基准必须在上面，而且中间得装得下几行号码
@@ -197,24 +247,47 @@ struct TicketFrame: Equatable {
     ///
     /// 同一个模式命中好几块时，上基准取**最靠下**的（离号码区最近），
     /// 下基准取**最靠上**的 —— 中间夹出来的那一块才是号码区。
-    static func anchorLine(_ fragments: [TicketVisionScanner.TextFragment],
-                           matching pattern: String,
-                           lowest: Bool) -> TicketVisionScanner.TextFragment? {
+    static func anchorRow(_ fragments: [TicketVisionScanner.TextFragment],
+                          matching pattern: String,
+                          lowest: Bool) -> TextRow? {
         let matched = fragments.filter {
             $0.text.range(of: pattern, options: .regularExpression) != nil
         }
         // Vision 的 y 向上为正：最靠下 = midY 最小
-        return lowest ? matched.min { $0.box.midY < $1.box.midY }
-                      : matched.max { $0.box.midY < $1.box.midY }
+        let picked = lowest ? matched.min(by: { $0.box.midY < $1.box.midY })
+                            : matched.max(by: { $0.box.midY < $1.box.midY })
+        guard let picked else { return nil }
+        return TextRow.containing(picked, in: fragments)
     }
 
-    /// 用票面上那两行文字当基准，夹出号码区。
+    /// 下基准：按优先级挨个试，取第一条**够宽**的。
+    ///
+    /// 体彩的公益行居中而且短（只有票宽的一半左右），拿它当基准，
+    /// 外推到整个票宽时角度误差会被放大。它下面那行出票时间
+    /// `20-020689-102 00011 26/04/17 16:21:04` 横跨整个印刷区，稳得多。
+    /// 够宽的取不到才退回窄的 —— 有基准总比没有强。
+    static func bottomRow(_ fragments: [TicketVisionScanner.TextFragment],
+                          patterns: [String],
+                          below top: TextRow) -> TextRow? {
+        var fallback: TextRow?
+        for pattern in patterns {
+            guard let row = anchorRow(fragments, matching: pattern, lowest: false) else { continue }
+            guard Swift.min(row.topLeft.y, row.topRight.y)
+                    > Swift.max(top.bottomLeft.y, top.bottomRight.y) else { continue }
+            if row.width >= top.width * 0.6 { return row }
+            if fallback == nil { fallback = row }
+        }
+        return fallback
+    }
+
+    /// 用票面上那两行文字当基准，夹出号码区，并把票头、票尾一起框好。
     static func betweenTextLines(_ fragments: [TicketVisionScanner.TextFragment],
                                  anchors: TextAnchors) -> TicketFrame? {
-        guard let top = anchorLine(fragments, matching: anchors.top, lowest: true),
-              let bottom = anchorLine(fragments, matching: anchors.bottom, lowest: false)
-        else { return nil }
-        return between(top: top, bottom: bottom)
+        guard let top = anchorRow(fragments, matching: anchors.top, lowest: true),
+              let bottom = bottomRow(fragments, patterns: anchors.bottom, below: top),
+              var frame = between(top: top, bottom: bottom) else { return nil }
+        frame = frame.addingFoot(bottom)
+        return frame
     }
 
     // MARK: - 票头区
@@ -251,6 +324,22 @@ struct TicketFrame: Equatable {
     /// 上边是一条**和号码区上边平行**的线，穿过期号那一行的顶；底边就是
     /// 号码区的上边本身，两块严丝合缝。平行是关键 —— 票斜着的时候，
     /// 横平竖直的框会一边压住字、一边空一大块，反而看不出基准准不准。
+    /// 把票尾区接在号码区下面：下基准那一整行。
+    ///
+    /// 号码区的下边界取的是这一行的**上沿**，所以这一行本身正好卡在区外。
+    /// 福彩的 `开奖期:2026097 26-08-23   合计18元` 就在这儿 —— 开奖期和
+    /// 合计金额都是核奖要用的字段，不框出来等于漏了。
+    func addingFoot(_ row: TextRow) -> TicketFrame {
+        guard let left = TextRow.extend(row.bottomLeft, row.bottomRight, to: bottomLeft.x),
+              let right = TextRow.extend(row.bottomLeft, row.bottomRight, to: bottomRight.x)
+        else { return self }
+        guard left.y > bottomLeft.y, right.y > bottomRight.y,
+              left.y <= 1, right.y <= 1 else { return self }
+        var copy = self
+        copy.footCorners = [bottomLeft, bottomRight, right, left]
+        return copy
+    }
+
     func addingHead(topAt top: CGFloat) -> TicketFrame {
         let edge = Swift.min(topLeft.y, topRight.y)
         let shift = edge - top
