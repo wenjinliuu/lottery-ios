@@ -228,6 +228,46 @@ final class DigitMatrixReaderTests: XCTestCase {
         XCTAssertEqual(grid?.count, 7)
     }
 
+    // MARK: - 整列没认出来时按列距插回去
+
+    private func column(_ center: CGFloat) -> ClosedRange<CGFloat> {
+        (center - 10.5) / blockWidth ... (center + 10.5) / blockWidth
+    }
+
+    /// 中间整整一列都没认出来：按列距把它插回去，位置是算出来的。
+    func testMissingMiddleColumnIsInterpolated() {
+        let clusters = [column(116), column(192), column(345), column(420)]
+        guard let grid = DigitMatrixReader.filledGrid(clusters, columns: 5) else {
+            return XCTFail("应该插得回去")
+        }
+        XCTAssertEqual(grid.count, 5)
+        let centers = grid.map { ($0.lowerBound + $0.upperBound) / 2 * blockWidth }
+        XCTAssertEqual(centers[2], 268.5, accuracy: 1)
+    }
+
+    /// 列数已经够了就**原样返回，一点都不插**。
+    ///
+    /// 七星彩的特别号那一列离前六位是 1.6 个列距（票面实测），
+    /// 硬按整数倍去套只会把整张票判掉。
+    func testCompleteGridIsLeftAlone() {
+        let uneven = [column(116), column(192), column(269), column(345),
+                      column(420), column(497), column(600)]
+        XCTAssertEqual(DigitMatrixReader.filledGrid(uneven, columns: 7)?.count, 7)
+    }
+
+    /// 插完还是不够列数就作废 —— 缺在两头的情况定不了位，
+    /// 宁可退回旧办法，也不能猜一个位置摆上去。
+    func testStillShortAfterInterpolationIsRejected() {
+        let clusters = [column(116), column(192), column(269)]
+        XCTAssertNil(DigitMatrixReader.filledGrid(clusters, columns: 5))
+    }
+
+    /// 认出来的列比该有的还多，一律作废。
+    func testTooManyColumnsIsRejected() {
+        let clusters = (0..<8).map { column(116 + CGFloat($0) * 76) }
+        XCTAssertNil(DigitMatrixReader.filledGrid(clusters, columns: 7))
+    }
+
     /// 排列3 / 3D 是三列的矩阵，同一套算法照样成立。
     func testThreeColumnMatrix() {
         var chars: [TicketVisionScanner.DigitChar] = []
@@ -426,46 +466,6 @@ final class UnknownDigitPlumbingTests: XCTestCase {
     func testGluedDigitsAreRejectedForPositionalGames() {
         XCTAssertNil(TicketTextParser.singleLineForTesting("① 84 4 1 5", game: .pl5))
         XCTAssertNil(TicketTextParser.singleLineForTesting("组六: 01 5", game: .fc3d))
-    }
-
-    // MARK: - 整列没认出来时按列距插回去
-
-    private func column(_ center: CGFloat) -> ClosedRange<CGFloat> {
-        (center - 10.5) / blockWidth ... (center + 10.5) / blockWidth
-    }
-
-    /// 中间整整一列都没认出来：按列距把它插回去，位置是算出来的。
-    func testMissingMiddleColumnIsInterpolated() {
-        let clusters = [column(116), column(192), column(345), column(420)]
-        guard let grid = DigitMatrixReader.filledGrid(clusters, columns: 5) else {
-            return XCTFail("应该插得回去")
-        }
-        XCTAssertEqual(grid.count, 5)
-        let centers = grid.map { ($0.lowerBound + $0.upperBound) / 2 * blockWidth }
-        XCTAssertEqual(centers[2], 268.5, accuracy: 1)
-    }
-
-    /// 列数已经够了就**原样返回，一点都不插**。
-    ///
-    /// 七星彩的特别号那一列离前六位是 1.6 个列距（票面实测），
-    /// 硬按整数倍去套只会把整张票判掉。
-    func testCompleteGridIsLeftAlone() {
-        let uneven = [column(116), column(192), column(269), column(345),
-                      column(420), column(497), column(600)]
-        XCTAssertEqual(DigitMatrixReader.filledGrid(uneven, columns: 7)?.count, 7)
-    }
-
-    /// 插完还是不够列数就作废 —— 缺在两头的情况定不了位，
-    /// 宁可退回旧办法，也不能猜一个位置摆上去。
-    func testStillShortAfterInterpolationIsRejected() {
-        let clusters = [column(116), column(192), column(269)]
-        XCTAssertNil(DigitMatrixReader.filledGrid(clusters, columns: 5))
-    }
-
-    /// 认出来的列比该有的还多，一律作废。
-    func testTooManyColumnsIsRejected() {
-        let clusters = (0..<8).map { column(116 + CGFloat($0) * 76) }
-        XCTAssertNil(DigitMatrixReader.filledGrid(clusters, columns: 7))
     }
 
     /// 只有最后一列可能印成两位数的彩种，才需要回头去找丢掉的十位。
