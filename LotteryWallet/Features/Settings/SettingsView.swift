@@ -111,6 +111,16 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle(isOn: $settings.debugVision) {
+                        row("ruler.fill", .teal, "识别调试图")
+                    }
+                } header: {
+                    Text("扫描识别")
+                } footer: {
+                    Text("打开后，扫描的复核页会多出一张标注图：绿线是票面上找到的基准（号码区上下那两条虚线），蓝框是配准后的号码区，粉格是每一个号码格子。号码认错时截这张图，就能看出是基准找歪了还是格子划错了。平时不用打开。")
+                }
+
+                Section {
                     LabeledContent {
                         Text("\(AppInfo.version) (\(AppInfo.build))")
                             .font(.footnote)

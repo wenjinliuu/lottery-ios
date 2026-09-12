@@ -20,3 +20,6 @@ AuthKey_*.p8
 *.p12
 
 .DS_Store
+
+# Python（Engineering/measure.py 跑出来的）
+__pycache__/

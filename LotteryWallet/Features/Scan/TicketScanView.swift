@@ -15,6 +15,7 @@ struct TicketScanView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Environment(DrawStore.self) private var drawStore
+    @Environment(AppSettings.self) private var settings
     @Environment(\.showToast) private var showToast
     @Environment(\.celebrate) private var celebrate
 
@@ -35,6 +36,11 @@ struct TicketScanView: View {
 
     @State private var globalWarnings: [String] = []
     @State private var errorText: String?
+    /// 识别调试图。设置里那个开关打开时才算，平时是 nil。
+    @State private var debugOverlay: UIImage?
+    /// 配准后的号码区正片 —— 「正没正」一眼看出的就是它。
+    @State private var debugZone: UIImage?
+    @State private var debugNotes: [String] = []
     /// 正在改期号 / 改号码的那张票。
     @State private var issuePickerTarget: IssuePickerTarget?
     @State private var zoneEditorTarget: ZoneEditorTarget?
@@ -292,6 +298,7 @@ struct TicketScanView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     photoCard
+                    debugCard
                     ContentUnavailableView {
                         Label("没有识别出彩票", systemImage: "doc.questionmark")
                     } description: {
@@ -331,6 +338,7 @@ struct TicketScanView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     photoCard
+                    debugCard
                     // 复核页是保存前的最后一道关口，提示摆在号码**上面**，
                     // 不能放页脚 —— 人是从上往下核对的，看完才提醒就晚了。
                     DisclaimerBanner(text: Disclaimer.review,
@@ -384,6 +392,77 @@ struct TicketScanView: View {
                     .strokeBorder(Palette.separator))
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    /// 识别调试图。设置 →「识别调试图」打开才出现，默认关闭。
+    ///
+    /// 摆在原图**下面**、号码**上面**：用户是顺着页面往下核对的，
+    /// 先看见票、再看见机器怎么划的格子、最后看见读出来的号码 ——
+    /// 哪一步歪了正好顺着这个顺序找。
+    @ViewBuilder
+    private var debugCard: some View {
+        if settings.debugVision, debugOverlay != nil || !debugNotes.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("识别调试图", systemImage: "ruler")
+                    .font(.subheadline.weight(.semibold))
+
+                if let debugOverlay {
+                    Button {
+                        zoomedImage = debugOverlay
+                        isPhotoZoomPresented = true
+                    } label: {
+                        Image(uiImage: debugOverlay)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(Palette.separator))
+                    }
+                    .buttonStyle(.plain)
+
+                    HStack(spacing: 12) {
+                        legend(.green, "基准（虚线）")
+                        legend(.blue, "配准后的号码区")
+                        legend(.pink, "格子")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+
+                if let debugZone {
+                    Text("配准后的号码区")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    // 这一张就是验收标准：号码排成整齐的横行就是配准对了，
+                    // 还是歪的就是基准找错了。
+                    Image(uiImage: debugZone)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Palette.separator))
+                }
+
+                // 用下标当 id：两条一模一样的记录（比如两条边界都没认出来）
+                // 撞 id 会让其中一条静默不显示
+                ForEach(Array(debugNotes.enumerated()), id: \.offset) { _, note in
+                    Text(note)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .contentCard(cornerRadius: 18, padding: 14)
+        }
+    }
+
+    private func legend(_ color: Color, _ text: String) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 14, height: 3)
+            Text(text)
         }
     }
 
@@ -819,11 +898,26 @@ struct TicketScanView: View {
             tickets = page.result.tickets
             ticketImages = page.images
             globalWarnings = page.result.warnings
+            applyDebug(page.registration, on: corrected)
             stage = .review
         } catch {
             errorText = error.localizedDescription
             stage = .intro
         }
+    }
+
+    /// 把配准的结果画出来。开关没开就一点活都不干 ——
+    /// 画一张 1400px 的标注图不贵，但没人看的东西不该占用户的电。
+    private func applyDebug(_ registration: TicketRegistration.Result, on image: UIImage) {
+        guard settings.debugVision else {
+            debugOverlay = nil
+            debugZone = nil
+            debugNotes = []
+            return
+        }
+        debugOverlay = ScanDebugOverlay.render(on: image, report: registration.debug)
+        debugZone = registration.rectified
+        debugNotes = registration.debug.notes
     }
 
     private func reset() {
@@ -836,6 +930,9 @@ struct TicketScanView: View {
         globalWarnings = []
         rawText = ""
         errorText = nil
+        debugOverlay = nil
+        debugZone = nil
+        debugNotes = []
     }
 
     /// 导入。

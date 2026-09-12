@@ -26,6 +26,12 @@ enum TicketVisionScanner {
         /// 按票的 id 存正片，复核和改号的时候贴出来。
         /// 一次只扫一张票，所以这些指向的是同一张图。
         var images: [ScannedTicket.ID: UIImage] = [:]
+        /// 配准的结果（号码区四角 + 调试记录）。
+        ///
+        /// **阶段 1 它不参与识别**，只画给人看：号码还是走老路认的。
+        /// 先让「摆正没摆正」肉眼可判，再把识别接到标准矩形上（阶段 2）——
+        /// 反过来做的话，一旦结果不对，没人分得清是配准错了还是识别错了。
+        var registration = TicketRegistration.Result()
     }
 
     /// 识别一张**已经裁切矫正过**的票。
@@ -68,6 +74,12 @@ enum TicketVisionScanner {
         // 裁掉没信息的边缘之后，同样的框里这些东西能大好几倍。
         let content = contentCrop(image, fragments: fragments) ?? image
         for ticket in result.tickets { page.images[ticket.id] = content }
+        // 配准。放在最后跑，而且**只读不写** —— 它现在不碰任何识别结果，
+        // 所以这一步出什么岔子都不会让一张本来认得出的票变成认不出。
+        page.registration = await TicketRegistration.run(
+            image: image,
+            fragments: fragments,
+            game: result.tickets.first?.game ?? TicketTextParser.detectGame(result.rawText))
         return page
     }
 
