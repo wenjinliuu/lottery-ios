@@ -26,7 +26,7 @@ struct RootView: View {
     @State private var toast: ToastMessage?
     @State private var celebrationTrigger = 0
     /// 点开抽屉那一刻的屏幕快照，见 `ScreenBackdrop`。
-    @State private var backdrop: UIImage?
+    @State private var backdrop: UIView?
 
     /// 点「扫描」时不切页面，只开抽屉。
     ///
@@ -86,9 +86,7 @@ struct RootView: View {
                 //
                 // 抽屉关掉之后系统会把选中态退回首页，快照也就跟着清掉了。
                 if let backdrop {
-                    Image(uiImage: backdrop)
-                        .resizable()
-                        .scaledToFill()
+                    ScreenBackdropView(snapshot: backdrop)
                         .ignoresSafeArea()
                         .accessibilityHidden(true)
                 } else {

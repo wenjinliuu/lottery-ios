@@ -76,6 +76,8 @@ struct DrawerLayer<Item: Identifiable & Equatable, Content: View>: View {
 
     /// 正在画的那一张。它比 `item` 多活一段 —— 关闭动画要跑完。
     @State private var rendered: Item?
+    /// 面板是不是已经升到位。它和 `rendered` **刻意分成两帧**，原因见 body。
+    @State private var shown = false
     @State private var height: DrawerHeight = .medium
     /// 手指当前拖出来的位移。不参与隐式动画，要跟手。
     @State private var drag: CGFloat = 0
@@ -85,44 +87,51 @@ struct DrawerLayer<Item: Identifiable & Equatable, Content: View>: View {
     var body: some View {
         // **整层忽略安全区**，面板因此贴着屏幕物理底边。
         //
-        // 原来面板底边停在安全区底部，靠背景多画 240pt 去盖 Home 指示条那一带 ——
-        // 于是内容到安全区就结束了，下面那一截只有背景色，看着就是一条灰带。
+        // 原来面板底边停在安全区底部，靠背景多画一截去盖 Home 指示条那一带 ——
+        // 内容到安全区就结束了，下面那一截只剩背景色，看着就是一条灰带。
         // 忽略安全区之后，Home 指示条那一条归内容自己所有（由 bottomInset 垫出来），
         // 整块面板从上到下是同一个底，没有接缝可露。
         GeometryReader { proxy in
             let insets = proxy.safeAreaInsets
             let available = proxy.size.height - insets.top - insets.bottom
+            let hidden = available + insets.bottom + 140
             ZStack(alignment: .bottom) {
                 if let rendered {
-                    dimmer
-                        .transition(.opacity)
+                    dimmer.opacity(shown ? 0.32 : 0)
                     panel(for: rendered, available: available, bottomInset: insets.bottom)
-                        .offset(y: drag)
-                        // **动画要挂在这里，不能靠 offset 的前后差。**
-                        //
-                        // 面板是在 rendered 由 nil 变成有值的那一帧被**插入**的，
-                        // 插入时它没有"上一个位置"，offset 算出来直接就是终点 ——
-                        // 所以上一版是"啪"地出现，一点动画都没有。
-                        // transition 描述的正是"插入/移除该怎么演"。
-                        .transition(.move(edge: .bottom))
+                        .offset(y: shown ? drag : hidden)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // 只有「升起/落下」和「换高度」带动画。`drag` 不在这里 —— 它要跟手。
+            .animation(Self.rise, value: shown)
             .animation(Self.rise, value: height)
         }
         .ignoresSafeArea()
         .onChange(of: item) { _, new in
             if let new {
+                // **先把内容建好，下一帧再升起来。**
+                //
+                // 抽屉里是一整个 NavigationStack，第一次构建要花掉十几毫秒。
+                // 如果构建和动画挤在同一帧，这笔开销正好砸在动画的第一帧上 ——
+                // 手上的感觉就是"起步一顿"。系统的相册选择器之所以顺，
+                // 是因为它整个在另一个进程里，构建根本不占我们这一帧。
+                //
+                // 拆成两帧之后：这一帧把面板建好、摆在屏幕外（不可见，卡也看不出来），
+                // 下一帧只剩纯粹的位移动画。
                 height = initialHeight(new)
                 drag = 0
-                withAnimation(Self.rise) { rendered = new }
+                shown = false
+                rendered = new
+                DispatchQueue.main.async { shown = true }
             } else if rendered != nil {
-                withAnimation(Self.rise) { rendered = nil }
-                // 落完再交棒。下一张抽屉要等这一张真的退场，
+                shown = false
+                // 落完再拆内容、再交棒。下一张抽屉要等这一张真的退场，
                 // 在同一帧里开会被吞掉。
                 Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(0.42))
+                    try? await Task.sleep(for: .seconds(0.45))
                     guard item == nil else { return }
+                    rendered = nil
                     onDismissed()
                 }
             }
@@ -131,7 +140,6 @@ struct DrawerLayer<Item: Identifiable & Equatable, Content: View>: View {
 
     private var dimmer: some View {
         Color.black
-            .opacity(0.32)
             .ignoresSafeArea()
             .contentShape(Rectangle())
             .onTapGesture { close() }
@@ -156,7 +164,15 @@ struct DrawerLayer<Item: Identifiable & Equatable, Content: View>: View {
         .frame(maxWidth: .infinity)
         .background(shape.fill(Palette.canvas))
         .clipShape(shape)
-        .shadow(color: .black.opacity(0.18), radius: 22, y: -4)
+        // **这里不能挂 .shadow。**
+        //
+        // 给一块正在做位移动画的大视图加阴影，等于让它每一帧都离屏重绘一次
+        // 22pt 的模糊 —— 这是升起时掉帧最大的一笔开销。
+        // 何况背后已经压了一层遮罩，面板和背景本来就分得清，阴影是白付的成本。
+        // 顶边那道细线足够交代"这是一块浮起来的东西"。
+        .overlay(alignment: .top) {
+            shape.stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+        }
     }
 
     /// 抓手。
