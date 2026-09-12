@@ -49,7 +49,8 @@ final class NumberGridTests: XCTestCase {
         return zone
     }
 
-    private let layout = DigitTicketLayout(columns: 7, trailingPitch: 1, trailingMaximum: 14)
+    private let layout = DigitTicketLayout(groups: [.init(count: 6, maximum: 9, gap: 0),
+                                                   .init(count: 1, maximum: 14, gap: 1)])
 
     /// 一张干净的票：五行七列，行列都切得出来。
     func testGridFromCleanMatrix() {
@@ -186,7 +187,7 @@ final class NumberGridTests: XCTestCase {
     /// 只差 4%，靠列距一项分不开，还要靠字宽（`①` 带个圈，比数字宽）。
     /// 这里离得远一些（2 个列距），列距一项就够了。
     func testLabelColumnIsTrimmed() {
-        let three = DigitTicketLayout(columns: 3, trailingPitch: 1, trailingMaximum: 9)
+        let three = DigitTicketLayout(groups: [.init(count: 3, maximum: 9, gap: 0)])
         let zone = Zone(width: width, height: height)
         var centers: [Double] = []
         for row in 0..<3 {
@@ -216,7 +217,7 @@ final class NumberGridTests: XCTestCase {
     /// ——离得最远的那个号码——才 1.58 个），而且 `(1)` 连括号 35px 宽，
     /// 是数字的两倍多。列距和字宽两项都对不上，`window` 挑不中它。
     func testMultiplierColumnIsTrimmed() {
-        let three = DigitTicketLayout(columns: 3, trailingPitch: 1, trailingMaximum: 9)
+        let three = DigitTicketLayout(groups: [.init(count: 3, maximum: 9, gap: 0)])
         let zone = Zone(width: width, height: height)
         var centers: [Double] = []
         for row in 0..<3 {
@@ -261,7 +262,8 @@ final class NumberGridTests: XCTestCase {
     /// 版式按实测摆：注序号列距 ÷ 号码列距 = 62.5 ÷ 65 = 0.96，
     /// 特别号偏移 1.58 个列距。
     func testSerialColumnIsTrimmedEvenWhenMisreadAsDigit() {
-        let seven = DigitTicketLayout(columns: 7, trailingPitch: 1.58, trailingMaximum: 14)
+        let seven = DigitTicketLayout(groups: [.init(count: 6, maximum: 9, gap: 0),
+                                          .init(count: 1, maximum: 14, gap: 1.58)])
         let zone = Zone(width: width, height: height)
         let pitch = 76
         var centers: [Double] = []
@@ -299,7 +301,7 @@ final class NumberGridTests: XCTestCase {
     /// 上限放宽之后该留哪几列交给 `window` 按版式挑：
     /// 标签那几段里一个数字都没有（被那道否决挡掉），`(1)` 的列距和字宽都对不上。
     func testWideLabelRowsSurviveTheSegmentCeiling() {
-        let three = DigitTicketLayout(columns: 3, trailingPitch: 1, trailingMaximum: 9)
+        let three = DigitTicketLayout(groups: [.init(count: 3, maximum: 9, gap: 0)])
         let zone = Zone(width: width, height: height)
         var centers: [Double] = []
         for row in 0..<5 {
@@ -328,6 +330,145 @@ final class NumberGridTests: XCTestCase {
         XCTAssertEqual(grid.columns.count, 3)
         XCTAssertGreaterThan(grid.columns[0].lowerBound * CGFloat(width), 100, "标签那几列裁掉了")
         XCTAssertLessThan(grid.columns[2].upperBound * CGFloat(width), 300, "倍数那一列裁掉了")
+    }
+
+    /// **福彩 3D 实测版式**（文档 3.3 节，500px 裁图上逐像素量的）。
+    ///
+    /// | 内容 | x 范围 |
+    /// |---|---|
+    /// | `组六:` | 29–78 |
+    /// | 第1位 | 93–107 |
+    /// | 第2位 | 133–147（列距 40，字宽 15） |
+    /// | 第3位 | 173–186 |
+    /// | `(1)` | 295–329（距号码 2.7 个列距） |
+    ///
+    /// 这是阶段 3 的验收线：五注全出，玩法标签和倍数都不能混进号码里。
+    func testWelfare3DMeasuredLayout() {
+        let three = DigitTicketLayout(groups: [.init(count: 3, maximum: 9, gap: 0)])
+        let zone = Zone(width: width, height: height)
+        var centers: [Double] = []
+        for row in 0..<5 {
+            let top = 20 + row * 36
+            zone.fill(x: 29..<79, y: top..<(top + 24))            // 组六:
+            for left in [93, 133, 173] {
+                zone.fill(x: left..<(left + 15), y: top..<(top + 24))
+                centers.append(Double(left) + 7.5)
+            }
+            zone.fill(x: 295..<330, y: top..<(top + 24))          // (1)
+            centers.append(312)                                    // 括号里那个 1 是真数字
+        }
+        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...(width - 1),
+                                          layout: three, digitCenters: centers) else {
+            return XCTFail("格子应该划得出来")
+        }
+        XCTAssertEqual(grid.rows.count, 5, "五注全出")
+        XCTAssertEqual(grid.columns.count, 3)
+        XCTAssertEqual(grid.columns[0].lowerBound * CGFloat(width), 93, accuracy: 2,
+                       "第一列压在第 1 位号码上，不是玩法标签")
+        XCTAssertEqual(grid.columns[2].upperBound * CGFloat(width), 188, accuracy: 3,
+                       "末列压在第 3 位号码上，不是倍数")
+    }
+
+    /// **大乐透 26102 实测版式**（照片摆正 3.6° 之后逐像素量的）。
+    ///
+    /// ```
+    /// ① 12 15 19 31 33  +  05 09
+    /// ```
+    /// 注序号 39–58，五个前区号码列距 43.4、两位数宽 27，
+    /// `+` 在 301–310（宽 10），后区第一个号码离前区最后一个 101.5px = **2.34 个列距**。
+    ///
+    /// 这张票说明了两件老架构做不到的事：
+    /// 1. 号码矩阵**中间夹着一段不是号码的墨**（`+`）—— 挑列要跳过它，
+    ///    收行时它落在号码区里面也不能算数，否则每一行都被判掉。
+    /// 2. 一格印**两位数** —— 同一个号码的两位要合成一段，而号码与号码之间不能合。
+    func testSuperLottoMeasuredLayout() {
+        let dlt = DigitTicketLayout(groups: [.init(count: 5, maximum: 35, gap: 0),
+                                             .init(count: 2, maximum: 12, gap: 2.34)],
+                                    separated: true)
+        // 实测列段，原样摆进来（两位数的两个数字是分开的两段）
+        let digits = [(69, 81), (84, 96), (113, 124), (127, 139), (156, 168), (171, 182),
+                      (200, 211), (214, 225), (243, 254), (257, 269),
+                      (345, 356), (359, 370), (388, 400), (403, 415)]
+        let zone = Zone(width: width, height: height)
+        var centers: [Double] = []
+        for row in 0..<3 {
+            let top = 20 + row * 23
+            zone.fill(x: 39..<59, y: top..<(top + 16))            // ①
+            for (left, right) in digits {
+                zone.fill(x: left..<(right + 1), y: top..<(top + 16))
+                centers.append(Double(left + right) / 2)
+            }
+            zone.fill(x: 301..<311, y: top..<(top + 16))          // +
+        }
+        let rough = NumberGrid.candidates(in: zone.mask, within: 0...(width - 1), columns: 7)
+        XCTAssertEqual(rough.first?.segments.count, 9,
+                       "两位数各合成一段：① + 5 个前区 + `+` + 2 个后区")
+
+        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...(width - 1),
+                                          layout: dlt, digitCenters: centers) else {
+            return XCTFail("格子应该划得出来")
+        }
+        XCTAssertEqual(grid.rows.count, 3, "三注全出 —— `+` 落在前后区之间，不算数")
+        XCTAssertEqual(grid.columns.count, 7)
+        let lefts = grid.columns.map { Int(($0.lowerBound * CGFloat(width)).rounded()) }
+        XCTAssertEqual(lefts, [69, 113, 156, 200, 243, 345, 388],
+                       "七列正好压在七个号码上，注序号和 `+` 都不在里面")
+    }
+
+    /// 组与组之间隔多远是**版式**说了算，不是一路等距。
+    func testPitchesFollowTheGroups() {
+        let qxc = DigitTicketLayout(groups: [.init(count: 6, maximum: 9, gap: 0),
+                                             .init(count: 1, maximum: 14, gap: 1.58)])
+        XCTAssertEqual(qxc.columns, 7)
+        XCTAssertEqual(qxc.pitches, [1, 1, 1, 1, 1, 1.58])
+        XCTAssertEqual(qxc.maximums, [9, 9, 9, 9, 9, 9, 14])
+        XCTAssertEqual(qxc.trailingPitch, 1.58)
+        XCTAssertFalse(qxc.separated)
+        XCTAssertTrue(qxc.singleDigit, "前六位都是 0–9，配准失败还能退回老路")
+
+        let dlt = DigitTicketLayout.of(.dlt)
+        XCTAssertEqual(dlt?.columns, 7)
+        XCTAssertEqual(dlt?.pitches, [1, 1, 1, 1, 2.34, 1])
+        XCTAssertEqual(dlt?.maximums, [35, 35, 35, 35, 35, 12, 12])
+        XCTAssertEqual(dlt?.trailingPitch, 1, "末列是后区组内的，和前一位等距")
+        XCTAssertEqual(dlt?.separated, true)
+        XCTAssertEqual(dlt?.singleDigit, false, "印的是两位数，不能退回按一格一位写的老路")
+    }
+
+    /// 挑法枚举：组内连续，组与组之间可以跳过几段（那就是分隔符）。
+    func testArrangementsSkipBetweenGroupsOnly() {
+        XCTAssertEqual(NumberGrid.arrangements(count: 4, groups: [3]),
+                       [[0, 1, 2], [1, 2, 3]])
+        XCTAssertEqual(NumberGrid.arrangements(count: 4, groups: [2, 1]),
+                       [[0, 1, 2], [0, 1, 3], [1, 2, 3]])
+        XCTAssertTrue(NumberGrid.arrangements(count: 2, groups: [3]).isEmpty,
+                      "段数不够就一种挑法都没有")
+    }
+
+    /// 格子路铺出来的一注，两区票也要读得进去 —— **连问号一起**。
+    ///
+    /// 大乐透和双色球以前只有「整行读成一注」或者「整行丢掉」两种结果：
+    /// 少认一位，用户手里三注的票在票夹里就变成两注，而且看不出少在哪儿。
+    /// 现在按位置读，认不出的那一格带着问号上复核页（硬约束一）。
+    func testTwoZoneRowKeepsQuestionMarks() {
+        XCTAssertEqual(TicketTextParser.singleLineForTesting("12 15 19 31 33 05 09",
+                                                             game: .dlt)?[.front],
+                       [12, 15, 19, 31, 33])
+        XCTAssertEqual(TicketTextParser.singleLineForTesting("12 15 19 31 33 05 09",
+                                                             game: .dlt)?[.back],
+                       [5, 9])
+
+        let holed = TicketTextParser.singleLineForTesting("12 ? 19 31 33 05 09", game: .dlt)
+        XCTAssertEqual(holed?[.front], [12, NumberSet.unknown, 19, 31, 33],
+                       "认不出的那一位是问号，整注不丢")
+        XCTAssertEqual(holed?[.back], [5, 9])
+
+        // 票面原文里前后区之间还印着 `+`，那条老路照旧走
+        XCTAssertEqual(TicketTextParser.singleLineForTesting("12 15 19 31 33 + 05 09",
+                                                             game: .dlt)?[.front],
+                       [12, 15, 19, 31, 33])
+        // 顺序错了的不能收 —— 前区必须升序
+        XCTAssertNil(TicketTextParser.singleLineForTesting("15 12 19 31 33 05 09", game: .dlt))
     }
 
     /// 划不出格子的时候，调试图要说得出**每一条墨迹带切了几段** ——

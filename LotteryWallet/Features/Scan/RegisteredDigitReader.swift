@@ -85,22 +85,25 @@ enum RegisteredDigitReader {
         // 不逐格去认是因为太贵 —— 5 注 × 7 位 × 几个放大倍数，一张票要跑
         // 上百次 Vision。整块认一遍再分配，效果一样而且快得多；
         // 「这个数字属于哪一格」依然是**按位置**定的，不是按顺序猜的。
+        // 每一列的上限按版式来：数字型是 0–9，七星彩的特别号 0–14，
+        // 大乐透前区 1–35、后区 1–12。超出上限说明落进来的不是这一格的东西。
+        let maximums = layout.maximums
         for (cell, digits) in bucket(chars, grid: grid) {
             guard values.indices.contains(cell.row),
-                  values[cell.row].indices.contains(cell.column) else { continue }
-            let maximum = cell.column == layout.columns - 1 ? layout.trailingMaximum : 9
+                  values[cell.row].indices.contains(cell.column),
+                  maximums.indices.contains(cell.column) else { continue }
             let value = digits.reduce(0) { $0 * 10 + $1 }
-            // 超过这一列的上限说明落进来的不是这一格的东西，当没认出来
-            guard digits.count <= 2, value <= maximum else { continue }
+            guard digits.count <= 2, value <= maximums[cell.column] else { continue }
             values[cell.row][cell.column] = value
         }
 
         // 空格子单独补认。只剩几个，慢一点无所谓。
         for row in values.indices {
             for column in values[row].indices where values[row][column] == nil {
-                guard let rect = grid.cell(row: row, column: column) else { continue }
-                let maximum = column == layout.columns - 1 ? layout.trailingMaximum : 9
-                values[row][column] = await reread(zone: zone, rect: rect, maximum: maximum)
+                guard let rect = grid.cell(row: row, column: column),
+                      maximums.indices.contains(column) else { continue }
+                values[row][column] = await reread(zone: zone, rect: rect,
+                                                   maximum: maximums[column])
             }
         }
 

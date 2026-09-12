@@ -386,6 +386,26 @@ enum TicketTextParser {
                              first: firstSection, second: secondSection, multiple: multiple)
         }
 
+        // 格子路铺出来的一注是「一格一个 token、认不出的那格写 `?`」。
+        // 这种行先按**位置**读：`?` 原样带到复核页让人补一下，
+        // 整行丢掉的话用户手里三注的票变成两注，而且看不出少在哪儿（硬约束一）。
+        //
+        // 判据很紧 —— `positionalValues` 要求正好切出这么多段、每段最多两位。
+        // 票面原文里前后区之间还印着 `+`（多切出一段）、OCR 把两个号码并成
+        // `0512`（段太长）都过不去，会照旧走下面按分隔符/按个数拆的老逻辑。
+        if let values = positionalValues(in: body,
+                                         count: firstSection.count + secondSection.count) {
+            let head = Array(values.prefix(firstSection.count))
+            let tail = Array(values.suffix(secondSection.count))
+            let knownHead = head.filter { $0 != NumberSet.unknown }
+            let knownTail = tail.filter { $0 != NumberSet.unknown }
+            if knownHead.allSatisfy(firstSection.range.contains),
+               knownTail.allSatisfy(secondSection.range.contains),
+               isAscendingUnique(knownHead), isAscendingUnique(knownTail) {
+                return (NumberSet([firstSection.key: head, secondSection.key: tail]), multiple)
+            }
+        }
+
         // 双色球用 `-` 分红蓝，大乐透用 `+` 分前后区；分隔符被吃掉时按个数拆
         let separators: Set<Character> = game == .ssq ? ["-"] : ["+", "*"]
         var head = body

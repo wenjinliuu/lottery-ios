@@ -147,7 +147,12 @@ enum TicketVisionScanner {
             }
             // 配准没成功（基准没找到、格子划不齐）就退回老路。
             // 老路会从识别结果里估几何，没有配准那么稳，但总比什么都不给强。
-            if let matrix = await DigitMatrixReader.read(image: image, layout: layout,
+            //
+            // 只有一格一位的那几种票能退到这儿：老路是按「一列一个个位数」写的，
+            // 双色球和大乐透印的是两位数，喂给它读出来的是垃圾，
+            // 还不如直接退到逐行二次识别 —— 那条路本来就是它们一直在走的。
+            if layout.singleDigit,
+               let matrix = await DigitMatrixReader.read(image: image, layout: layout,
                                                         labelBoundary: rowLabelBoundary(base)) {
                 return DigitPass(
                     text: compose(rows: baseRows, originals: originals, matrix: matrix),

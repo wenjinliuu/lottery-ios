@@ -45,15 +45,27 @@ struct NumberGrid: Equatable {
 
     /// 挨得很近的两段合成一段 —— 那是**同一个号码的两位数字**。
     ///
-    /// 实测（七星彩）：号码之间空 55px，而 `13` 里的 `1` 和 `3` 只空 14px，
-    /// 字宽 21px。所以判据是「间隙小于一个字宽就是同一个号码」。
+    /// 判据是「间隙不到 0.75 个字宽就是同一个号码」。这个界不是拍的，
+    /// 是把实测间隙都按 ÷ 字宽 折算之后，卡在**该合**和**不该合**中间：
     ///
-    /// 不合的话，两位数的特别号会占掉两段，整行段数多出一段、
-    /// 和别的行对不齐，那一注就被判掉了。
+    /// | 该合（号码里的两位之间） | | 不该合 | |
+    /// |---|---|---|---|
+    /// | 七星彩 `13` | 14 ÷ 21 = **0.67** | 大乐透 `①` → 第一个号码 | 11 ÷ 13 = **0.85** |
+    /// | 大乐透 `12` | 3 ÷ 13 = 0.23 | 双色球 号码之间（列距 51、两位数宽 36） | 15 ÷ 18 = **0.83** |
+    /// | 双色球 | ≈ 0.15 | 大乐透 号码之间 | 17 ÷ 13 = 1.36 |
+    /// | | | 七星彩 号码之间 | 55 ÷ 21 = 2.62 |
+    ///
+    /// 两侧最紧的是 0.67 和 0.83，取几何中点 0.75，两头各留 12% 的余量。
+    ///
+    /// 上一版的界是 1.0 个字宽 —— 七星彩和大乐透够用，但**双色球会整行合成一段**
+    /// （号码之间只空 0.83 个字宽），大乐透的注序号也会粘到第一个号码上。
+    ///
+    /// 不合的话，两位数会占掉两段，整行段数多出来、和别的行对不齐，
+    /// 那一注就被判掉了。
     static func merging(_ segments: [ClosedRange<Int>]) -> [ClosedRange<Int>] {
         guard segments.count > 1 else { return segments }
         let widths = segments.map { Double($0.upperBound - $0.lowerBound + 1) }
-        let glyph = Swift.max(median(widths), 2)
+        let glyph = Swift.max(median(widths), 2) * 0.75
         var out: [ClosedRange<Int>] = [segments[0]]
         for segment in segments.dropFirst() {
             let previous = out[out.count - 1]
@@ -168,13 +180,17 @@ struct NumberGrid: Equatable {
         return ranges
     }
 
-    /// 从多切出来的那些列里，挑出**最像号码矩阵**的连续一段。
+    /// 从多切出来的那些列里，挑出真正的号码矩阵：**每一组挑一段连续的**。
     ///
-    /// 号码是等距印的，只有最后一位可能远一点（七星彩的特别号，
-    /// `DigitTicketLayout.trailingPitch` 记着实测值 1.58）。而且号码是等宽印的 ——
-    /// 一位就是一个字宽。注序号列（`①` 带个圈，比数字宽）、玩法标签列
-    /// （`组六:` 实测 29–78，比数字宽三倍）、倍数列（`(1)` 实测 295–329）
-    /// 三样都同时破坏这两条规律，按规律挑就能避开它们。
+    /// 票面上的号码不是一路等距印到底的。七星彩的特别号离前六位 1.58 个列距；
+    /// 大乐透的后区离前区 2.34 个列距，中间还印着一个 `+`；双色球的蓝球
+    /// 同样和红球隔开。`DigitTicketLayout.groups` 把这件事写成了规则，
+    /// 这里按规则去挑：**组内等距，组与组之间隔一个已知的倍数，
+    /// 中间允许夹着几段不是号码的墨**（分隔符就是这么跳过去的）。
+    ///
+    /// 号码还都是**等宽**印的 —— 一位就是一个字宽，两位就是两个。
+    /// 注序号列（`①` 带个圈）、玩法标签列（`组六:` 实测比数字宽三倍）、
+    /// 倍数列（`(1)`）、分隔符（`+` 实测 10px 对号码的 27px）都破坏这两条规律。
     ///
     /// 上一版是靠「这一列里有没有数字字符」来认注序号列的，**那条路是死的**：
     /// 文档第七节写着 `.fast` 会把圈码 `①` 读成 `0` —— 注序号列里于是"有数字"，
@@ -182,61 +198,102 @@ struct NumberGrid: Equatable {
     /// 就卡死在这一步。几何规律不依赖 OCR，稳得多。
     ///
     /// 打分的两项（都是无量纲的，跟裁切和拍摄距离无关）：
-    /// - **列距**：把末段列距先除掉 `trailingPitch` 折算成标准列距，
-    ///   再看最离谱的那一段偏中位数多少。取 max ——
-    ///   有一段列距不对，这一段窗口就是错的。
+    /// - **列距**：每一段列距先除掉它该有的倍数（组内 1，组间 `Group.gap`）
+    ///   折算成标准列距，再看最离谱的那一段偏中位数多少。取 max ——
+    ///   有一段列距不对，这一组挑法就是错的。
     /// - **字宽**：各列宽偏离中位宽多少，取**平均**而不是 max ——
-    ///   某一列碰巧全是 `1`（笔画细）不该一票否决掉正确的窗口。
+    ///   某一列碰巧全是 `1`（笔画细）不该一票否决掉正确的挑法。
     ///
-    /// 权重 0.7 是拿四种版式的实测列位扫出来的：光看列距，排列3 只有
+    /// 权重 0.7 是拿几种版式的实测列位扫出来的：光看列距，排列3 只有
     /// 62.5 对 65 这么点差别（注序号列距和号码列距几何上分不开，文档 3.2 节
     /// 就是这么记的），±3px 抖动下只有七成能挑对；加上字宽这一项之后全中。
     ///
-    /// 数字字符只留作一道**否决**：挑中的这一段里至少一半的列得有数字，
+    /// 数字字符只留作一道**否决**：挑中的这些列里至少一半得有数字，
     /// 否则是整段压在中文标签上了。
-    static func window(_ ranges: [ClosedRange<Int>],
-                       columns: Int,
-                       trailingPitch: Double,
-                       digitCenters: [Double]) -> ClosedRange<Int>? {
-        guard ranges.count >= columns, columns >= 2 else { return nil }
-        var bestStart: Int?
+    ///
+    /// 返回挑中的那些列在 `ranges` 里的下标，按票面从左到右。
+    static func select(_ ranges: [ClosedRange<Int>],
+                       layout: DigitTicketLayout,
+                       digitCenters: [Double]) -> [Int]? {
+        let columns = layout.columns
+        guard ranges.count >= columns, columns >= 2,
+              layout.groups.allSatisfy({ $0.count >= 1 }) else { return nil }
+
+        var best: [Int]?
         var bestScore = Double.greatestFiniteMagnitude
-        for start in 0...(ranges.count - columns) {
-            let picked = Array(ranges[start..<(start + columns)])
-            let centers = picked.map { Double($0.lowerBound + $0.upperBound) / 2 }
-            let widths = picked.map { Double($0.upperBound - $0.lowerBound + 1) }
-            let gaps = zip(centers, centers.dropFirst()).map { $1 - $0 }
-            guard !gaps.isEmpty else { continue }
-
-            // 这一段里至少一半的列得有数字，否则是压在中文标签上了
-            let withDigits = picked.filter { range in
-                digitCenters.contains {
-                    Double(range.lowerBound) <= $0 && $0 <= Double(range.upperBound)
-                }
-            }.count
-            guard withDigits * 2 >= columns else { continue }
-
-            // 末段列距折算成标准列距，之后每一段都该相等
-            let units = gaps.enumerated().map { index, gap in
-                index == gaps.count - 1 ? gap / Swift.max(trailingPitch, 0.01) : gap
-            }
-            let pitch = median(units)
-            guard pitch > 0 else { continue }
-            let pitchDeviation = (units.map { abs($0 - pitch) }.max() ?? 0) / pitch
-
-            let glyph = median(widths)
-            guard glyph > 0 else { continue }
-            let widthDeviation = widths.map { abs($0 - glyph) }.reduce(0, +)
-                / Double(widths.count) / glyph
-
-            let score = pitchDeviation + 0.7 * widthDeviation
+        for picked in arrangements(count: ranges.count, groups: layout.groups.map(\.count)) {
+            guard let score = matrixScore(picked, ranges: ranges, layout: layout,
+                                          digitCenters: digitCenters) else { continue }
             if score < bestScore {
                 bestScore = score
-                bestStart = start
+                best = picked
             }
         }
-        guard let bestStart else { return nil }
-        return bestStart...(bestStart + columns - 1)
+        return best
+    }
+
+    /// 所有可能的挑法：每一组挑一段连续的下标，组与组之间**可以跳过几段**。
+    ///
+    /// 跳过的那几段就是分隔符和它旁边的杂墨。组内不许跳 ——
+    /// 组内是等距印的，中间不会插东西。
+    static func arrangements(count: Int, groups: [Int]) -> [[Int]] {
+        guard count > 0, !groups.isEmpty, groups.allSatisfy({ $0 >= 1 }) else { return [] }
+        var out: [[Int]] = []
+        func walk(_ index: Int, _ start: Int, _ picked: [Int]) {
+            guard index < groups.count else {
+                out.append(picked)
+                return
+            }
+            let size = groups[index]
+            // 后面几组至少还要占这么多段，不能把它们挤没了
+            let reserved = groups[(index + 1)...].reduce(0, +)
+            var first = start
+            while first + size + reserved <= count {
+                // 下一组从这一组结束的地方开始找 —— 它自己的循环会往右挪，
+                // 挪过去的那几段就是跳过的分隔符
+                walk(index + 1, first + size, picked + Array(first..<(first + size)))
+                first += 1
+            }
+        }
+        walk(0, 0, [])
+        return out
+    }
+
+    /// 一种挑法的得分。越小越像号码矩阵；挑法明显不对时返回 nil。
+    static func matrixScore(_ picked: [Int],
+                            ranges: [ClosedRange<Int>],
+                            layout: DigitTicketLayout,
+                            digitCenters: [Double]) -> Double? {
+        guard picked.count == layout.columns,
+              picked.allSatisfy({ ranges.indices.contains($0) }) else { return nil }
+        let chosen = picked.map { ranges[$0] }
+        let centers = chosen.map { Double($0.lowerBound + $0.upperBound) / 2 }
+        let widths = chosen.map { Double($0.upperBound - $0.lowerBound + 1) }
+        let gaps = zip(centers, centers.dropFirst()).map { $1 - $0 }
+        guard !gaps.isEmpty, gaps.allSatisfy({ $0 > 0 }) else { return nil }
+
+        // 挑中的这些列里至少一半得有数字，否则是压在中文标签上了
+        let withDigits = chosen.filter { range in
+            digitCenters.contains {
+                Double(range.lowerBound) <= $0 && $0 <= Double(range.upperBound)
+            }
+        }.count
+        guard withDigits * 2 >= layout.columns else { return nil }
+
+        // 每一段列距折算成标准列距，之后每一段都该相等
+        let expected = layout.pitches
+        guard expected.count == gaps.count else { return nil }
+        let units = zip(gaps, expected).map { $0 / Double(Swift.max($1, 0.01)) }
+        let pitch = median(units)
+        guard pitch > 0 else { return nil }
+        let pitchDeviation = (units.map { abs($0 - pitch) }.max() ?? 0) / pitch
+
+        let glyph = median(widths)
+        guard glyph > 0 else { return nil }
+        let widthDeviation = widths.map { abs($0 - glyph) }.reduce(0, +)
+            / Double(widths.count) / glyph
+
+        return pitchDeviation + 0.7 * widthDeviation
     }
 
     /// 某一列取**并集**，不取中位数。
@@ -289,12 +346,37 @@ struct NumberGrid: Equatable {
         return ranges + [low...high]
     }
 
+    /// 号码区里**允许有东西、但那东西不是号码**的几段。
+    ///
+    /// 大乐透前后区之间印着 `+`，双色球红蓝之间印着 `-`。它们正正好落在
+    /// 号码区中间，既不在任何一列上、又不在号码区外面 —— `fits` 原来的判据
+    /// 会因此把每一条投注行都判掉，一注都读不出来。
+    ///
+    /// 所以按版式把「组与组之间」那一段空当圈出来：落在这里面的墨不算数，
+    /// 落在别处却不在列上的，依然说明这行不是投注行。
+    static func separatorZones(_ ranges: [ClosedRange<Int>],
+                               layout: DigitTicketLayout) -> [ClosedRange<Double>] {
+        guard layout.separated, ranges.count == layout.columns else { return [] }
+        var zones: [ClosedRange<Double>] = []
+        var index = 0
+        for group in layout.groups.dropLast() {
+            index += group.count
+            guard index - 1 >= 0, index < ranges.count else { break }
+            let low = Double(ranges[index - 1].upperBound)
+            let high = Double(ranges[index].lowerBound)
+            if high > low { zones.append(low...high) }
+        }
+        return zones
+    }
+
     /// 这一行的每一段是不是都**落在某一列里**，而且没有两段挤进同一列。
     ///
     /// 列位定下来之后拿它去收行：缺了一位的那一注段数少一段，但剩下的段
     /// 依然一段一列对得上 —— 这样的行要留下来，那一格标问号。
     /// 整行丢掉的话，用户手里五注的票在票夹里变成四注，而且**看不出少在哪儿**。
-    static func fits(_ candidate: Candidate, _ ranges: [ClosedRange<Int>]) -> Bool {
+    static func fits(_ candidate: Candidate,
+                     _ ranges: [ClosedRange<Int>],
+                     separators: [ClosedRange<Double>] = []) -> Bool {
         guard !candidate.segments.isEmpty,
               let leftmost = ranges.first, let rightmost = ranges.last else { return false }
         let widths = ranges.map { Double($0.upperBound - $0.lowerBound + 1) }
@@ -311,6 +393,8 @@ struct NumberGrid: Equatable {
                 landed += 1
                 continue
             }
+            // 落在**组与组之间**那段空当里的是分隔符（大乐透的 `+`），不算数
+            if separators.contains(where: { $0.contains(center) }) { continue }
             // 落在号码区**外面**的那些段是注序号和倍数 `(N)` —— 它们本来就不算号码。
             // 但落在号码区**里面**却不在任何一列上的，说明这行根本不是投注行。
             let outside = center < Double(leftmost.lowerBound) - tolerance
@@ -334,21 +418,26 @@ struct NumberGrid: Equatable {
         guard !consensus.isEmpty else { return nil }
         guard var ranges = columnRanges(consensus) else { return nil }
 
-        // 号码左右多出来的列（注序号、玩法标签、倍数）按列距规律挑掉
+        // 号码左右和中间多出来的列（注序号、玩法标签、倍数、分隔符）
+        // 按「组内等距、组间隔一个已知倍数」挑掉
         if ranges.count > layout.columns {
-            guard let kept = window(ranges, columns: layout.columns,
-                                    trailingPitch: Double(layout.trailingPitch),
-                                    digitCenters: digitCenters) else { return nil }
-            // 两位数的那一列要取并集（见 `unionRange`）。裁完才知道哪一列是
-            // 真正的末列 —— 倍数列在右边，不裁掉的话会union错人。
-            if layout.trailingMaximum > 9 {
-                let widths = kept.map { Double(ranges[$0].upperBound - ranges[$0].lowerBound + 1) }
-                let glyph = median(widths)
-                let base = unionRange(consensus, at: kept.upperBound) ?? ranges[kept.upperBound]
-                ranges[kept.upperBound] = wideningTail(base, by: glyph)
+            guard let kept = select(ranges, layout: layout, digitCenters: digitCenters),
+                  let last = kept.last else { return nil }
+            // 末列印两位数时要取并集（见 `unionRange`）。挑完才知道哪一列是
+            // 真正的末列 —— 倍数列在它右边，不挑掉的话会 union 错人。
+            //
+            // 只有「最后一组就一个号码」时才做：七星彩的特别号是右对齐印的，
+            // 一位数两位数混着来。大乐透后区两个号码都是两位，列宽本来就够。
+            if layout.trailingMaximum > 9, layout.groups.last?.count == 1 {
+                let glyph = median(kept.map {
+                    Double(ranges[$0].upperBound - ranges[$0].lowerBound + 1)
+                })
+                let base = unionRange(consensus, at: last) ?? ranges[last]
+                ranges[last] = wideningTail(base, by: glyph)
             }
             ranges = kept.map { ranges[$0] }
-        } else if layout.trailingMaximum > 9, ranges.count == layout.columns {
+        } else if layout.trailingMaximum > 9, layout.groups.last?.count == 1,
+                  ranges.count == layout.columns {
             let glyph = median(ranges.map { Double($0.upperBound - $0.lowerBound + 1) })
             let base = unionRange(consensus, at: ranges.count - 1) ?? ranges[ranges.count - 1]
             ranges[ranges.count - 1] = wideningTail(base, by: glyph)
@@ -362,8 +451,10 @@ struct NumberGrid: Equatable {
         // 列数凑不齐就**整个作废**。少认一注用户看得见，摆错位用户看不见。
         guard ranges.count == layout.columns else { return nil }
 
-        // 再拿定好的列位去收行 —— 缺一位的那一注也收进来，那一格标问号
-        let rows = all.filter { fits($0, ranges) }
+        // 再拿定好的列位去收行 —— 缺一位的那一注也收进来，那一格标问号。
+        // 大乐透的 `+` 落在前后区之间那段空当里，不算数（见 `separatorZones`）。
+        let separators = separatorZones(ranges, layout: layout)
+        let rows = all.filter { fits($0, ranges, separators: separators) }
             .sorted { $0.band.lowerBound < $1.band.lowerBound }
         guard !rows.isEmpty else { return nil }
 
