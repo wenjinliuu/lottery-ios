@@ -64,9 +64,14 @@ enum RegisteredDigitReader {
             let rough = NumberGrid.candidates(in: mask, within: span, columns: layout.columns)
             let consensus = NumberGrid.betRows(rough, columns: layout.columns)
             let shape = consensus.map { String($0.segments.count) }.joined(separator: "/")
+            // 连候选行都没有时，段数上下限是最可能的凶手 —— 把没过筛子的
+            // 原始段数也报出来，下一轮不用再猜
+            let bands = NumberGrid.bandShapes(in: mask, within: span)
+                .map(String.init).joined(separator: "/")
             return Outcome(reading: nil,
                            note: "格子路：划不齐（要 \(layout.columns) 位）。"
                                + "号码区 \(mask.width)×\(mask.height)，"
+                               + "墨迹带 \(bands.isEmpty ? "—" : bands) 段，"
                                + "候选行 \(rough.count) 条，对得齐 \(consensus.count) 条，"
                                + "每行切出 \(shape.isEmpty ? "—" : shape) 段")
         }

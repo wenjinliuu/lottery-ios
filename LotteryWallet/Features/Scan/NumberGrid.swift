@@ -87,12 +87,35 @@ struct NumberGrid: Equatable {
             let segments = merging(runs.map {
                 (span.lowerBound + $0.lowerBound)...(span.lowerBound + $0.upperBound)
             })
-            // 段数离谱的直接不要：虚线一行几十段，中文那行两三段
-            guard segments.count <= columns + 2,
+            // 上限给得宽：票面上号码左右还杵着注序号、玩法标签、倍数，
+            // 而中文标签常常被切成好几段（`组` 是 纟+且 两段，`六` 还能再拆）。
+            // 卡得紧的话整行被判掉 —— 实测福彩 3D 每行切出 11 段，
+            // 卡在 5 段就是「候选行 0 条」，一注都读不出来。
+            // 该留哪几列交给 `window` 按列距规律去挑，不在这里瞎砍。
+            guard segments.count <= columns + 8,
                   segments.count >= Swift.max(1, columns - 2) else { continue }
             found.append(Candidate(band: band, segments: segments))
         }
         return found
+    }
+
+    /// 每一条墨迹带切出了几段 —— **不过任何筛子**，只给调试图看。
+    ///
+    /// `candidates` 会按段数上下限把行筛掉，筛完是 0 条时调试图只能说
+    /// 「候选行 0 条」，看不出是压根没切出带来、还是段数卡在了上限外面。
+    /// 福彩 3D 那一轮就卡在这儿：真机报 0 条，而实际上每行切了 11 段，
+    /// 只是撞上了当时 `columns + 2` 的上限。把原始段数摊开就不用再猜。
+    static func bandShapes(in mask: InkMask, within span: ClosedRange<Int>) -> [Int] {
+        guard mask.height > 0, span.lowerBound <= span.upperBound else { return [] }
+        let width = Double(span.upperBound - span.lowerBound + 1)
+        let profile = mask.rowProfile(rows: 0...(mask.height - 1), columns: span)
+        return InkMask.runs(profile, above: width * 0.05).compactMap { band in
+            guard band.upperBound - band.lowerBound + 1 >= 3 else { return nil }
+            let runs = InkMask.runs(mask.columnProfile(rows: band, columns: span), above: 0)
+            return merging(runs.map {
+                (span.lowerBound + $0.lowerBound)...(span.lowerBound + $0.upperBound)
+            }).count
+        }
     }
 
     /// 从候选行里挑出**真正的投注行**。
@@ -145,53 +168,75 @@ struct NumberGrid: Equatable {
         return ranges
     }
 
-    /// 号码区两边多出来的那些列，裁掉。
+    /// 从多切出来的那些列里，挑出**最像号码矩阵**的连续一段。
     ///
-    /// 票面上号码左右常常还杵着两样东西，它们都会被切成一列：
+    /// 号码是等距印的，只有最后一位可能远一点（七星彩的特别号，
+    /// `DigitTicketLayout.trailingPitch` 记着实测值 1.58）。而且号码是等宽印的 ——
+    /// 一位就是一个字宽。注序号列（`①` 带个圈，比数字宽）、玩法标签列
+    /// （`组六:` 实测 29–78，比数字宽三倍）、倍数列（`(1)` 实测 295–329）
+    /// 三样都同时破坏这两条规律，按规律挑就能避开它们。
     ///
-    /// - **左边：注序号 / 玩法标签**（`①②③`、`组六:`）。实测它和第一位号码的
-    ///   列距和号码之间的列距几乎一样（62.5 对 65），**几何上分不开** ——
-    ///   所以靠内容判：这一列里一个数字字符都没有。`①` 是带圈的，
-    ///   Vision 认得出但 `plainDigitValue` 不认它当数字，正好用上。
-    /// - **右边：倍数 `(N)`**。它离号码远得多 —— 实测福彩 3D 是 **2.7 个列距**，
-    ///   而七星彩的特别号（离得最远的一个号码）也才 **1.58 个列距**。
-    ///   这两个数中间有很大余量，拿 1.8 当界一刀切下去两边都安全。
+    /// 上一版是靠「这一列里有没有数字字符」来认注序号列的，**那条路是死的**：
+    /// 文档第七节写着 `.fast` 会把圈码 `①` 读成 `0` —— 注序号列里于是"有数字"，
+    /// 判据失效，整个矩阵被毙掉。真机上七星彩 5 行各切出 8 段、格子划得好好的，
+    /// 就卡死在这一步。几何规律不依赖 OCR，稳得多。
     ///
-    /// 裁不动就返回 nil，整个矩阵作废 —— 硬约束二。
-    /// 返回**保留下来的那段下标**。只从两头裁，所以留下的一定是连续的一段 ——
-    /// 拿着这段下标，后面还能回到原来那几行里去取并集。
-    static func trimming(_ ranges: [ClosedRange<Int>],
-                         columns: Int,
-                         digitCenters: [Double]) -> ClosedRange<Int>? {
-        guard ranges.count >= columns, columns > 0 else { return nil }
-        var first = 0
-        var last = ranges.count - 1
-        while last - first + 1 > columns {
-            let kept = Array(ranges[first...last])
-            let centers = kept.map { Double($0.lowerBound + $0.upperBound) / 2 }
+    /// 打分的两项（都是无量纲的，跟裁切和拍摄距离无关）：
+    /// - **列距**：把末段列距先除掉 `trailingPitch` 折算成标准列距，
+    ///   再看最离谱的那一段偏中位数多少。取 max ——
+    ///   有一段列距不对，这一段窗口就是错的。
+    /// - **字宽**：各列宽偏离中位宽多少，取**平均**而不是 max ——
+    ///   某一列碰巧全是 `1`（笔画细）不该一票否决掉正确的窗口。
+    ///
+    /// 权重 0.7 是拿四种版式的实测列位扫出来的：光看列距，排列3 只有
+    /// 62.5 对 65 这么点差别（注序号列距和号码列距几何上分不开，文档 3.2 节
+    /// 就是这么记的），±3px 抖动下只有七成能挑对；加上字宽这一项之后全中。
+    ///
+    /// 数字字符只留作一道**否决**：挑中的这一段里至少一半的列得有数字，
+    /// 否则是整段压在中文标签上了。
+    static func window(_ ranges: [ClosedRange<Int>],
+                       columns: Int,
+                       trailingPitch: Double,
+                       digitCenters: [Double]) -> ClosedRange<Int>? {
+        guard ranges.count >= columns, columns >= 2 else { return nil }
+        var bestStart: Int?
+        var bestScore = Double.greatestFiniteMagnitude
+        for start in 0...(ranges.count - columns) {
+            let picked = Array(ranges[start..<(start + columns)])
+            let centers = picked.map { Double($0.lowerBound + $0.upperBound) / 2 }
+            let widths = picked.map { Double($0.upperBound - $0.lowerBound + 1) }
             let gaps = zip(centers, centers.dropFirst()).map { $1 - $0 }
-            guard let lastGap = gaps.last, gaps.count >= 2,
-                  let typical = gaps.dropLast().min() else { return nil }
-            // 拿**最小**的那个列距当基准，不拿中位数。
-            //
-            // 中位数在只剩两个间隙时会取到较大的那个，判据一下子松掉一半：
-            // 实测福彩 3D 的 `(1)` 离号码 132.5px、号码之间 39.5px，
-            // 按中位数算阈值是 129.6 —— 只剩 2% 余量，票面稍微变一点就翻过去。
-            // 按最小值算阈值是 71.1，余量大得多，而且七星彩那边
-            // （特别号 103px、最小列距 62.5px、阈值 112.5）照样不会误伤。
-            if typical > 0, lastGap > typical * 1.8 {
-                last -= 1
-                continue
+            guard !gaps.isEmpty else { continue }
+
+            // 这一段里至少一半的列得有数字，否则是压在中文标签上了
+            let withDigits = picked.filter { range in
+                digitCenters.contains {
+                    Double(range.lowerBound) <= $0 && $0 <= Double(range.upperBound)
+                }
+            }.count
+            guard withDigits * 2 >= columns else { continue }
+
+            // 末段列距折算成标准列距，之后每一段都该相等
+            let units = gaps.enumerated().map { index, gap in
+                index == gaps.count - 1 ? gap / Swift.max(trailingPitch, 0.01) : gap
             }
-            // 最左边那一列里一个数字都没有 —— 那是注序号 / 玩法标签
-            let head = ranges[first]
-            let hasDigit = digitCenters.contains {
-                Double(head.lowerBound) <= $0 && $0 <= Double(head.upperBound)
+            let pitch = median(units)
+            guard pitch > 0 else { continue }
+            let pitchDeviation = (units.map { abs($0 - pitch) }.max() ?? 0) / pitch
+
+            let glyph = median(widths)
+            guard glyph > 0 else { continue }
+            let widthDeviation = widths.map { abs($0 - glyph) }.reduce(0, +)
+                / Double(widths.count) / glyph
+
+            let score = pitchDeviation + 0.7 * widthDeviation
+            if score < bestScore {
+                bestScore = score
+                bestStart = start
             }
-            guard !hasDigit else { return nil }
-            first += 1
         }
-        return first...last
+        guard let bestStart else { return nil }
+        return bestStart...(bestStart + columns - 1)
     }
 
     /// 某一列取**并集**，不取中位数。
@@ -289,10 +334,11 @@ struct NumberGrid: Equatable {
         guard !consensus.isEmpty else { return nil }
         guard var ranges = columnRanges(consensus) else { return nil }
 
-        // 号码左右多出来的列（注序号、倍数）裁掉
+        // 号码左右多出来的列（注序号、玩法标签、倍数）按列距规律挑掉
         if ranges.count > layout.columns {
-            guard let kept = trimming(ranges, columns: layout.columns,
-                                      digitCenters: digitCenters) else { return nil }
+            guard let kept = window(ranges, columns: layout.columns,
+                                    trailingPitch: Double(layout.trailingPitch),
+                                    digitCenters: digitCenters) else { return nil }
             // 两位数的那一列要取并集（见 `unionRange`）。裁完才知道哪一列是
             // 真正的末列 —— 倍数列在右边，不裁掉的话会union错人。
             if layout.trailingMaximum > 9 {

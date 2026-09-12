@@ -182,9 +182,9 @@ final class NumberGridTests: XCTestCase {
 
     /// **注序号那一列不是号码列。**
     ///
-    /// 实测它和第一位号码的列距（62.5）和号码之间的列距（65）几乎一样，
-    /// 几何上分不开 —— 只能靠「这一列里一个数字字符都没有」来判。
-    /// `①` 是带圈的，`plainDigitValue` 不认它当数字，正好用上。
+    /// 实测它和第一位号码的列距（62.5）和号码之间的列距（65）几乎一样 ——
+    /// 只差 4%，靠列距一项分不开，还要靠字宽（`①` 带个圈，比数字宽）。
+    /// 这里离得远一些（2 个列距），列距一项就够了。
     func testLabelColumnIsTrimmed() {
         let three = DigitTicketLayout(columns: 3, trailingPitch: 1, trailingMaximum: 9)
         let zone = Zone(width: width, height: height)
@@ -212,8 +212,9 @@ final class NumberGridTests: XCTestCase {
     /// 这就是文档里那个「福彩 3D 的矩阵路径从来没跑起来过」的老 bug：
     /// `(1)` 里的 `1` 被当成第 4 个号码。
     ///
-    /// 判据是实测的列距关系：`(N)` 离号码 **2.7 个列距**，
-    /// 而七星彩的特别号（离得最远的号码）也才 **1.58 个列距** —— 拿 1.8 当界。
+    /// 判据是实测的版式关系：`(N)` 离号码 **2.7 个列距**（而七星彩的特别号
+    /// ——离得最远的那个号码——才 1.58 个），而且 `(1)` 连括号 35px 宽，
+    /// 是数字的两倍多。列距和字宽两项都对不上，`window` 挑不中它。
     func testMultiplierColumnIsTrimmed() {
         let three = DigitTicketLayout(columns: 3, trailingPitch: 1, trailingMaximum: 9)
         let zone = Zone(width: width, height: height)
@@ -246,6 +247,94 @@ final class NumberGridTests: XCTestCase {
         let merged = NumberGrid.merging([60...81, 136...157, 496...503, 517...538])
         XCTAssertEqual(merged.count, 3, "十位和个位合成一段")
         XCTAssertEqual(merged[2], 496...538)
+    }
+
+    /// **七星彩真机上卡死的那一步。**
+    ///
+    /// 五行各切出 8 段（`①` + 6 位 + 特别号），格子划得好好的，却裁不到 7 列。
+    /// 原因是老判据「这一列里没有数字字符就是注序号列」撞上了文档第七节记的
+    /// 那个坑：`.fast` 会把 `①` 读成 `0` —— 注序号列里"有数字"，判据失效。
+    ///
+    /// 所以这里**故意把 `①` 的中心也放进 `digitCenters`**，复现那个误读。
+    /// 能挑对就说明裁剪不再依赖 OCR 了。
+    ///
+    /// 版式按实测摆：注序号列距 ÷ 号码列距 = 62.5 ÷ 65 = 0.96，
+    /// 特别号偏移 1.58 个列距。
+    func testSerialColumnIsTrimmedEvenWhenMisreadAsDigit() {
+        let seven = DigitTicketLayout(columns: 7, trailingPitch: 1.58, trailingMaximum: 14)
+        let zone = Zone(width: width, height: height)
+        let pitch = 76
+        var centers: [Double] = []
+        for row in 0..<5 {
+            let top = 20 + row * 41
+            // `①` 带个圈，比数字宽；离第一位 0.96 个列距
+            zone.fill(x: 44..<71, y: top..<(top + 29))
+            centers.append(57.5)                       // ← `.fast` 把它读成 `0`
+            for column in 0..<6 {
+                let left = 120 + column * pitch
+                zone.fill(x: left..<(left + 21), y: top..<(top + 29))
+                centers.append(Double(left) + 10.5)
+            }
+            // 特别号：1.58 个列距开外
+            zone.fill(x: 620..<641, y: top..<(top + 29))
+            centers.append(630.5)
+        }
+        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...(width - 1),
+                                          layout: seven, digitCenters: centers) else {
+            return XCTFail("格子应该划得出来")
+        }
+        XCTAssertEqual(grid.rows.count, 5)
+        XCTAssertEqual(grid.columns.count, 7)
+        XCTAssertGreaterThan(grid.columns[0].lowerBound * CGFloat(width), 100,
+                             "注序号那一列应该裁掉了")
+        XCTAssertGreaterThan(grid.columns[6].lowerBound * CGFloat(width), 560,
+                             "末列应该是特别号那一列")
+    }
+
+    /// **福彩 3D 真机上"候选行 0 条"的那一步。**
+    ///
+    /// 中文玩法标签会被切成好几段（`组` 是 纟 + 且），一行于是切出十来段。
+    /// 段数上限卡在 `columns + 2` = 5 的时候，每一行都被判掉，一注都读不出来。
+    ///
+    /// 上限放宽之后该留哪几列交给 `window` 按版式挑：
+    /// 标签那几段里一个数字都没有（被那道否决挡掉），`(1)` 的列距和字宽都对不上。
+    func testWideLabelRowsSurviveTheSegmentCeiling() {
+        let three = DigitTicketLayout(columns: 3, trailingPitch: 1, trailingMaximum: 9)
+        let zone = Zone(width: width, height: height)
+        var centers: [Double] = []
+        for row in 0..<5 {
+            let top = 20 + row * 36
+            // `组六:` 切成三段，段与段之间比字宽窄不了多少，合不上
+            for left in [20, 48, 76] {
+                zone.fill(x: left..<(left + 12), y: top..<(top + 24))
+            }
+            for column in 0..<3 {
+                let left = 130 + column * 40
+                zone.fill(x: left..<(left + 15), y: top..<(top + 24))
+                centers.append(Double(left) + 7.5)
+            }
+            zone.fill(x: 330..<365, y: top..<(top + 24))   // `(1)`
+            centers.append(347)
+        }
+        let rough = NumberGrid.candidates(in: zone.mask, within: 0...(width - 1), columns: 3)
+        XCTAssertEqual(rough.count, 5, "七段一行，不该被段数上限判掉")
+        XCTAssertEqual(rough.first?.segments.count, 7)
+
+        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...(width - 1),
+                                          layout: three, digitCenters: centers) else {
+            return XCTFail("格子应该划得出来")
+        }
+        XCTAssertEqual(grid.rows.count, 5)
+        XCTAssertEqual(grid.columns.count, 3)
+        XCTAssertGreaterThan(grid.columns[0].lowerBound * CGFloat(width), 100, "标签那几列裁掉了")
+        XCTAssertLessThan(grid.columns[2].upperBound * CGFloat(width), 300, "倍数那一列裁掉了")
+    }
+
+    /// 划不出格子的时候，调试图要说得出**每一条墨迹带切了几段** ——
+    /// 否则"候选行 0 条"看不出是没切出带来、还是段数卡在上限外面。
+    func testBandShapesReportsEveryBand() {
+        let shapes = NumberGrid.bandShapes(in: ticket().mask, within: 0...(width - 1))
+        XCTAssertEqual(shapes, [7, 7, 7, 7, 7])
     }
 
     /// 空白的号码区划不出格子，要老实返回 nil ——
