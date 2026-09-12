@@ -75,8 +75,15 @@ struct TicketScanView: View {
                 case .review: review
                 }
             }
-            // 抽屉自己已经是玻璃了，页面再铺一层不透明底色会把它糊死
-            .background(.clear)
+            // **必须和抽屉面板同一个底色。**
+            //
+            // 这里原来是 `.clear`（当年抽屉是半透明玻璃时的写法）。改成自绘
+            // 抽屉之后，透明就会露出 NavigationStack 默认的 systemBackground（白），
+            // 而面板铺的是 canvas（浅灰）—— 上下各拼出一条灰带，就是"背景不统一"。
+            .background(Palette.canvas)
+            // 导航栏也别自己糊一层材质，否则顶部又是一条色差
+            .toolbarBackground(Palette.canvas, for: .navigationBar)
+            .toolbarBackgroundVisibility(.visible, for: .navigationBar)
             .navigationTitle(stage == .review ? "核对识别结果" : "扫描彩票")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarVisibility(stage == .crop ? .hidden : .automatic, for: .navigationBar)
@@ -348,11 +355,14 @@ struct TicketScanView: View {
                 isPhotoZoomPresented = true
             } label: {
                 ZStack(alignment: .bottomTrailing) {
+                    // **完整显示，不裁。**
+                    // 这一张是"机器拿到的整张票"，用来确认框对没框对 ——
+                    // 用 scaledToFill 裁掉边缘，恰恰把最该看的边界切没了。
                     Image(uiImage: preview)
                         .resizable()
-                        .scaledToFill()
-                        .frame(height: 150)
-                        .clipped()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                        .frame(maxHeight: 260)
                     Label("放大核对", systemImage: "arrow.up.left.and.arrow.down.right")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white)
@@ -855,9 +865,11 @@ private struct ScanZoneEditor: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 14) {
-                    TicketReferenceImage(image: image)
+            // 不再套 ScrollView：号码盘按自己需要的高度贴在下面，
+            // 剩下的竖向空间全部让给票面图。原来是图固定 210、底下空一大截。
+            VStack(spacing: 12) {
+                TicketReferenceImage(image: image, expands: true)
+                    .frame(maxHeight: .infinity)
                 if let section {
                     VStack(alignment: .leading, spacing: 14) {
                         if ticket.play == .dantuo, section.count > 1 {
@@ -875,11 +887,14 @@ private struct ScanZoneEditor: View {
                                          onReject: { showToast($0, symbol: "hand.raised", feedback: .warning) })
                     }
                     .contentCard()
+                    // 号码盘先拿走它要的高度，图再吃剩下的
+                    .layoutPriority(1)
                 }
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 24)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.canvas)
             .navigationTitle("修改\(section?.label ?? "号码")")
             .navigationBarTitleDisplayMode(.inline)
@@ -917,24 +932,26 @@ private struct ScanLineEditor: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 14) {
-                    TicketReferenceImage(image: image)
-                    VStack(alignment: .leading, spacing: 16) {
-                        ForEach(ticket.game.sections) { section in
-                            NumberPadSection(section: section,
-                                             selection: binding(for: section.key),
-                                             required: section.count,
-                                             mode: .manual,
-                                             danPicking: false,
-                                             onReject: { showToast($0, symbol: "hand.raised", feedback: .warning) })
-                        }
+            VStack(spacing: 12) {
+                TicketReferenceImage(image: image, expands: true)
+                    .frame(maxHeight: .infinity)
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(ticket.game.sections) { section in
+                        NumberPadSection(section: section,
+                                         selection: binding(for: section.key),
+                                         required: section.count,
+                                         mode: .manual,
+                                         danPicking: false,
+                                         onReject: { showToast($0, symbol: "hand.raised", feedback: .warning) })
                     }
-                    .contentCard()
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 24)
+                .contentCard()
+                .layoutPriority(1)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.canvas)
             .navigationTitle("修改第 \(lineIndex + 1) 注")
             .navigationBarTitleDisplayMode(.inline)
@@ -981,6 +998,12 @@ private struct ScanLineEditor: View {
 /// 改号页面顶上的票面参照图。可捏合放大 —— 要核对的就是那几行小字。
 private struct TicketReferenceImage: View {
     var image: UIImage?
+    /// 是否吃掉版面上剩下的全部高度。
+    ///
+    /// 改号的时候人是**盯着票面**在改的，图越大越好认。号码盘的高度是定死的
+    /// （几行球就是几行），所以正确的分法是：号码盘贴底、按自己需要的高度占位，
+    /// 剩下多少全给图 —— 而不是给图一个 210 的死高度、底下空一大片。
+    var expands = false
     @State private var isZoomPresented = false
 
     var body: some View {
@@ -990,7 +1013,7 @@ private struct TicketReferenceImage: View {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
-                        .frame(maxHeight: 210)
+                        .frame(maxHeight: expands ? .infinity : 210)
                     Label("放大", systemImage: "arrow.up.left.and.arrow.down.right")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white)
@@ -1026,7 +1049,11 @@ private struct PhotoZoomView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            // 点空白处关掉。放大看完一眼就想退出，让人去够右上角那颗小叉太费事。
+            Color.black
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { dismiss() }
             Image(uiImage: image)
                 .resizable()
                 .scaledToFit()
@@ -1057,6 +1084,19 @@ private struct PhotoZoomView: View {
                         } else {
                             scale = 3; committed = 3
                         }
+                    }
+                }
+                // 单击图片：没放大就直接退出；放大着的先还原，
+                // 免得刚放大想看细节，手一抖就把整页关了。
+                //
+                // 必须写在双击**之后** —— 顺序反过来，单击会把双击吃掉。
+                .onTapGesture {
+                    guard scale > 1 else {
+                        dismiss()
+                        return
+                    }
+                    withAnimation(.spring(duration: 0.3, bounce: 0.1)) {
+                        scale = 1; committed = 1; offset = .zero; committedOffset = .zero
                     }
                 }
         }

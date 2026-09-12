@@ -59,8 +59,39 @@ enum TicketVisionScanner {
         // 复核页要能把原文摆出来，否则用户只能干瞪眼。
         if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
         page.result = result
-        for ticket in result.tickets { page.images[ticket.id] = image }
+        // 复核页每张票下面贴的那张图，裁到**有字的那一块**再给出去。
+        //
+        // 整张票面上下常有大片空白、底部还有一长条码 —— 原图塞进一个
+        // 132pt 高的预览框里，真正要核对的彩种名、期号、号码球全被压成一条。
+        // 裁掉没信息的边缘之后，同样的框里这些东西能大好几倍。
+        let content = contentCrop(image, fragments: fragments) ?? image
+        for ticket in result.tickets { page.images[ticket.id] = content }
         return page
+    }
+
+    /// 按识别到的文字把图裁到内容区。
+    ///
+    /// Vision 的框是归一化坐标、原点在**左下角**，UIImage 是左上角，
+    /// 所以 y 要翻过来。四周各留一点余量，免得贴着字边切、看着发憋。
+    static func contentCrop(_ image: UIImage, fragments: [TextFragment]) -> UIImage? {
+        guard !fragments.isEmpty, let cgImage = image.cgImage else { return nil }
+        let union = fragments.dropFirst().reduce(fragments[0].box) { $0.union($1.box) }
+        // 几乎占满整张图就没必要裁了，白费一次重绘
+        guard union.width < 0.97 || union.height < 0.94 else { return nil }
+
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+        let padX = width * 0.02
+        let padY = height * 0.02
+        var rect = CGRect(x: union.minX * width - padX,
+                          // 归一化 y 向上，位图 y 向下
+                          y: (1 - union.maxY) * height - padY,
+                          width: union.width * width + padX * 2,
+                          height: union.height * height + padY * 2)
+        rect = rect.intersection(CGRect(x: 0, y: 0, width: width, height: height))
+        guard rect.width > 40, rect.height > 40,
+              let cropped = cgImage.cropping(to: rect) else { return nil }
+        return UIImage(cgImage: cropped, scale: image.scale, orientation: image.imageOrientation)
     }
 
     // MARK: - 文字识别

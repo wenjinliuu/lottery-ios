@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 /// 三个主页面：首页、票夹、设置。
 /// 标签栏用系统原生的液态玻璃，向下滚动时自动收起。
@@ -24,12 +25,15 @@ struct RootView: View {
     @State private var queuedSheet: RootSheet?
     @State private var toast: ToastMessage?
     @State private var celebrationTrigger = 0
+    /// 点开抽屉那一刻的屏幕快照，见 `ScreenBackdrop`。
+    @State private var backdrop: UIImage?
 
-    /// 扫描那个「标签」要**在写进 `selection` 之前**拦下来。
+    /// 点「扫描」时不切页面，只开抽屉。
     ///
-    /// 不能用 `.onChange(of: selection)`：那时候值已经写进去了，想还回去
-    /// 就得在处理器里再写一次，而那次写入会把处理器再触发一遍 ——
-    /// 上一版就是这么把刚弹出来的菜单当场收掉的。
+    /// 注意这里**拦不住**选中态：`role: .search` 的标签一点下去，系统当场就把
+    /// 那一页切上来了，绑定里怎么写都退不回去（试过同步写、异步写两版）。
+    /// 所以那一页的内容是一张点击前的屏幕快照 —— 见 `ScreenBackdrop` 和下面
+    /// 扫描那个 Tab 的注释。这里只负责把抽屉打开。
     private var tabSelection: Binding<MainTab> {
         Binding(
             get: { selection },
@@ -38,21 +42,10 @@ struct RootView: View {
                     selection = newValue
                     return
                 }
-                // **必须在这里同步改一处状态。**
-                //
-                // 系统标签栏为了点起来跟手，会先把选中态切到「扫描」，再回头
-                // 问绑定要结果。它什么时候回读？—— 下一次视图更新的时候。
-                // 上一版把开抽屉推到了下一轮 runloop，于是这一帧里**什么状态
-                // 都没变**，SwiftUI 没有理由重跑 body，绑定也就没人回读：
-                // 「扫描」那一页就这么真的留在了屏幕上，用户看到的是一整片
-                // 画布底色把首页盖住了。
-                //
-                // 同步写 `activeSheet` 就是那个「变一下」：body 立刻重跑，
-                // TabView 回读到 `.home`，选中态当场退回去。
-                //
-                // 当初推迟是为了躲系统 sheet 的背景缩放动画 —— 而抽屉现在是
-                // 自绘的 overlay，那个动画根本不存在了，这条绕路也就没必要了。
                 guard activeSheet == nil else { return }
+                // 先截图，再开抽屉 —— 顺序不能反。
+                // 这一刻屏幕上还是用户刚才看的那一页，晚一步系统就切过去了。
+                backdrop = ScreenBackdrop.capture()
                 activeSheet = .scan
             }
         )
@@ -87,13 +80,20 @@ struct RootView: View {
             // 它不承载页面：选中的那一刻在 `tabSelection` 里就被拦下来了，
             // 所以既不会切页面，也不会弹出搜索框。
             Tab("扫描", systemImage: "camera.viewfinder", value: MainTab.scan, role: .search) {
-                // 这一页永远不会被真正看到，但**不能留成 Color.clear**。
+                // 抽屉开着的时候，这一页**是真的会显示出来的**（拦不住，见
+                // `tabSelection` 的注释）。所以它必须长得和点击前那一页一样 ——
+                // 摆的就是点击那一刻截下来的屏幕。
                 //
-                // 系统标签栏为了点起来跟手，会先把选中值切过来、再去问绑定要
-                // 结果，被退回时已经画过一帧。透明的一帧会直接露出窗口底色，
-                // 隔着半透明抽屉就是一道白闪；铺上和三个页面同样的画布色，
-                // 这一帧和退回后的画面是同一个颜色，看不出来。
-                Palette.canvas.ignoresSafeArea()
+                // 抽屉关掉之后系统会把选中态退回首页，快照也就跟着清掉了。
+                if let backdrop {
+                    Image(uiImage: backdrop)
+                        .resizable()
+                        .scaledToFill()
+                        .ignoresSafeArea()
+                        .accessibilityHidden(true)
+                } else {
+                    Palette.canvas.ignoresSafeArea()
+                }
             }
             // 这个位置在系统眼里仍然是「标签」，读屏会念成标签而不是按钮。
             // 用无障碍标签把它的实际作用说清楚。
@@ -119,7 +119,12 @@ struct RootView: View {
                 // 扫描入口只是选张照片，半屏就够；手动录入一上来就要整套选号盘。
                 sheet == .entry ? .large : .medium
             }, onDismissed: {
-                guard let next = queuedSheet else { return }
+                guard let next = queuedSheet else {
+                    // 抽屉全关完了，快照没用了 —— 留着会在下次点开时
+                    // 先闪一张上一回的旧画面。
+                    backdrop = nil
+                    return
+                }
                 queuedSheet = nil
                 activeSheet = next
             }) { sheet in

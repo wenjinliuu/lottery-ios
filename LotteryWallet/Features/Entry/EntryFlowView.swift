@@ -124,6 +124,8 @@ struct EntryFlowView: View {
                 .padding(.bottom, 20)
             }
             .background(Palette.canvas)
+            .toolbarBackground(Palette.canvas, for: .navigationBar)
+            .toolbarBackgroundVisibility(.visible, for: .navigationBar)
             .navigationTitle("添加彩票")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
