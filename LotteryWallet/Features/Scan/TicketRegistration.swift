@@ -274,7 +274,7 @@ enum TicketRegistration {
 
     /// 号码区在标准矩形里的横向范围：左边界和右边界之间。
     /// 认不出边界就用整块 —— 宁可画宽一点，也不要拿个错的边界去切。
-    private static func zoneColumns(frame: TicketFrame, width: Int) -> ClosedRange<Int> {
+    static func zoneColumns(frame: TicketFrame, width: Int) -> ClosedRange<Int> {
         /// 标准矩形里的 0–1 → 列号。落在矩形外面（边界本来就不在号码区里）
         /// 或者算出个 NaN 的，一律当没算出来 —— `Int(nan)` 是会当场崩的。
         func column(_ value: CGFloat?) -> Int? {

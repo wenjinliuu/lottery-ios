@@ -152,7 +152,7 @@ enum DigitMatrixReader {
     /// 跑两遍：原图一遍、**加了对比度**的一遍，按位置取并集。
     /// 热敏票印在银灰纸上，票面反光、纸还是弯的，原图上有些笔画淡到模型看不见；
     /// 拉一把对比度就出来了。反过来对比度拉过头又会糊掉另一些，所以两遍都要。
-    private static func allDigits(in image: UIImage) async -> [TicketVisionScanner.DigitChar] {
+    static func allDigits(in image: UIImage) async -> [TicketVisionScanner.DigitChar] {
         var kept: [TicketVisionScanner.DigitChar] = []
         var sources = [image]
         if let boosted = TicketVisionScanner.contrastBoosted(image) { sources.append(boosted) }

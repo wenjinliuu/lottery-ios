@@ -42,6 +42,14 @@ enum TicketVisionScanner {
     static func scan(_ image: UIImage) async throws -> ScannedPage {
         var page = ScannedPage()
         let fragments = try await recognizeFragments(in: image)
+        // **配准跑在识别前面。**
+        //
+        // 阶段 2 起，号码是摆到配准后的格子上去认的，所以基准得先定下来。
+        // 阶段 1 时它跑在最后、只画给人看；现在它是号码那条路的入口。
+        let detected = TicketTextParser.detectGame(LayoutSegmenter.lines(fragments))
+        var registration = await TicketRegistration.run(image: image,
+                                                        fragments: fragments,
+                                                        game: detected)
         // **不再做版面切分。**
         //
         // 递归 XY 切分是为「一张照片里几张票」写的，现在一次只认一张，
@@ -54,7 +62,14 @@ enum TicketVisionScanner {
         //
         // 现在整块文本一起交给解析器，同一张纸上连着打两张票的情况
         // 由 `splitBlocks` 按「玩法:」这类票头来切，那是按内容切的，不会误伤。
-        var result = TicketTextParser.parse(await mergedText(image: image, base: fragments))
+        let merged = await mergedText(image: image, base: fragments, frame: registration.frame)
+        // 划出来的格子画到调试图上，盖掉阶段 1 那版"墨迹自己切出来的段" ——
+        // 现在画的是真正拿去认号码的那些格子，位置对不对一眼就看得出来。
+        if let grid = merged.grid, let frame = registration.frame {
+            registration.debug.cells = grid.debugCells(frame: frame)
+            registration.debug.notes.append("号码按配准后的格子读：\(grid.rows.count) 注 × \(grid.columns.count) 位")
+        }
+        var result = TicketTextParser.parse(merged.text)
         if result.tickets.isEmpty {
             // 再放大一遍重试。裁切之后还认不出，多半是原图本身就糊。
             if let bigger = upscaled(image, factor: 1.6),
@@ -74,12 +89,7 @@ enum TicketVisionScanner {
         // 裁掉没信息的边缘之后，同样的框里这些东西能大好几倍。
         let content = contentCrop(image, fragments: fragments) ?? image
         for ticket in result.tickets { page.images[ticket.id] = content }
-        // 配准。放在最后跑，而且**只读不写** —— 它现在不碰任何识别结果，
-        // 所以这一步出什么岔子都不会让一张本来认得出的票变成认不出。
-        page.registration = await TicketRegistration.run(
-            image: image,
-            fragments: fragments,
-            game: result.tickets.first?.game ?? TicketTextParser.detectGame(result.rawText))
+        page.registration = registration
         return page
     }
 
@@ -100,17 +110,29 @@ enum TicketVisionScanner {
     /// 它们的号码印成一个紧密的矩阵，上下的空隙比左右的窄好几倍，
     /// Vision 干脆**按竖列**读 —— 分行结果本身就是错的，基于它修修补补没有意义。
     /// 所以整段交给 `DigitMatrixReader` 按坐标重建。
-    static func mergedText(image: UIImage, base: [TextFragment]) async -> String {
+    static func mergedText(image: UIImage, base: [TextFragment],
+                          frame: TicketFrame? = nil) async -> (text: String, grid: NumberGrid?) {
         let baseRows = LayoutSegmenter.rows(base)
         let originals = baseRows.map(LayoutSegmenter.join)
         // 彩种要先认出来，二次识别的结果才有得校验 —— 见 `isImprovement`。
         let game = TicketTextParser.detectGame(originals.joined(separator: "\n"))
         // 数字型彩种先走矩阵重建。它**整段接管**号码区，因为对这些票来说
         // Vision 的分行结果本身就是错的（它按竖列读），基于它再修修补补没有意义。
-        if let game, let layout = DigitTicketLayout.of(game),
-           let matrix = await DigitMatrixReader.read(image: image, layout: layout,
-                                                     labelBoundary: rowLabelBoundary(base)) {
-            return compose(rows: baseRows, originals: originals, matrix: matrix)
+        if let game, let layout = DigitTicketLayout.of(game) {
+            // 阶段 2：配准成功就走格子那条路 —— 先有格子再去认，
+            // 几何不再是从识别结果里估出来的。
+            if let frame,
+               let reading = await RegisteredDigitReader.read(image: image, frame: frame,
+                                                              layout: layout) {
+                return (compose(rows: baseRows, originals: originals, matrix: reading.matrix),
+                        reading.grid)
+            }
+            // 配准没成功（基准没找到、格子划不齐）就退回老路。
+            // 老路会从识别结果里估几何，没有配准那么稳，但总比什么都不给强。
+            if let matrix = await DigitMatrixReader.read(image: image, layout: layout,
+                                                        labelBoundary: rowLabelBoundary(base)) {
+                return (compose(rows: baseRows, originals: originals, matrix: matrix), nil)
+            }
         }
 
         var result: [String] = []
@@ -129,7 +151,7 @@ enum TicketVisionScanner {
             }
             result.append(graft(prefix: original, digits: better))
         }
-        return result.joined(separator: "\n")
+        return (result.joined(separator: "\n"), nil)
     }
 
     /// 票面左边那一竖排注序号的右边界 —— `①②③④⑤`、`A. B. C.`、3D 的 `组六:`。
