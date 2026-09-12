@@ -537,7 +537,7 @@ extension TicketCard {
             let numbers = key.sections.compactMap { section -> String? in
                 let values = record.ticket[section.key]
                 guard !values.isEmpty else { return nil }
-                return values.map { String(format: section.range.upperBound > 9 ? "%02d" : "%d", $0) }
+                return values.map { String(format: section.padsNumbers ? "%02d" : "%d", $0) }
                     .joined(separator: " ")
             }.joined(separator: " + ")
             return "\(index + 1). \(numbers)"

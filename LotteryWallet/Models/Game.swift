@@ -30,6 +30,16 @@ struct GameSection: Hashable, Sendable, Identifiable {
     /// 数字型号码区（3D、排列3/5、七星彩前六位）：按位取值、允许重复、
     /// 顺序本身有意义，任何时候都不能排序。
     var isPositional: Bool { range.lowerBound == 0 && range.upperBound <= 9 }
+
+    /// 号码要不要补成两位（`03`）。
+    ///
+    /// **判据不是"最大值超过 9"。** 七星彩的特别号取值 0–14，按那条规则会被补零，
+    /// 可是**票面上印的是 `4`、`9`、`2`，只有到了 10 以上才印两位**（`13` `10`）。
+    /// 补了零之后号码球上写着 `04`，和用户手里那张票对不上 —— 核对彩票这件事，
+    /// 屏幕上的样子和票面不一致就是错的。
+    ///
+    /// 双色球、大乐透那些彩种票面印的本来就是 `03`，照补。
+    var padsNumbers: Bool { range.upperBound > 9 && key != .tail }
 }
 
 struct PlayMode: Hashable, Sendable, Identifiable {

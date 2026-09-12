@@ -35,11 +35,19 @@ enum RegisteredDigitReader {
         else { return nil }
 
         let span = TicketRegistration.zoneColumns(frame: frame, width: mask.width)
-        guard let grid = NumberGrid.build(mask: mask, within: span, layout: layout) else {
+        let zone = UIImage(cgImage: zoneImage)
+
+        // 整块号码区认一遍，只认一次。这些字符有两个用处：
+        // 1. 划格子时判断某一列里**有没有数字** —— 注序号那一列没有，
+        //    靠这一条把它和号码列分开（几何上分不开，实测列距 62.5 对 65）
+        // 2. 划完之后按位置落进各自的格子
+        let chars = await DigitMatrixReader.allDigits(in: zone)
+        let centers = chars.map { Double($0.box.midX) * Double(mask.width) }
+        guard let grid = NumberGrid.build(mask: mask, within: span,
+                                          layout: layout, digitCenters: centers) else {
             return nil
         }
 
-        let zone = UIImage(cgImage: zoneImage)
         var values = [[Int?]](repeating: [Int?](repeating: nil, count: layout.columns),
                               count: grid.rows.count)
 
@@ -48,7 +56,7 @@ enum RegisteredDigitReader {
         // 不逐格去认是因为太贵 —— 5 注 × 7 位 × 几个放大倍数，一张票要跑
         // 上百次 Vision。整块认一遍再分配，效果一样而且快得多；
         // 「这个数字属于哪一格」依然是**按位置**定的，不是按顺序猜的。
-        for (cell, digits) in await bucket(zone: zone, grid: grid) {
+        for (cell, digits) in bucket(chars, grid: grid) {
             guard values.indices.contains(cell.row),
                   values[cell.row].indices.contains(cell.column) else { continue }
             let maximum = cell.column == layout.columns - 1 ? layout.trailingMaximum : 9
@@ -89,13 +97,14 @@ enum RegisteredDigitReader {
         var column: Int
     }
 
-    /// 整块号码区认一遍，每个数字按**中心落在哪一格**归位。
+    /// 每个数字按**中心落在哪一格**归位。
     ///
     /// 归位靠的是坐标，不是顺序 —— 少认一个字符只会让那一格空着，
     /// 不会让整行往前挪一位（那正是「每注前面凭空多个 0」的老毛病）。
-    static func bucket(zone: UIImage, grid: NumberGrid) async -> [(Cell, [Int])] {
+    static func bucket(_ chars: [TicketVisionScanner.DigitChar],
+                       grid: NumberGrid) -> [(Cell, [Int])] {
         var buckets: [Cell: [(x: CGFloat, value: Int)]] = [:]
-        for char in await DigitMatrixReader.allDigits(in: zone) {
+        for char in chars {
             // Vision 的 y 向上为正，翻成左上原点再和格子比
             let x = char.box.midX
             let y = 1 - char.box.midY

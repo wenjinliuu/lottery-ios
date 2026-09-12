@@ -66,7 +66,7 @@ enum TicketPreviewBuilder {
             let selection = selections[section.key] ?? SectionSelection()
             let need = game.pickCount(for: section, playMode: playMode)
             let base = prefix(game, section.key).isEmpty ? section.label : prefix(game, section.key)
-            let padded = section.range.upperBound > 9
+            let padded = section.padsNumbers
 
             // 只选一个号的区（双色球蓝球）留不出拖码，票面上永远写「蓝单／蓝复」。
             if mode == .dantuo, need > 1 {
@@ -113,7 +113,7 @@ enum TicketPreviewBuilder {
                                   guard !values.isEmpty else { return nil }
                                   return TicketPreview.Group(color: section.color,
                                                              values: section.isPositional ? values : values.sorted(),
-                                                             padded: section.range.upperBound > 9)
+                                                             padded: section.padsNumbers)
                               })
         }
         return TicketPreview(title: "\(game.label)-单式 · \(lines.count) 注", rows: rows)

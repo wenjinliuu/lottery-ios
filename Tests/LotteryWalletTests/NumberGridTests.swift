@@ -143,6 +143,111 @@ final class NumberGridTests: XCTestCase {
         XCTAssertEqual(grid?.columns.count, 7)
     }
 
+    // MARK: - 真机上栽过的三个跟头
+
+    /// **七星彩的特别号那一列是右对齐的：两位数的十位往左探出去。**
+    ///
+    /// 五注里三注是一位数、两注是两位数，列位取中位数的话就落在个位那一段上，
+    /// 十位的 `1` 落在列外面被丢掉 —— `13` 读成 `3`、`10` 读成 `0`。
+    /// build 32/33/34 和阶段 2 第一版都栽在这儿。这一列只能取并集。
+    func testTrailingColumnCoversTheTensDigit() {
+        let zone = Zone(width: width, height: height)
+        var centers: [Double] = []
+        let tails = [13, 4, 9, 10, 2]
+        for row in 0..<5 {
+            let top = 20 + row * 41
+            for column in 0..<6 {
+                let left = 60 + column * 76
+                zone.fill(x: left..<(left + 21), y: top..<(top + 29))
+                centers.append(Double(left) + 10.5)
+            }
+            if tails[row] >= 10 {
+                // 十位的 `1` 又窄又靠左
+                zone.fill(x: 496..<503, y: top..<(top + 29))
+                centers.append(499.5)
+            }
+            zone.fill(x: 516..<537, y: top..<(top + 29))
+            centers.append(526.5)
+        }
+        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...(width - 1),
+                                          layout: layout, digitCenters: centers) else {
+            return XCTFail("格子应该划得出来")
+        }
+        XCTAssertEqual(grid.rows.count, 5)
+        XCTAssertEqual(grid.columns.count, 7)
+        let last = grid.columns[6]
+        XCTAssertLessThanOrEqual(last.lowerBound * CGFloat(width), 497, "末列要容得下十位")
+        XCTAssertGreaterThanOrEqual(last.upperBound * CGFloat(width), 536, "也要容得下个位")
+    }
+
+    /// **注序号那一列不是号码列。**
+    ///
+    /// 实测它和第一位号码的列距（62.5）和号码之间的列距（65）几乎一样，
+    /// 几何上分不开 —— 只能靠「这一列里一个数字字符都没有」来判。
+    /// `①` 是带圈的，`plainDigitValue` 不认它当数字，正好用上。
+    func testLabelColumnIsTrimmed() {
+        let three = DigitTicketLayout(columns: 3, trailingPitch: 1, trailingMaximum: 9)
+        let zone = Zone(width: width, height: height)
+        var centers: [Double] = []
+        for row in 0..<3 {
+            let top = 20 + row * 36
+            zone.fill(x: 10..<31, y: top..<(top + 24))          // ① —— 不是数字
+            for column in 0..<3 {
+                let left = 93 + column * 40
+                zone.fill(x: left..<(left + 15), y: top..<(top + 24))
+                centers.append(Double(left) + 7.5)
+            }
+        }
+        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...(width - 1),
+                                          layout: three, digitCenters: centers) else {
+            return XCTFail("格子应该划得出来")
+        }
+        XCTAssertEqual(grid.rows.count, 3)
+        XCTAssertEqual(grid.columns.count, 3)
+        XCTAssertGreaterThan(grid.columns[0].lowerBound * CGFloat(width), 80, "注序号那一列裁掉了")
+    }
+
+    /// **行尾的倍数 `(N)` 不是号码。**
+    ///
+    /// 这就是文档里那个「福彩 3D 的矩阵路径从来没跑起来过」的老 bug：
+    /// `(1)` 里的 `1` 被当成第 4 个号码。
+    ///
+    /// 判据是实测的列距关系：`(N)` 离号码 **2.7 个列距**，
+    /// 而七星彩的特别号（离得最远的号码）也才 **1.58 个列距** —— 拿 1.8 当界。
+    func testMultiplierColumnIsTrimmed() {
+        let three = DigitTicketLayout(columns: 3, trailingPitch: 1, trailingMaximum: 9)
+        let zone = Zone(width: width, height: height)
+        var centers: [Double] = []
+        for row in 0..<3 {
+            let top = 20 + row * 36
+            for column in 0..<3 {
+                let left = 93 + column * 40
+                zone.fill(x: left..<(left + 15), y: top..<(top + 24))
+                centers.append(Double(left) + 7.5)
+            }
+            // `(1)` 在 2.7 个列距开外，里面那个 `1` 是**真数字**，
+            // 所以挡不住它的只能是距离
+            zone.fill(x: 295..<329, y: top..<(top + 24))
+            centers.append(312)
+        }
+        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...(width - 1),
+                                          layout: three, digitCenters: centers) else {
+            return XCTFail("格子应该划得出来")
+        }
+        XCTAssertEqual(grid.rows.count, 3)
+        XCTAssertEqual(grid.columns.count, 3)
+        XCTAssertLessThan(grid.columns[2].upperBound * CGFloat(width), 200, "倍数那一列裁掉了")
+    }
+
+    /// 两位数的两个数字要合成一段 —— 它们挨得比号码之间近得多。
+    ///
+    /// 实测：号码之间空 55px，`13` 里的 `1` 和 `3` 只空 14px，字宽 21px。
+    func testAdjacentDigitsMergeIntoOneNumber() {
+        let merged = NumberGrid.merging([60...81, 136...157, 496...503, 517...538])
+        XCTAssertEqual(merged.count, 3, "十位和个位合成一段")
+        XCTAssertEqual(merged[2], 496...538)
+    }
+
     /// 空白的号码区划不出格子，要老实返回 nil ——
     /// 硬约束二：摆不上栅格宁可整个作废，绝不允许错位。
     func testBlankZoneRefuses() {

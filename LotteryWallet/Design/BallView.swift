@@ -143,7 +143,7 @@ private func flatten(sections: [GameSection],
             let hit = index < flags.count && flags[index]
             items.append(BallItem(id: items.count, value: value, color: section.color,
                                   isHit: hit, isDimmed: dimUnmatched && !hit,
-                                  padded: section.range.upperBound > 9,
+                                  padded: section.padsNumbers,
                                   leadingGap: index == 0 ? gap : 0, overflow: 0))
         }
         let hidden = all.count - shown.count

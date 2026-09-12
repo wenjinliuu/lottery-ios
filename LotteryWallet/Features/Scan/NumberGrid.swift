@@ -43,9 +43,36 @@ struct NumberGrid: Equatable {
         }
     }
 
+    /// 挨得很近的两段合成一段 —— 那是**同一个号码的两位数字**。
+    ///
+    /// 实测（七星彩）：号码之间空 55px，而 `13` 里的 `1` 和 `3` 只空 14px，
+    /// 字宽 21px。所以判据是「间隙小于一个字宽就是同一个号码」。
+    ///
+    /// 不合的话，两位数的特别号会占掉两段，整行段数多出一段、
+    /// 和别的行对不齐，那一注就被判掉了。
+    static func merging(_ segments: [ClosedRange<Int>]) -> [ClosedRange<Int>] {
+        guard segments.count > 1 else { return segments }
+        let widths = segments.map { Double($0.upperBound - $0.lowerBound + 1) }
+        let glyph = Swift.max(median(widths), 2)
+        var out: [ClosedRange<Int>] = [segments[0]]
+        for segment in segments.dropFirst() {
+            let previous = out[out.count - 1]
+            if Double(segment.lowerBound - previous.upperBound) <= glyph {
+                out[out.count - 1] = previous.lowerBound...segment.upperBound
+            } else {
+                out.append(segment)
+            }
+        }
+        return out
+    }
+
     /// 把配准后的号码区切成一条条候选行。
     ///
     /// 行的墨量下限取号码区宽度的 5% —— 和 `measure.py` 量行距时用的是同一个数。
+    ///
+    /// 段数允许**比号码位数多两列**：票面上号码左边常常还杵着注序号
+    /// （`①②③` / `组六:`），右边还杵着倍数 `(N)`。它们该不该算，
+    /// 由 `trimming` 按实测的列距关系去判，不在这里瞎猜。
     static func candidates(in mask: InkMask,
                            within span: ClosedRange<Int>,
                            columns: Int) -> [Candidate] {
@@ -57,11 +84,11 @@ struct NumberGrid: Equatable {
             // 一两个像素高的是噪点，不是一行字
             guard band.upperBound - band.lowerBound + 1 >= 3 else { continue }
             let runs = InkMask.runs(mask.columnProfile(rows: band, columns: span), above: 0)
-            let segments = runs.map {
+            let segments = merging(runs.map {
                 (span.lowerBound + $0.lowerBound)...(span.lowerBound + $0.upperBound)
-            }
-            // 段数不对的直接不要：虚线一行几十段，中文那行三五段
-            guard segments.count <= columns,
+            })
+            // 段数离谱的直接不要：虚线一行几十段，中文那行两三段
+            guard segments.count <= columns + 2,
                   segments.count >= Swift.max(1, columns - 2) else { continue }
             found.append(Candidate(band: band, segments: segments))
         }
@@ -118,6 +145,61 @@ struct NumberGrid: Equatable {
         return ranges
     }
 
+    /// 号码区两边多出来的那些列，裁掉。
+    ///
+    /// 票面上号码左右常常还杵着两样东西，它们都会被切成一列：
+    ///
+    /// - **左边：注序号 / 玩法标签**（`①②③`、`组六:`）。实测它和第一位号码的
+    ///   列距和号码之间的列距几乎一样（62.5 对 65），**几何上分不开** ——
+    ///   所以靠内容判：这一列里一个数字字符都没有。`①` 是带圈的，
+    ///   Vision 认得出但 `plainDigitValue` 不认它当数字，正好用上。
+    /// - **右边：倍数 `(N)`**。它离号码远得多 —— 实测福彩 3D 是 **2.7 个列距**，
+    ///   而七星彩的特别号（离得最远的一个号码）也才 **1.58 个列距**。
+    ///   这两个数中间有很大余量，拿 1.8 当界一刀切下去两边都安全。
+    ///
+    /// 裁不动就返回 nil，整个矩阵作废 —— 硬约束二。
+    /// 返回**保留下来的那段下标**。只从两头裁，所以留下的一定是连续的一段 ——
+    /// 拿着这段下标，后面还能回到原来那几行里去取并集。
+    static func trimming(_ ranges: [ClosedRange<Int>],
+                         columns: Int,
+                         digitCenters: [Double]) -> ClosedRange<Int>? {
+        guard ranges.count >= columns, columns > 0 else { return nil }
+        var first = 0
+        var last = ranges.count - 1
+        while last - first + 1 > columns {
+            let kept = Array(ranges[first...last])
+            let centers = kept.map { Double($0.lowerBound + $0.upperBound) / 2 }
+            let gaps = zip(centers, centers.dropFirst()).map { $1 - $0 }
+            guard let lastGap = gaps.last, gaps.count >= 2 else { return nil }
+            let typical = median(Array(gaps.dropLast()))
+            if typical > 0, lastGap > typical * 1.8 {
+                last -= 1
+                continue
+            }
+            // 最左边那一列里一个数字都没有 —— 那是注序号 / 玩法标签
+            let head = ranges[first]
+            let hasDigit = digitCenters.contains {
+                Double(head.lowerBound) <= $0 && $0 <= Double(head.upperBound)
+            }
+            guard !hasDigit else { return nil }
+            first += 1
+        }
+        return first...last
+    }
+
+    /// 某一列取**并集**，不取中位数。
+    ///
+    /// 七星彩的特别号那一列是**右对齐**的：`13` 的十位往左探出去，
+    /// 而 `4` `9` `2` 不探。五行里三行是一位数，中位数就落在个位那一段上 ——
+    /// 十位的 `1` 落在列外面，直接被丢掉，`13` 就读成了 `3`。
+    /// 这一列只能取并集：只要有一行印了两位，这一列就得容得下两位。
+    static func unionRange(_ rows: [Candidate], at index: Int) -> ClosedRange<Int>? {
+        let picked = rows.compactMap { $0.segments.indices.contains(index) ? $0.segments[index] : nil }
+        guard let low = picked.map(\.lowerBound).min(),
+              let high = picked.map(\.upperBound).max(), high >= low else { return nil }
+        return low...high
+    }
+
     /// 缺的那一列按版式**算**出来，不去找。
     ///
     /// 七星彩的特别号印得比别的号码远（实测 1.58 个列距），而且整列可能
@@ -146,30 +228,61 @@ struct NumberGrid: Equatable {
     /// 依然一段一列对得上 —— 这样的行要留下来，那一格标问号。
     /// 整行丢掉的话，用户手里五注的票在票夹里变成四注，而且**看不出少在哪儿**。
     static func fits(_ candidate: Candidate, _ ranges: [ClosedRange<Int>]) -> Bool {
-        guard !candidate.segments.isEmpty, !ranges.isEmpty else { return false }
+        guard !candidate.segments.isEmpty,
+              let leftmost = ranges.first, let rightmost = ranges.last else { return false }
         let widths = ranges.map { Double($0.upperBound - $0.lowerBound + 1) }
         let tolerance = Swift.max(median(widths) * 0.6, 2)
         var used = Set<Int>()
+        var landed = 0
         for center in candidate.centers {
-            guard let index = ranges.firstIndex(where: {
+            if let index = ranges.firstIndex(where: {
                 Double($0.lowerBound) - tolerance <= center
                     && center <= Double($0.upperBound) + tolerance
-            }) else { return false }
-            guard used.insert(index).inserted else { return false }
+            }) {
+                // 两段挤进同一列 = 这一行的排版和号码矩阵对不上
+                guard used.insert(index).inserted else { return false }
+                landed += 1
+                continue
+            }
+            // 落在号码区**外面**的那些段是注序号和倍数 `(N)` —— 它们本来就不算号码。
+            // 但落在号码区**里面**却不在任何一列上的，说明这行根本不是投注行。
+            let outside = center < Double(leftmost.lowerBound) - tolerance
+                || center > Double(rightmost.upperBound) + tolerance
+            guard outside else { return false }
         }
-        return true
+        // 落进来的位数太少就不是一注 —— 允许缺一两位（那几格标问号），
+        // 但不能只落一两位就当成一注
+        return landed >= Swift.max(1, ranges.count - 2)
     }
 
     /// 划格子。`span` 是号码区在配准图里的横向范围（左边界到右边界）。
     static func build(mask: InkMask,
                       within span: ClosedRange<Int>,
-                      layout: DigitTicketLayout) -> NumberGrid? {
+                      layout: DigitTicketLayout,
+                      digitCenters: [Double] = []) -> NumberGrid? {
         guard mask.width > 0, mask.height > 0 else { return nil }
         let all = candidates(in: mask, within: span, columns: layout.columns)
         // 先用"互相对得齐"的那几行把列位定下来
         let consensus = betRows(all, columns: layout.columns)
         guard !consensus.isEmpty else { return nil }
         guard var ranges = columnRanges(consensus) else { return nil }
+
+        // 号码左右多出来的列（注序号、倍数）裁掉
+        if ranges.count > layout.columns {
+            guard let kept = trimming(ranges, columns: layout.columns,
+                                      digitCenters: digitCenters) else { return nil }
+            // 两位数的那一列要取并集（见 `unionRange`）。裁完才知道哪一列是
+            // 真正的末列 —— 倍数列在右边，不裁掉的话会union错人。
+            if layout.trailingMaximum > 9,
+               let union = unionRange(consensus, at: kept.upperBound) {
+                ranges[kept.upperBound] = union
+            }
+            ranges = kept.map { ranges[$0] }
+        } else if layout.trailingMaximum > 9, ranges.count == layout.columns,
+                  let union = unionRange(consensus, at: ranges.count - 1) {
+            ranges[ranges.count - 1] = union
+        }
+
         if ranges.count == layout.columns - 1 {
             guard let filled = appendingTrailing(ranges, layout: layout,
                                                  limit: mask.width - 1) else { return nil }

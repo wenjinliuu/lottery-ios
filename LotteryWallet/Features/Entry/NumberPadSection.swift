@@ -106,7 +106,7 @@ struct NumberPadSection: View {
                              size: ballSize,
                              isHit: isDan,
                              isHollow: !isSelected,
-                             padded: section.range.upperBound > 9)
+                             padded: section.padsNumbers)
                 }
                 .buttonStyle(.plain)
                 .overlay(alignment: .topTrailing) {
