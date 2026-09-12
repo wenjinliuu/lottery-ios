@@ -289,11 +289,6 @@ struct TicketCard: Identifiable, Hashable {
         let matched: [SectionKey: [Bool]]
         let prizeAmount: Double
         let status: RecordStatus
-        /// 这一注自己的玩法名（组三 / 组六 / 单选 / 选八）。没有就留空。
-        ///
-        /// 3D 和排列3 一张票上每一注可以是不同玩法，票面就是这么打的 ——
-        /// 卡片上也该照样标出来，用「1. 2. 3.」代替就把最要紧的信息抹掉了。
-        let playLabel: String
         /// 这一注是否已经核对过 —— 也就是**有没有命中标记可以拿来渲染**。
         ///
         /// 导入恢复的老票状态是 won / lost，命中标记却是空的，
@@ -326,6 +321,17 @@ struct TicketCard: Identifiable, Hashable {
     let isNewResult: Bool
 
     var netProfit: Double { prize - cost }
+
+    /// 把历史上各种写法的 `entryLabel` 折成票面用词。
+    ///
+    /// 老记录里存的可能是录入方式（扫描 / 手选）或者录入页的用词（普通），
+    /// 票面上一律叫「单式」。
+    static func shapeLabel(_ raw: String, addOn: Bool) -> String {
+        switch raw {
+        case "复式", "胆拖": return raw
+        default: return "单式"
+        }
+    }
 
     /// 快照时最多留几注。收起看 5 注、展开看 50 注，再多也不画。
     static let lineLimit = 50
@@ -388,8 +394,13 @@ extension TicketCard {
         targetStatus = first?.targetStatus ?? .confirmed
         multiple = batch.multiple
         entryLabel = batch.entryLabel
-        playLabel = batch.game.playLabel(playMode: first?.playMode ?? "",
-                                         addOn: first?.ticket.addOn ?? false)
+        // 票面那句话，比如「组选单式」「选八单式」「追加单式」。
+        // 玩法取**整张票里所有注**的集合 —— 3D 和排列3 一张票上可以混玩法，
+        // 只看第一注会把「组选」说成「组六」。
+        playLabel = batch.game.ticketLabel(
+            modes: Set(records.map(\.playMode)),
+            shape: TicketCard.shapeLabel(batch.entryLabel, addOn: first?.ticket.addOn ?? false)
+        )
         count = records.count
         createdAt = batch.createdAt
         // 整张票里只要还有一注的结果没被看过，这张票就还算「新结果」。
@@ -412,7 +423,6 @@ extension TicketCard {
                  matched: record.matched,
                  prizeAmount: record.prizeAmount,
                  status: record.status,
-                 playLabel: key.lineLabel(playMode: record.playMode),
                  hasResult: !record.matched.isEmpty)
         }
 

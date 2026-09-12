@@ -128,8 +128,8 @@ struct WalletTicketCard: View {
         TicketMetaText(items: [
             "\(card.count) 注",
             card.multiple > 1 ? "\(card.multiple) 倍" : "",
+            // playLabel 已经是「组选单式」这种完整写法，entryLabel 再列一遍就是重复
             card.playLabel,
-            card.entryLabel,
             "投入 \(MoneyText.format(card.cost))"
         ])
         .padding(.top, 8)
@@ -155,17 +155,17 @@ struct WalletTicketCard: View {
 
     private func lineRow(index: Int, line: TicketCard.Line) -> some View {
         HStack(spacing: 9) {
-            // 3D / 排列3 一张票上每一注可以是不同玩法，票面就是这么打的
-            // （组六 / 组六 / 组三 / 单选…），卡片上也要照样标出来 ——
-            // 用「1. 2. 3.」代替就把这一注最要紧的信息抹掉了。
-            // 其余彩种整票一个玩法，仍然显示注序号。
-            Text(line.playLabel.isEmpty ? "\(index + 1)" : line.playLabel)
-                .font(.caption2.weight(line.playLabel.isEmpty ? .medium : .semibold))
+            // 每一注前面就是序号，和实体票面一致。
+            //
+            // 曾经在这里标过玩法（组三/组六/单选）—— 但真实票面**并没有**
+            // 逐注印玩法，它只在票头写「组选单式票」。界面要跟票面统一，
+            // 玩法挪到卡片头部去标。底层每一注仍然各自带着自己的玩法，
+            // 核对走的是那份数据，不受显示影响。
+            Text("\(index + 1)")
+                .font(.caption2.weight(.medium))
                 .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .foregroundStyle(line.playLabel.isEmpty ? Color.secondary : game.tint)
-                .frame(width: line.playLabel.isEmpty ? 20 : 30)
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
 
             TicketNumbersSnapshotView(
                 game: game,

@@ -83,36 +83,83 @@ enum TicketVisionScanner {
     /// 非号码行（彩种名、玩法、期号、金额）仍然用中文那一遍的结果。
     static func mergedText(image: UIImage, base: [TextFragment]) async -> String {
         let baseRows = LayoutSegmenter.rows(base)
-        guard let upscaled = upscale(image, factor: 2),
-              let digitFragments = try? await recognizeFragments(in: upscaled, languages: ["en-US"]) else {
-            return LayoutSegmenter.lines(base)
-        }
-        let digitRows = LayoutSegmenter.rows(digitFragments)
-
-        return baseRows.map { row -> String in
+        var result: [String] = []
+        for row in baseRows {
             let original = LayoutSegmenter.join(row)
-            guard looksLikeNumberRow(original) else { return original }
+            guard looksLikeNumberRow(original) else {
+                result.append(original)
+                continue
+            }
             let band = LayoutSegmenter.band(row)
-            // 放大不改变归一化坐标，所以两遍的纵向位置可以直接比
-            let overlapping = digitRows.filter { LayoutSegmenter.band($0).overlaps(band) }
-            guard let better = overlapping
-                .map(LayoutSegmenter.join)
-                .max(by: { digitCount($0) < digitCount($1) }),
-                digitCount(better) > digitCount(original) else { return original }
-            return graft(prefix: original, digits: better)
+            let better = await bestDigitReading(image: image, band: band)
+            guard let better, digitCount(better) > digitCount(original) else {
+                result.append(original)
+                continue
+            }
+            result.append(graft(prefix: original, digits: better))
         }
-        .joined(separator: "\n")
+        return result.joined(separator: "\n")
     }
 
-    /// 这一行看着像不像一排号码：数字占了绝大多数。
+    /// 把这一行**单独裁出来**再识别一遍。
     ///
-    /// 判松了会把「开奖期:2026091 26-04-11 合计10元」也送去数字识别 ——
-    /// 那一行恰恰需要中文才能读出「合计」和「开奖期」。
+    /// 这是精度上最大的一个杠杆。整张票一起送进 Vision 时，一行里那几个
+    /// 间距很宽的个位数在整幅画面里只占很小一块，模型既要处理中文标题、
+    /// 又要处理条码和一长串机号，孤立的数字最容易被丢掉 ——
+    /// `8 4 4 1 5` 认成 `8 4 1`、`3 6 7` 认成 `3 6` 都是这么来的。
+    ///
+    /// 裁成一条窄带之后，这一行就占满了整幅输入：字被放大好几倍，
+    /// 周围也没有别的东西来抢注意力。再挂上只认英数的模型，
+    /// 中文识别那套「把宽间距当排版空白」的倾向也一并避开了。
+    private static func bestDigitReading(image: UIImage, band: ClosedRange<CGFloat>) async -> String? {
+        guard let cgImage = image.cgImage else { return nil }
+        let height = CGFloat(cgImage.height)
+        // 上下各留半行余量，免得贴着字边切，笔画被削掉反而更难认
+        let pad = Swift.max((band.upperBound - band.lowerBound) * 0.45, 0.004)
+        // Vision 的 y 向上为正，位图向下，所以要翻过来
+        let top = (1 - Swift.min(band.upperBound + pad, 1)) * height
+        let bottom = (1 - Swift.max(band.lowerBound - pad, 0)) * height
+        let rect = CGRect(x: 0, y: top, width: CGFloat(cgImage.width), height: bottom - top)
+            .intersection(CGRect(x: 0, y: 0, width: CGFloat(cgImage.width), height: height))
+        guard rect.height > 8, let strip = cgImage.cropping(to: rect) else { return nil }
+
+        var candidates: [String] = []
+        // 一条窄带很小，放大三倍也不贵；两个倍数各试一次，取数字多的那个。
+        for factor in [3.0, 5.0] as [CGFloat] {
+            let slice = UIImage(cgImage: strip, scale: 1, orientation: .up)
+            guard let big = upscale(slice, factor: factor),
+                  let fragments = try? await recognizeFragments(in: big, languages: ["en-US"]) else { continue }
+            candidates.append(LayoutSegmenter.lines(fragments).replacingOccurrences(of: "\n", with: " "))
+        }
+        return candidates.max { digitCount($0) < digitCount($1) }
+    }
+
+    /// 这一行是不是一排号码。
+    ///
+    /// **不能按"数字占比"判。** 上一版就是这么判的，两头都错：
+    ///
+    /// - 「第26088期 2026年04月08日开奖」去掉空白后数字占 61%，被当成号码行，
+    ///   于是拿旁边票号行的内容覆盖掉了它 —— 排列3 从此读不到期号。
+    /// - 「组六: U 7」数字只占 20%，被当成不是号码行，于是**恰恰最需要**
+    ///   二次识别的那一行被跳过了。
+    ///
+    /// 正确的判据是结构：摘掉行首的标签（`A.`、`①`、`组六:`）之后，
+    /// 剩下的部分**一个汉字都不能有**。号码行天生满足，
+    /// 而期号行、合计行、销售期行的汉字都夹在数字中间，天生不满足。
     static func looksLikeNumberRow(_ text: String) -> Bool {
-        let meaningful = text.filter { !$0.isWhitespace }
-        guard meaningful.count >= 3 else { return false }
-        let digits = meaningful.filter(\.isNumber).count
-        return Double(digits) / Double(meaningful.count) >= 0.6
+        let body = text.replacingOccurrences(of: Self.rowLabelPrefix,
+                                             with: "", options: .regularExpression)
+        guard body.contains(where: { $0.isNumber }) else { return false }
+        return !body.contains(where: isHan)
+    }
+
+    /// 号码行行首允许出现的标签。
+    private static let rowLabelPrefix =
+        "^\\s*(?:组[六三选]|单选|直选|[A-Ea-e\\u{0410}-\\u{0415}]\\s*[.。·:、)]|[①-⑮]|[(（]\\s*\\d{1,2}\\s*[)）])\\s*[:：]?\\s*"
+
+    private static func isHan(_ character: Character) -> Bool {
+        guard let scalar = character.unicodeScalars.first else { return false }
+        return (0x4E00...0x9FFF).contains(scalar.value)
     }
 
     private static func digitCount(_ text: String) -> Int {

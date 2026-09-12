@@ -134,22 +134,46 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     ///
     /// 大乐透的「追加」原来在票夹里完全看不见 —— 票面只显示录入方式
     /// （随机/普通/复式/胆拖），玩法字段虽然存了却没有任何地方读它。
-    /// 票夹卡片上每一注前面标的玩法。
+    /// 票面头部那个完整的玩法标签：`组选单式` / `直选单式` / `选八单式` / `追加单式`。
     ///
-    /// 只有「同一张票上每一注可以不一样」的彩种才需要 —— 也就是 3D 和排列3。
-    /// 其余彩种整票一个玩法，标在卡片头部就够了，每行再重复一遍是噪声。
-    func lineLabel(playMode: String) -> String {
-        guard self == .fc3d || self == .pl3 else { return "" }
-        return playLabel(playMode: playMode, addOn: false)
+    /// 要和实体票面写的一字不差 —— 用户核对时是拿票面对着看的。
+    /// `modes` 是这张票里每一注的玩法（3D 和排列3 可以混），
+    /// `shape` 是票型（单式 / 复式 / 胆拖），两段拼起来才是票面那句话。
+    func ticketLabel(modes: Set<String>, shape: String) -> String {
+        let play = headPlayLabel(modes: modes)
+        return play.isEmpty ? shape : play + shape
     }
 
-    func playLabel(playMode: String, addOn: Bool) -> String {
+    /// 票头该写哪种玩法。
+    private func headPlayLabel(modes: Set<String>) -> String {
+        let known = modes.filter { !$0.isEmpty }
+        switch self {
+        case .pl3:
+            // 排列3 票面只分「直选」和「组选」，组三/组六 是组选里按号码再分的
+            if known.contains("group3") || known.contains("group6") { return "组选" }
+            return known.contains("single") ? "直选" : ""
+        case .fc3d:
+            // 3D 票面逐注印玩法，票头只写「单式」，所以这里不重复
+            return ""
+        case .k8:
+            guard known.count == 1, let mode = known.first, let count = Int(mode) else { return "" }
+            return "选\(ChineseNumber.text(count))"
+        case .dlt:
+            return known.contains("add") ? "追加" : ""
+        default:
+            return ""
+        }
+    }
+
+    /// 3D 票面上印的是「单选」，排列3 印的是「直选」—— 同一个玩法两家叫法不同，
+    /// 显示要跟着各自的票面走。
+    func playLabel(playMode: String, addOn: Bool) -> String {    func playLabel(playMode: String, addOn: Bool) -> String {
         switch self {
         case .dlt: return addOn ? "追加" : "普通"
         case .k8: return Int(playMode).map { "选\(ChineseNumber.text($0))" } ?? ""
         case .fc3d, .pl3:
             switch playMode {
-            case "single": return "直选"
+            case "single": return self == .fc3d ? "单选" : "直选"
             case "group3": return "组三"
             case "group6": return "组六"
             default: return ""

@@ -488,17 +488,12 @@ struct TicketScanView: View {
                         zoneEditorTarget = ZoneEditorTarget(ticketID: ticket.id, lineIndex: index)
                     } label: {
                         HStack(alignment: .top, spacing: 8) {
-                            // 3D / 排列3 每一注的玩法各不相同，复核时这一格
-                            // 比注序号有用得多 —— 用户要核的正是「这注是组三还是组六」。
-                            let mode = ticket.lineModes.indices.contains(index)
-                                ? ticket.game.lineLabel(playMode: ticket.lineModes[index]) : ""
-                            Text(mode.isEmpty ? "\(index + 1)." : mode)
+                            // 序号，和票面一致。玩法标在这张票的头部。
+                            Text("\(index + 1).")
                                 .font(.caption.weight(.bold))
                                 .monospacedDigit()
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-                                .foregroundStyle(mode.isEmpty ? Color.secondary : ticket.game.tint)
-                                .frame(width: mode.isEmpty ? 24 : 34, alignment: .leading)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24, alignment: .leading)
                                 .padding(.top, 3)
                             TicketNumbersSnapshotView(game: ticket.game, numbers: numbers.values, size: 26)
                             Spacer(minLength: 0)
@@ -816,9 +811,12 @@ struct TicketScanView: View {
                             }
                             return ticket.playMode
                         }()
+                        // entryLabel 存的是**票型**（单式 / 复式 / 胆拖），
+                        // 不是录入方式 —— 票夹卡片上要拼成票面那句话
+                        // 「组选单式」「选八单式」，而「扫描」两个字对核对毫无帮助。
                         var item = Ticket(numbers: numbers,
                                           playMode: mode,
-                                          entryLabel: EntryKind.scan.label)
+                                          entryLabel: ticket.play.label)
                         item.addOn = ticket.addOn
                         if ticket.game == .k8, let count = Int(mode) { item.playCount = count }
                         return item
