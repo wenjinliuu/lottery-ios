@@ -485,20 +485,24 @@ final class UnknownDigitPlumbingTests: XCTestCase {
 
     /// 票面版式：全是比值，一个像素数都没有。
     ///
-    /// 三张真票逐像素量出来的：七星彩 列距÷字宽 3.62、排列5 3.74、排列3 3.43；
-    /// 七星彩的特别号偏移 1.58 个列距。两家不同的打票机比值几乎一样，
-    /// 说明这是**印刷版式**决定的，可以当先验用。
-    func testLayoutOnlyCoversDigitGames() {
+    /// 真票逐像素量出来的：七星彩 列距÷字宽 3.62、排列5 3.74、排列3 3.43、
+    /// 大乐透 1.61；七星彩的特别号偏 1.58 个列距，大乐透的后区偏 2.34。
+    /// 不同的打票机比值几乎一样，说明这是**印刷版式**决定的，可以当先验用。
+    func testLayoutCoversTheMatrixGames() {
         XCTAssertEqual(DigitTicketLayout.of(.pl3)?.columns, 3)
         XCTAssertEqual(DigitTicketLayout.of(.fc3d)?.columns, 3)
         XCTAssertEqual(DigitTicketLayout.of(.pl5)?.columns, 5)
         XCTAssertEqual(DigitTicketLayout.of(.qxc)?.columns, 7)
-        // 七乐彩、快乐8 印的是正常行距的两位数，双色球、大乐透还带分隔符 ——
-        // 它们的行 Vision 横着读得好好的，不该按矩阵去拆。
+        // 大乐透也是矩阵排版（阶段 4）：前区 5 + 后区 2，中间印一个 `+`
+        XCTAssertEqual(DigitTicketLayout.of(.dlt)?.columns, 7)
+
+        // 七乐彩、快乐8 印的是一长排两位数，Vision 横着读得好好的，
+        // 不该按矩阵去拆。
         XCTAssertNil(DigitTicketLayout.of(.qlc))
         XCTAssertNil(DigitTicketLayout.of(.k8))
+        // 双色球红蓝之间隔几个列距**还没量过**。按项目约定，
+        // 没拿真票量过就不写它的版式 —— 猜出来的比值比没有更危险。
         XCTAssertNil(DigitTicketLayout.of(.ssq))
-        XCTAssertNil(DigitTicketLayout.of(.dlt))
     }
 
     /// 只有七星彩的最后一列印成两位数。
