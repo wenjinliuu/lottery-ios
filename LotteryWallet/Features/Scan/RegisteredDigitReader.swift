@@ -53,8 +53,9 @@ enum RegisteredDigitReader {
         let zone = UIImage(cgImage: zoneImage)
 
         // 整块号码区认一遍，只认一次。这些字符有两个用处：
-        // 1. 划格子时判断某一列里**有没有数字** —— 注序号那一列没有，
-        //    靠这一条把它和号码列分开（几何上分不开，实测列距 62.5 对 65）
+        // 1. 划格子时当一道**否决**：挑中的那一段列里至少一半得有数字，
+        //    否则是整段压在中文标签上了。注意只是否决 —— 注序号列靠它
+        //    分不出来（`.fast` 会把 `①` 读成 `0`），那件事交给 `window` 的几何判据
         // 2. 划完之后按位置落进各自的格子
         let chars = await DigitMatrixReader.allDigits(in: zone)
         let centers = chars.map { Double($0.box.midX) * Double(mask.width) }

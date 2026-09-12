@@ -72,7 +72,7 @@ struct NumberGrid: Equatable {
     ///
     /// 段数允许**比号码位数多两列**：票面上号码左边常常还杵着注序号
     /// （`①②③` / `组六:`），右边还杵着倍数 `(N)`。它们该不该算，
-    /// 由 `trimming` 按实测的列距关系去判，不在这里瞎猜。
+    /// 由 `window` 按实测的列距和字宽规律去判，不在这里瞎猜。
     static func candidates(in mask: InkMask,
                            within span: ClosedRange<Int>,
                            columns: Int) -> [Candidate] {
