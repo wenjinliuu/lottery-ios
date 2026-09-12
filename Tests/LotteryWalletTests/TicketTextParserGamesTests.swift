@@ -197,6 +197,32 @@ final class TicketTextParserGamesTests: XCTestCase {
         XCTAssertEqual(tickets.dropFirst().first?.lines.first?[.nums3], [0, 4, 4])
     }
 
+    // MARK: - 回归：这两个坑是上一版真踩出来的
+
+    /// 「第 26088期 2026年04月08日开奖」按两位一组拆出来正好是 8、4、8，
+    /// 三个都落在 0-9 里 —— 数字型彩种如果不要求"整行只有数字"，
+    /// 每张排列3 都会平白多出一注。
+    func testDateLineIsNotABet() {
+        XCTAssertNil(TicketTextParser.singleLineForTesting("第 26088期    2026年04月08日开奖", game: .pl3))
+        XCTAssertFalse(TicketTextParser.isBareNumberLine("第 26088期    2026年04月08日开奖"))
+        // 票号那一行有字母和连字符，同样不能当号码
+        XCTAssertFalse(TicketTextParser.isBareNumberLine("110310-276861-120948-245844 158739  UvDpAQ"))
+        // 真正的一注要能过
+        XCTAssertTrue(TicketTextParser.isBareNumberLine(" 9 5 0"))
+        // 热敏票把 0 认成 O 是常事，这种容忍要留着
+        XCTAssertTrue(TicketTextParser.isBareNumberLine("O5 16 24"))
+    }
+
+    /// 福彩四个彩种的期号都是 7 位，原来只有双色球走这条路。
+    func testWelfareGamesAllUseSevenDigitIssue() {
+        for game in [GameKey.ssq, .qlc, .k8, .fc3d] {
+            XCTAssertEqual(TicketTextParser.extractIssue("开奖期:2026018 26-02-11", game: game),
+                           "2026018", "\(game) 的期号没读出来")
+        }
+        // 体彩那边仍然是 5 位
+        XCTAssertEqual(TicketTextParser.extractIssue("第 26042期  2026年04月17日开奖", game: .qxc), "26042")
+    }
+
     // MARK: - 不能误伤原有彩种
 
     func testWelfareHeaderStillResolvesDoubleColourBall() {

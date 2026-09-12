@@ -196,6 +196,27 @@ enum TicketTextParser {
         return digitRuns(trimmed).allSatisfy { $0.count <= maximumDigitRun }
     }
 
+    /// 这一行除了数字（含 OCR 易混字母）和空白之外什么都没有。
+    ///
+    /// 数字型彩种必须有这道闸。它的一注就是几个 0-9，判据本身太松 ——
+    /// 「第 26088期 2026年04月08日开奖」按两位一组拆出来正好是 8、4、8，
+    /// 三个都在 0-9 里，于是每张排列3 都会平白多出一注，
+    /// 注数和票面合计当然就对不上了。
+    ///
+    /// 和 `isNumberOnlyLine` 的区别：这里用 `digitValue` 而不是 `isNumber`，
+    /// 保留对 O/I/l 这类 OCR 误读的容忍 —— 热敏票上 `05` 被认成 `O5` 很常见。
+    static func isBareNumberLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        var sawDigit = false
+        for character in trimmed {
+            if character.isWhitespace { continue }
+            guard digitValue(character) != nil else { return false }
+            sawDigit = true
+        }
+        return sawDigit
+    }
+
     static func isAscendingUnique(_ values: [Int]) -> Bool {
         zip(values, values.dropFirst()).allSatisfy { $0 < $1 }
     }
@@ -247,6 +268,10 @@ enum TicketTextParser {
         var body = line.replacingOccurrences(of: "\\(\\s*[-—0-9OQDIloq|!]{1,3}\\s*\\)\\s*$",
                                              with: "", options: .regularExpression)
         body = body.replacingOccurrences(of: lineIndexPrefix, with: "", options: .regularExpression)
+        // 3D 每一注行首印着自己的玩法：`组六: 1 8 9`。摘掉它，
+        // 剩下的才是号码 —— 玩法由 `perLineModes` 单独去读。
+        body = body.replacingOccurrences(of: "^\\s*(组六|组三|组选|单选|直选|组6|组3)\\s*[:：]?\\s*",
+                                         with: "", options: .regularExpression)
         // 空注：`D.-- -- -- -- -- ----  (-)`
         guard body.contains(where: { $0.isNumber }) else { return nil }
 
@@ -296,6 +321,12 @@ enum TicketTextParser {
         return (NumberSet([firstSection.key: first, secondSection.key: second]), multiple)
     }
 
+    /// 给测试用的入口。`singleLine` 本身是私有的，但"哪些行会被当成一注"
+    /// 正是最容易出错、也最该被钉住的一件事。
+    static func singleLineForTesting(_ line: String, game: GameKey) -> NumberSet? {
+        singleLine(line, game: game)?.numbers
+    }
+
     /// 只有一个号码区的彩种：七乐彩 7 个、快乐8 选几就几个、排列3/5 的每一位。
     ///
     /// 和双色球那种两区票的区别在于**没有分隔符可依**，只能靠「读出几个号」
@@ -304,6 +335,7 @@ enum TicketTextParser {
                                        game: GameKey,
                                        section: GameSection,
                                        multiple: Int?) -> (numbers: NumberSet, multiple: Int?)? {
+        guard isBareNumberLine(body) else { return nil }
         let values = numbers(in: body, range: section.range)
         guard !values.isEmpty else { return nil }
 
@@ -328,6 +360,7 @@ enum TicketTextParser {
                                   first: GameSection,
                                   second: GameSection,
                                   multiple: Int?) -> (numbers: NumberSet, multiple: Int?)? {
+        guard isBareNumberLine(body) else { return nil }
         let all = numbers(in: body, range: 0...second.range.upperBound)
         guard all.count == first.count + second.count else { return nil }
         let head = Array(all.prefix(first.count))
@@ -668,9 +701,15 @@ enum TicketTextParser {
     }
 
     /// 期号：福彩 7 位（2026029），体彩 5 位（26005）。
+    /// 期号印成 7 位 `YYYYNNN` 的彩种 —— 也就是福彩这一家。
+    private static let sevenDigitIssueGames: Set<GameKey> = [.ssq, .qlc, .k8, .fc3d]
+
     static func extractIssue(_ text: String, game: GameKey) -> String {
         let lines = normalize(text).split(separator: "\n").map(String.init)
-        if game == .ssq {
+        // 福彩四个彩种的期号都是 7 位的 `YYYYNNN`（2026018），
+        // 体彩四个是 5 位的 `YYNNN`（26042）。原来只给双色球开了 7 位这条路，
+        // 七乐彩、快乐8、3D 全都读不到期号。
+        if Self.sevenDigitIssueGames.contains(game) {
             for line in lines {
                 // 「销售期:2026029-2470」也会命中，但它和开奖期是同一个号，没有影响
                 if let match = firstMatch(in: line, pattern: "开奖期\\D{0,4}(20\\d{5})"),
