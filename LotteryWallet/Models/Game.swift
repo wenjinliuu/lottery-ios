@@ -134,6 +134,7 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     ///
     /// 大乐透的「追加」原来在票夹里完全看不见 —— 票面只显示录入方式
     /// （随机/普通/复式/胆拖），玩法字段虽然存了却没有任何地方读它。
+
     /// 票面头部那个完整的玩法标签：`组选单式` / `直选单式` / `选八单式` / `追加单式`。
     ///
     /// 要和实体票面写的一字不差 —— 用户核对时是拿票面对着看的。
@@ -167,7 +168,7 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
 
     /// 3D 票面上印的是「单选」，排列3 印的是「直选」—— 同一个玩法两家叫法不同，
     /// 显示要跟着各自的票面走。
-    func playLabel(playMode: String, addOn: Bool) -> String {    func playLabel(playMode: String, addOn: Bool) -> String {
+    func playLabel(playMode: String, addOn: Bool) -> String {
         switch self {
         case .dlt: return addOn ? "追加" : "普通"
         case .k8: return Int(playMode).map { "选\(ChineseNumber.text($0))" } ?? ""

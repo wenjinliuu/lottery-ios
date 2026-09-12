@@ -318,3 +318,56 @@ final class TicketTextParserGamesTests: XCTestCase {
         XCTAssertEqual(TicketTextParser.detectGame("中国体育彩票 超级大乐透 前区 后区"), .dlt)
     }
 }
+
+/// 复式 / 胆拖票在票夹里要按**整票**显示，而不是把展开的每一注铺开。
+///
+/// 关键在于这些信息不需要给记录加字段 —— 它们本来就藏在注里：
+/// 某个区所有注的**并集**就是这个区选的号，**交集**就是胆码
+/// （胆码按定义出现在每一注里，拖码只出现在一部分注里）。
+final class WholeTicketDerivationTests: XCTestCase {
+
+    private func record(_ red: [Int], _ blue: [Int]) -> TicketRecord {
+        TicketRecord(id: UUID().uuidString,
+                     batchId: "b",
+                     game: .ssq,
+                     ticket: Ticket(numbers: NumberSet([.red: red, .blue: blue]),
+                                    playMode: "", entryLabel: "复式"),
+                     entryKind: .manual,
+                     target: DrawTarget(),
+                     price: 2,
+                     multiple: 1,
+                     source: "test")
+    }
+
+    /// 双色球 7 红复式：展开 7 注，整票应该还原成那 7 个红球。
+    func testSystemTicketUnionsAllNumbers() {
+        let reds = [1, 2, 3, 4, 5, 6, 7]
+        let records = (0..<7).map { skip -> TicketRecord in
+            record(reds.enumerated().filter { $0.offset != skip }.map(\.element), [8])
+        }
+        let zones = TicketCard.wholeZones(records, game: .ssq)
+        let red = zones.first { $0.key == .red }
+        XCTAssertEqual(red?.selected, reds)
+        // 复式没有胆码：没有哪个红球出现在全部 7 注里
+        XCTAssertEqual(red?.dan, [])
+    }
+
+    /// 胆拖：出现在每一注里的就是胆码。
+    func testDantuoTicketFindsDanNumbers() {
+        // 胆码 1、2 固定，拖码 3/4/5 里选 4 个中的 4 个组合
+        let tuo = [3, 4, 5, 6]
+        let records = tuo.map { dropped in
+            record([1, 2] + tuo.filter { $0 != dropped }, [9])
+        }
+        let red = TicketCard.wholeZones(records, game: .ssq).first { $0.key == .red }
+        XCTAssertEqual(red?.selected, [1, 2, 3, 4, 5, 6])
+        XCTAssertEqual(red?.dan, [1, 2])
+    }
+
+    /// 一组真正的单式（每注号码各不相同、每个区都刚好选满）不该被当成整票。
+    func testPlainSingleLinesAreNotTreatedAsWholeTicket() {
+        let records = [record([1, 2, 3, 4, 5, 6], [1]),
+                       record([7, 8, 9, 10, 11, 12], [2])]
+        XCTAssertTrue(TicketCard.wholeZones(records, game: .ssq).isEmpty)
+    }
+}

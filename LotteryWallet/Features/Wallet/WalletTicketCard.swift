@@ -40,7 +40,18 @@ struct WalletTicketCard: View {
                 header
                 meta
                 TicketDivider(tint: game.tint).padding(.top, 10)
-                lines
+                // 复式 / 胆拖按整票画；单式仍然一注一行
+                if card.whole.isEmpty {
+                    lines
+                } else if isExpanded {
+                    // 展开时两样都给：上面是票面的样子，下面是展开的每一注，
+                    // 想逐注核对的人还是找得到。
+                    wholeTicket
+                    TicketDivider(tint: game.tint)
+                    lines
+                } else {
+                    wholeTicket
+                }
                 TicketDivider(tint: game.tint)
                 footer
                 disclaimer
@@ -136,6 +147,51 @@ struct WalletTicketCard: View {
     }
 
     // MARK: - 号码
+
+    /// 复式 / 胆拖按**整票**画，和实体票面一致。
+    ///
+    /// 一张 7+2 的双色球复式展开是 14 注，票面上却只有两行号码。
+    /// 把 14 注一条条铺开，既对不上用户手里那张票，也根本看不过来 ——
+    /// 胆拖更夸张，一张票能展开成上百注。
+    ///
+    /// **只是显示方式变了。** 底下的记录一注都没少，奖金和命中标记
+    /// 全都是逐注算出来的，核对精度一点不受影响。
+    @ViewBuilder
+    private var wholeTicket: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(card.whole) { zone in
+                if zone.dan.isEmpty {
+                    wholeRow(zone, title: "复", values: zone.selected)
+                } else {
+                    wholeRow(zone, title: "胆", values: zone.selected.filter { zone.dan.contains($0) })
+                    wholeRow(zone, title: "拖", values: zone.selected.filter { !zone.dan.contains($0) })
+                }
+            }
+            Text("共 \(card.count) 注 · 按每一注分别核对")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.top, 1)
+        }
+        .padding(.vertical, 10)
+    }
+
+    private func wholeRow(_ zone: TicketCard.WholeZone, title: String, values: [Int]) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Text(TicketPreviewBuilder.prefix(game, zone.key) + title)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, alignment: .leading)
+                .padding(.top, 4)
+            TicketNumbersSnapshotView(
+                game: game,
+                numbers: [zone.key: values],
+                matched: [zone.key: values.map { zone.hits.contains($0) }],
+                size: 27,
+                dimUnmatched: !zone.hits.isEmpty
+            )
+            Spacer(minLength: 0)
+        }
+    }
 
     private var lines: some View {
         VStack(alignment: .leading, spacing: 7) {

@@ -319,6 +319,27 @@ struct TicketCard: Identifiable, Hashable {
     let copyText: String
     /// 已经出结果、但用户还没看过。票夹靠它把「新结果」单独分一区。
     let isNewResult: Bool
+    /// 复式 / 胆拖票的**整票选号**。单式票为空。
+    ///
+    /// 票夹要像实体票那样显示：一排红球里标出胆码，而不是把 100 注号码
+    /// 一条条铺开 —— 用户手里就是一张复式票，铺成 100 行既对不上票面，
+    /// 也根本看不过来。
+    ///
+    /// **核对仍然按每一注算**：底下的记录一注都没少，奖金、命中标记
+    /// 全都是逐注算出来的，这里只是换个方式显示。
+    let whole: [WholeZone]
+
+    /// 整票里的一个号码区。
+    struct WholeZone: Identifiable, Hashable {
+        let key: SectionKey
+        /// 这个区选了哪些号，升序。
+        let selected: [Int]
+        /// 其中哪些是胆码。复式票为空。
+        let dan: Set<Int>
+        /// 开出来命中的号。
+        let hits: Set<Int>
+        var id: String { key.rawValue }
+    }
 
     var netProfit: Double { prize - cost }
 
@@ -331,6 +352,46 @@ struct TicketCard: Identifiable, Hashable {
         case "复式", "胆拖": return raw
         default: return "单式"
         }
+    }
+
+    /// 从展开的每一注反推整票选号。
+    ///
+    /// 不需要给记录加字段 —— 这些信息本来就藏在注里：
+    /// **某个区所有注的并集**就是这个区选的号；**所有注的交集**就是胆码
+    /// （胆码按定义出现在每一注里，拖码只出现在一部分注里）。
+    /// 复式票没有胆码，交集自然是空的（除非那个区正好选满，
+    /// 那它本来也就等于单式，不影响显示）。
+    static func wholeZones(_ records: [TicketRecord], game: GameKey) -> [WholeZone] {
+        guard records.count > 1 else { return [] }
+        var zones: [WholeZone] = []
+        for section in game.sections {
+            var union: Set<Int> = []
+            var intersection: Set<Int>?
+            var hits: Set<Int> = []
+            for record in records {
+                let values = record.ticket[section.key]
+                guard !values.isEmpty else { continue }
+                union.formUnion(values)
+                intersection = intersection.map { $0.intersection(values) } ?? Set(values)
+                let flags = record.matched[section.key] ?? []
+                for (index, value) in values.enumerated() where index < flags.count && flags[index] {
+                    hits.insert(value)
+                }
+            }
+            guard !union.isEmpty else { continue }
+            let dan = intersection ?? []
+            zones.append(WholeZone(key: section.key,
+                                   selected: union.sorted(),
+                                   // 整个区都被"交集"覆盖说明这个区是定选的，
+                                   // 那不是胆码，是这一区本来就没有可选余地
+                                   dan: dan.count == union.count ? [] : dan,
+                                   hits: hits))
+        }
+        // 每个区都没多选，说明这其实是一组单式，不必按整票显示
+        let expanded = zones.contains { zone in
+            (game.sections.first { $0.key == zone.key }?.count ?? 0) < zone.selected.count
+        }
+        return expanded ? zones : []
     }
 
     /// 快照时最多留几注。收起看 5 注、展开看 50 注，再多也不画。
@@ -406,6 +467,7 @@ extension TicketCard {
         // 整张票里只要还有一注的结果没被看过，这张票就还算「新结果」。
         // 已经出结果才谈得上看没看 —— 没开奖的票不该占着新结果那一区。
         isNewResult = batch.status.hasResult && records.contains { $0.resultSeenAt == nil }
+        whole = TicketCard.wholeZones(records, game: batch.game)
 
         var costSum = 0.0
         var prizeSum = 0.0

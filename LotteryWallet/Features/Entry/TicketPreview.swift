@@ -38,7 +38,9 @@ struct TicketPreview {
 enum TicketPreviewBuilder {
     /// 票面上号码区的中文前缀。只有双色球和大乐透支持复式胆拖，
     /// 所以这里只需要覆盖这两个。
-    private static func prefix(_ game: GameKey, _ key: SectionKey) -> String {
+    ///
+    /// 票夹卡片也要按票面画整票，所以这份用词不能是私有的 —— 两处写法必须一致。
+    static func prefix(_ game: GameKey, _ key: SectionKey) -> String {
         switch (game, key) {
         case (.ssq, .red): "红"
         case (.ssq, .blue): "蓝"
