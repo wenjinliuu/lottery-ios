@@ -422,9 +422,10 @@ struct TicketScanView: View {
                     }
                     .buttonStyle(.plain)
 
-                    HStack(spacing: 12) {
-                        legend(.green, "基准（虚线）")
-                        legend(.blue, "配准后的号码区")
+                    HStack(spacing: 10) {
+                        legend(.green, "基准")
+                        legend(.blue, "号码区")
+                        legend(.purple, "票头")
                         legend(.pink, "格子")
                     }
                     .font(.caption2)

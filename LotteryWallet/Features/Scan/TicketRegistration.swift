@@ -42,14 +42,43 @@ enum TicketRegistration {
         let boundary = TicketVisionScanner.rowLabelBoundary(fragments)
         let contentWidth = TicketVisionScanner.contentBox(fragments)?.width ?? 1
         let expectsRules = game.map { DigitTicketLayout.of($0) != nil && $0 != .fc3d } ?? true
+        let region = ticketRegion(fragments)
+        let size = CGSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height))
+        let tilt = TicketVisionScanner.textTilt(fragments, size: size)
 
         return await Task.detached(priority: .userInitiated) {
             measure(cgImage: cgImage,
                     fragments: fragments,
                     leftBoundary: boundary,
                     contentWidth: contentWidth,
-                    expectsRules: expectsRules)
+                    expectsRules: expectsRules,
+                    region: region,
+                    tilt: tilt)
         }.value
+    }
+
+    /// 票面在照片里占的那一块（归一化，左上原点）。
+    ///
+    /// **所有像素判据都只在这一块里算。** 拿整张照片当分母的话，
+    /// 裁松一点就两头挨打：大津法会把深色桌面当成墨（虚线连候选带都切不出来），
+    /// 横跨判据也会误伤（同一条虚线，裁紧时横跨 0.97，四周各留一圈之后只剩 0.69，
+    /// 而判据要求 > 0.80）。这正是「裁歪一点、裁松一点就整个没有标注」的来源。
+    ///
+    /// 边界取的是**认出来的文字**占的那一块，再往外让一点 ——
+    /// 虚线比文字印得宽，让出来的这一点正好把它接住；
+    /// 让过头的话深色桌面又进来了，所以只让 3%。
+    static func ticketRegion(_ fragments: [TicketVisionScanner.TextFragment]) -> CGRect? {
+        guard let box = TicketVisionScanner.contentBox(fragments),
+              box.width > 0.2, box.height > 0.05 else { return nil }
+        let padX = box.width * 0.03
+        let padY = box.height * 0.03
+        let left = Swift.max(0, box.minX - padX)
+        let right = Swift.min(1, box.maxX + padX)
+        // Vision 的 y 向上为正，翻成左上原点
+        let top = Swift.max(0, 1 - box.maxY - padY)
+        let bottom = Swift.min(1, 1 - box.minY + padY)
+        guard right > left, bottom > top else { return nil }
+        return CGRect(x: left, y: top, width: right - left, height: bottom - top)
     }
 
     // MARK: - 量
@@ -58,15 +87,24 @@ enum TicketRegistration {
                                 fragments: [TicketVisionScanner.TextFragment],
                                 leftBoundary: CGFloat?,
                                 contentWidth: CGFloat,
-                                expectsRules: Bool) -> Result {
+                                expectsRules: Bool,
+                                region: CGRect?,
+                                tilt: Double?) -> Result {
         var debug = ScanDebugReport()
-        guard let mask = InkMask.make(cgImage) else {
+        guard let mask = InkMask.make(cgImage, region: region) else {
             debug.notes.append("这张图量不出墨迹")
             return Result(debug: debug)
         }
+        if region == nil {
+            debug.notes.append("没框出票面在照片里的位置，只能按整张照片量 —— 判据会偏")
+        }
+        if let tilt, abs(tilt) > 0.0005 {
+            let degrees = atan(tilt) * 180 / .pi
+            debug.notes.append(String(format: "票面还歪着 %.2f°（按文字行量的），投影方向跟着斜", degrees))
+        }
 
-        let rules = DashedRuleDetector.rules(in: mask)
-        debug.notes.append("虚线候选：整票 \(mask.rowBands().count) 条横带，命中 \(rules.count) 条")
+        let rules = DashedRuleDetector.rules(in: mask, tilt: tilt)
+        debug.notes.append("虚线候选：票面 \(mask.rowBands().count) 条横带，命中 \(rules.count) 条")
         debug.baselines = rules.enumerated().map { index, rule in
             baseline(rule, label: index == 0 ? "上虚线" : "下虚线", mask: mask)
         }
@@ -83,11 +121,22 @@ enum TicketRegistration {
         }
 
         frame.leftBoundary = leftBoundary
-        let band = Swift.min(frame.topLeft.y, frame.topRight.y)...Swift.max(frame.bottomLeft.y, frame.bottomRight.y)
-        frame.rightBoundary = TicketFrame.multiplierBoundary(fragments, within: band,
+        let top: CGFloat = Swift.min(frame.topLeft.y, frame.topRight.y)
+        let bottom: CGFloat = Swift.max(frame.bottomLeft.y, frame.bottomRight.y)
+        frame.rightBoundary = TicketFrame.multiplierBoundary(fragments, within: top...bottom,
                                                              contentWidth: contentWidth)
+        // 票头区：期号 + 开奖日期（体彩连中间那行机号一起）。
+        // 底边和号码区共用同一条基准，所以两块严丝合缝。
+        if let issue = TicketFrame.issueTop(fragments, above: top) {
+            frame = frame.addingHead(topAt: issue)
+        }
         debug.anchor = frame.anchor
-        debug.frame = frame.corners
+        debug.zones = [.init(label: "号码区", corners: frame.corners, isPrimary: true)]
+        if let head = frame.headCorners {
+            debug.zones.append(.init(label: "票头：期号·开奖日期", corners: head))
+        } else {
+            debug.notes.append("没框出期号那一行，票头区空着")
+        }
         if let left = frame.leftBoundary {
             debug.boundaries.append(.init(label: "左：注序号列右侧", x: left))
         } else {
@@ -112,17 +161,17 @@ enum TicketRegistration {
     private static func baseline(_ rule: DashedRule,
                                  label: String,
                                  mask: InkMask) -> ScanDebugReport.Baseline {
-        let width = CGFloat(mask.width)
-        let height = CGFloat(mask.height)
         let left = Double(rule.columns.lowerBound)
         let right = Double(rule.columns.upperBound)
-        return ScanDebugReport.Baseline(
-            label: label,
-            start: CGPoint(x: CGFloat(left) / width, y: CGFloat(rule.y(at: left)) / height),
-            end: CGPoint(x: CGFloat(right) / width, y: CGFloat(rule.y(at: right)) / height),
-            dashes: rule.segments.map {
-                CGFloat($0.lowerBound) / width...CGFloat($0.upperBound + 1) / width
-            })
+        let start = mask.imagePoint(x: left, y: rule.y(at: left))
+        let end = mask.imagePoint(x: right, y: rule.y(at: right))
+        var dashes: [ClosedRange<CGFloat>] = []
+        for segment in rule.segments {
+            let low = mask.imagePoint(x: Double(segment.lowerBound), y: 0).x
+            let high = mask.imagePoint(x: Double(segment.upperBound + 1), y: 0).x
+            if high > low { dashes.append(low...high) }
+        }
+        return ScanDebugReport.Baseline(label: label, start: start, end: end, dashes: dashes)
     }
 
     // MARK: - 配准

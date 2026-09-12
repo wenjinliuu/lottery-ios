@@ -511,6 +511,37 @@ enum TicketVisionScanner {
         let text: String
         /// Vision 归一化坐标，原点在**左下角**。
         let box: CGRect
+        /// 这一块文字的**上边两个角**（Vision 归一化坐标）。
+        ///
+        /// `VNRecognizedTextObservation` 继承自 `VNRectangleObservation`，
+        /// 给的是四边形而不是正框 —— 这两个角连起来就是票面上这一行的走向，
+        /// 也就是**票还歪着多少度**。配准要沿票面自己的方向去投影，
+        /// 量的就是它；不用凭空扫一大圈倾角去猜。
+        var topLeft: CGPoint?
+        var topRight: CGPoint?
+    }
+
+    /// 票面还歪着多少 —— 用文字行自己的走向量出来。
+    ///
+    /// 返回的是**位图坐标系**下的斜率（y 向下为正），可以直接喂给
+    /// `InkMask.binProfile`。Vision 的 y 向上，所以这里要取负号。
+    ///
+    /// 取中位数不取平均：票上总有几个歪的印章、手写签名，平均值会被拽跑。
+    /// 太短的文字块量出来的角度噪声太大，按票面宽度的 8% 卡掉 ——
+    /// 和 `TicketImagePreprocessor.deskewed` 用的是同一条判据。
+    static func textTilt(_ fragments: [TextFragment], size: CGSize) -> Double? {
+        guard size.width > 0, size.height > 0 else { return nil }
+        var slopes: [Double] = []
+        for fragment in fragments {
+            guard let left = fragment.topLeft, let right = fragment.topRight else { continue }
+            let dx = Double(right.x - left.x) * Double(size.width)
+            let dy = Double(right.y - left.y) * Double(size.height)
+            guard dx > Double(size.width) * 0.08 else { continue }
+            slopes.append(-dy / dx)
+        }
+        guard slopes.count >= 3 else { return nil }
+        let sorted = slopes.sorted()
+        return sorted[sorted.count / 2]
     }
 
     static func recognizeFragments(in image: UIImage,
@@ -536,7 +567,8 @@ enum TicketVisionScanner {
             guard let candidate = observation.topCandidates(1).first else { return nil }
             let text = candidate.string.trimmingCharacters(in: .whitespaces)
             guard !text.isEmpty else { return nil }
-            return TextFragment(text: text, box: observation.boundingBox)
+            return TextFragment(text: text, box: observation.boundingBox,
+                                topLeft: observation.topLeft, topRight: observation.topRight)
         }
         guard !fragments.isEmpty else { throw ScanError.recognitionFailed }
         return fragments

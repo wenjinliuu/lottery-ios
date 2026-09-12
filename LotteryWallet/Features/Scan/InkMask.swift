@@ -20,10 +20,18 @@ struct InkMask {
     /// 每一行的墨量（有墨的像素个数）。横带切分要用。
     let rowInk: [Int]
 
-    init(width: Int, height: Int, ink: [Bool]) {
+    /// 这张墨迹图在**整张照片**里占的那一块（归一化，左上原点）。
+    ///
+    /// 量票面只量票面那一块，不量整张照片 —— 这是实测逼出来的（见 `make`）。
+    /// 量完要把坐标换算回整张照片，靠的就是它。
+    let region: CGRect
+
+    init(width: Int, height: Int, ink: [Bool],
+         region: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)) {
         self.width = width
         self.height = height
         self.ink = ink
+        self.region = region
         var rows = [Int](repeating: 0, count: max(0, height))
         for y in 0..<max(0, height) {
             let base = y * width
@@ -39,9 +47,37 @@ struct InkMask {
 
     /// 把一张图变成墨迹图。
     ///
+    /// `region` 是**票面在照片里占的那一块**（归一化，左上原点）。
+    /// 只量这一块，不量整张照片 —— 这一条是实测逼出来的，
+    /// 裁松之后两件事会同时崩：
+    ///
+    /// 1. **大津法会算错阈值。** 裁进来一圈深色桌面，阈值从 79 跳到 104，
+    ///    整片桌面被当成"墨"，行投影全饱和，虚线连候选横带都切不出来。
+    /// 2. **横跨判据会误伤。** 同一条虚线，票占满画面时横跨 0.97，
+    ///    四周各留 160px 之后横跨只剩 0.69 —— 判据要求 > 0.80，当场判掉。
+    ///
+    /// 这正是「裁歪一点、裁松一点就整个没有标注」的来源：不是没找到虚线，
+    /// 是判据拿整张照片当分母。只量票面那一块之后，两种情况量出来的数
+    /// 和裁得严丝合缝时**一模一样**。
+    ///
     /// 按 `workingWidth` 等比缩放 —— 只缩不放，本来就小的图保持原样，
     /// 放大只会凭空造出插值出来的灰边，让虚线变胖。
-    static func make(_ cgImage: CGImage, workingWidth: Int = InkMask.workingWidth) -> InkMask? {
+    static func make(_ cgImage: CGImage,
+                     region: CGRect? = nil,
+                     workingWidth: Int = InkMask.workingWidth) -> InkMask? {
+        let full = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let area = (region ?? full).intersection(full)
+        guard area.width > 0.05, area.height > 0.02 else { return nil }
+
+        var cgImage = cgImage
+        if area != full {
+            let pixels = CGRect(x: area.minX * CGFloat(cgImage.width),
+                                y: area.minY * CGFloat(cgImage.height),
+                                width: area.width * CGFloat(cgImage.width),
+                                height: area.height * CGFloat(cgImage.height))
+            guard let cropped = cgImage.cropping(to: pixels.integral) else { return nil }
+            cgImage = cropped
+        }
         let sourceWidth = cgImage.width
         let sourceHeight = cgImage.height
         guard sourceWidth > 0, sourceHeight > 0 else { return nil }
@@ -68,7 +104,16 @@ struct InkMask {
         guard drawn else { return nil }
 
         let threshold = otsu(bytes)
-        return InkMask(width: width, height: height, ink: bytes.map { $0 < threshold })
+        return InkMask(width: width, height: height,
+                       ink: bytes.map { $0 < threshold }, region: area)
+    }
+
+    /// 墨迹图里的一个点 → **整张照片**里的归一化坐标（左上原点）。
+    func imagePoint(x: Double, y: Double) -> CGPoint {
+        let u = width > 0 ? CGFloat(x) / CGFloat(width) : 0
+        let v = height > 0 ? CGFloat(y) / CGFloat(height) : 0
+        return CGPoint(x: region.minX + u * region.width,
+                       y: region.minY + v * region.height)
     }
 
     /// 大津法阈值。热敏票印在银灰纸上，固定阈值不管用。

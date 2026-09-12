@@ -78,14 +78,32 @@ enum DashedRuleDetector {
         return values
     }()
 
+    /// 要试的倾角，**从票面实测的那个角度开始试**。
+    ///
+    /// `measured` 是文字行自己量出来的倾角（见 `TicketVisionScanner.textTilt`）。
+    /// 有它就先试它和它附近，没有再退回从正着扫一圈 —— 后者是兜底，
+    /// 前者才是正解：票歪多少是**量出来的**，不是挨个猜出来的。
+    static func slopes(around measured: Double?) -> [Double] {
+        guard let measured, measured.isFinite, abs(measured) < 0.2 else { return slopes }
+        var values: [Double] = [measured]
+        for step in 1...3 {
+            let delta = Double(step) * 0.005
+            values.append(measured + delta)
+            values.append(measured - delta)
+        }
+        return values + slopes
+    }
+
     /// 图里所有符合判据的虚线，从上到下。
     ///
-    /// 按倾角从小到大扫，**第一个正好扫出两条的倾角说了算**。
-    /// 一条都没凑够两条时退回摆正那一遍的结果 —— 调试图上照样画出来，
+    /// 按倾角挨个试，**第一个正好扫出两条的倾角说了算**。
+    /// 一个倾角都没凑够两条时退回摆正那一遍的结果 —— 调试图上照样画出来，
     /// 用户一看就知道是"一条也没找到"还是"找到三条不敢挑"。
-    static func rules(in mask: InkMask, criteria: Criteria = .measured) -> [DashedRule] {
+    static func rules(in mask: InkMask,
+                      tilt: Double? = nil,
+                      criteria: Criteria = .measured) -> [DashedRule] {
         var fallback: [DashedRule] = []
-        for (index, slope) in slopes.enumerated() {
+        for (index, slope) in slopes(around: tilt).enumerated() {
             let found = rules(in: mask, slope: slope, criteria: criteria)
             if found.count == 2 { return found }
             if index == 0 { fallback = found }

@@ -37,15 +37,30 @@ struct ScanDebugReport: Equatable {
         var x: CGFloat
     }
 
+    /// 票面上**框出来的一块**：号码区、票头区（期号 / 开奖日期）……
+    ///
+    /// 一张票上重要的信息不止号码。既然基准已经找得准，就顺手把这些块
+    /// 一起框出来、一起标上 —— 它们都是核奖要用的字段，
+    /// 都该说得出"来自票面哪一块"。不重要的信息交给普通识别就好。
+    struct Zone: Equatable {
+        var label: String
+        var corners: [CGPoint]
+        /// 主角（号码区）画粗一点，配角画细一点。
+        var isPrimary: Bool = false
+    }
+
     /// 这张票走的是哪条基准路。没配准成功就是 nil。
     var anchor: TicketFrame.Anchor?
     var baselines: [Baseline] = []
-    /// 配准后的号码区四角，画在票面上。
-    var frame: [CGPoint] = []
+    /// 配准出来的那些块，画在票面上。
+    var zones: [Zone] = []
     var boundaries: [Boundary] = []
     var cells: [Cell] = []
     /// 说人话的过程记录：找到几条虚线、为什么没配准成功。
     var notes: [String] = []
 
-    var didRegister: Bool { anchor != nil && frame.count == 4 }
+    /// 号码区的四角。画竖直边界的时候要知道画多高。
+    var numberZone: [CGPoint] { zones.first(where: \.isPrimary)?.corners ?? [] }
+
+    var didRegister: Bool { anchor != nil && !numberZone.isEmpty }
 }

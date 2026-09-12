@@ -54,6 +54,19 @@ final class DashedRuleDetectorTests: XCTestCase {
         }
 
         var mask: InkMask { InkMask(width: width, height: height, ink: ink) }
+
+        /// 只取其中一块做成墨迹图 —— 相当于"只量票面那一块"。
+        func cropped(to region: CGRect) -> InkMask {
+            let x0 = Int(region.minX * CGFloat(width))
+            let x1 = Int(region.maxX * CGFloat(width))
+            let y0 = Int(region.minY * CGFloat(height))
+            let y1 = Int(region.maxY * CGFloat(height))
+            var cropped: [Bool] = []
+            for y in y0..<y1 {
+                for x in x0..<x1 { cropped.append(ink[y * width + x]) }
+            }
+            return InkMask(width: x1 - x0, height: y1 - y0, ink: cropped, region: region)
+        }
     }
 
     private func ticket(slope: Double = 0) -> Canvas {
@@ -126,6 +139,45 @@ final class DashedRuleDetectorTests: XCTestCase {
         XCTAssertEqual(rules[1].slope, 0.008, accuracy: 0.0005)
         XCTAssertEqual(rules[0].y(at: 0), 47, accuracy: 0.5, "x=0 处这条线在第 47 行")
         XCTAssertEqual(rules[1].y(at: 0), 297, accuracy: 0.5)
+    }
+
+    /// **裁松了照样要认得出来。**
+    ///
+    /// 这一条是真机上报回来的毛病：用户把裁切框拖歪一点、拖松一点，
+    /// 调试图上就一条线一个框都没有了。量出来的原因是判据拿**整张照片**
+    /// 当分母 —— 同一条虚线，票占满画面时横跨 0.97，四周留一圈之后只剩 0.69，
+    /// 而判据要求 > 0.80，当场判掉。虚线一直都在，是尺子量错了地方。
+    ///
+    /// 修法不是放宽判据（那会把票号行之类的东西放进来），而是**只量票面那一块**。
+    func testLooseCropNeedsTicketRegion() {
+        // 票只占画面中间 60%：左右各空 200px，上下各空 40px
+        let canvas = Canvas(width: width, height: height)
+        for start in stride(from: 210, to: 790, by: 20) {
+            canvas.fill(x: start..<(start + 10), y: 60..<63)
+            canvas.fill(x: start..<(start + 10), y: 300..<303)
+        }
+        for top in [110, 160, 210, 250] {
+            for column in 0..<7 {
+                let left = 260 + column * 62
+                canvas.fill(x: left..<(left + 17), y: top..<(top + 24))
+            }
+        }
+
+        XCTAssertNotEqual(DashedRuleDetector.rules(in: canvas.mask).count, 2,
+                          "按整张照片量：虚线横跨不到 80%，找不齐")
+
+        let region = CGRect(x: 0.2, y: 0.1, width: 0.6, height: 0.8)
+        let rules = DashedRuleDetector.rules(in: canvas.cropped(to: region))
+        XCTAssertEqual(rules.count, 2, "只量票面那一块：和裁得严丝合缝时一样")
+
+        // 量完要能换算回整张照片上去，否则调试图会画在错的地方
+        guard let frame = TicketFrame.between(rules: rules, in: canvas.cropped(to: region)) else {
+            return XCTFail("两条虚线应该夹得出号码区")
+        }
+        XCTAssertEqual(frame.topLeft.y, 63.0 / 400, accuracy: 0.01, "上边落在上虚线下沿")
+        XCTAssertEqual(frame.bottomLeft.y, 300.0 / 400, accuracy: 0.01, "下边落在下虚线上沿")
+        XCTAssertGreaterThan(frame.topLeft.x, 0.2, "左边落在票面里，不是照片边上")
+        XCTAssertLessThan(frame.topRight.x, 0.8)
     }
 
     /// 一张白纸上什么都没有。空图不能崩，也不能凭空找出基准。

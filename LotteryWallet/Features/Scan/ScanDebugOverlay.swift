@@ -37,7 +37,21 @@ enum ScanDebugOverlay {
                 CGPoint(x: normalized.x * size.width, y: normalized.y * size.height)
             }
 
-            // 基准：整条画细线，每一小段画粗线 —— 粗线压在票面的虚线上才算抓对了
+            // 框出来的那些块。号码区是主角画粗，票头区是配角画细。
+            for zone in report.zones where zone.corners.count == 4 {
+                cg.setStrokeColor(zone.isPrimary
+                                  ? UIColor.systemBlue.cgColor
+                                  : UIColor.systemPurple.cgColor)
+                cg.setLineWidth(zone.isPrimary ? unit * 1.6 : unit * 1.1)
+                cg.beginPath()
+                cg.move(to: point(zone.corners[0]))
+                for corner in zone.corners.dropFirst() { cg.addLine(to: point(corner)) }
+                cg.closePath()
+                cg.strokePath()
+            }
+
+            // 基准画在框**之后** —— 它就压在号码区上下两条边旁边，
+            // 先画的话会被框整条盖住，看着像"没找到基准"。
             for baseline in report.baselines {
                 cg.setStrokeColor(UIColor.systemGreen.withAlphaComponent(0.9).cgColor)
                 cg.setLineWidth(unit)
@@ -66,23 +80,12 @@ enum ScanDebugOverlay {
                 }
             }
 
-            // 配准后的号码区
-            if report.frame.count == 4 {
-                cg.setStrokeColor(UIColor.systemBlue.cgColor)
-                cg.setLineWidth(unit * 1.6)
-                cg.beginPath()
-                cg.move(to: point(report.frame[0]))
-                for corner in report.frame.dropFirst() { cg.addLine(to: point(corner)) }
-                cg.closePath()
-                cg.strokePath()
-            }
-
             // 左右边界
             cg.setStrokeColor(UIColor.systemOrange.cgColor)
             cg.setLineWidth(unit)
             for boundary in report.boundaries {
                 let x = boundary.x * size.width
-                let ys = report.frame.map { $0.y * size.height }
+                let ys = report.numberZone.map { $0.y * size.height }
                 let top = (ys.min() ?? 0) - unit * 6
                 let bottom = (ys.max() ?? size.height) + unit * 6
                 cg.saveGState()

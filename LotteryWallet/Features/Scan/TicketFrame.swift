@@ -37,6 +37,16 @@ struct TicketFrame: Equatable {
     /// 从来没跑起来过，根因就在这里。
     var rightBoundary: CGFloat?
 
+    /// 票头区的四角：以号码区**上边界那条基准**为底，往上罩住期号、开奖日期
+    /// （体彩连中间那行机号一起罩进去）。
+    ///
+    /// 为什么值得单独框出来：期号和开奖日期是核奖的两个关键字段，
+    /// 和号码一样该说得出"它来自票面哪一块"。底边和号码区共用同一条基准，
+    /// 两块严丝合缝接在一起 —— 基准找对没有，一眼就看得出来。
+    ///
+    /// 现在只标不读：标签路按硬约束三一行都不动。
+    var headCorners: [CGPoint]?
+
     var corners: [CGPoint] { [topLeft, topRight, bottomRight, bottomLeft] }
 
     /// 四个角的包络。调试图和粗略裁剪用。
@@ -79,20 +89,72 @@ struct TicketFrame: Equatable {
         let right = Double(min(top.columns.upperBound, bottom.columns.upperBound))
         guard right - left > Double(mask.width) * 0.5 else { return nil }
 
-        let gap = bottom.y(at: (left + right) / 2) - top.y(at: (left + right) / 2)
+        let middle: Double = (left + right) / 2
+        let gap: Double = bottom.y(at: middle) - top.y(at: middle)
         // 号码区总得有几行字那么高。两条挨在一起的线夹出来的"号码区"是假的。
         guard gap > Double(mask.height) * 0.02, gap > 8 else { return nil }
 
-        let width = Double(mask.width)
-        let height = Double(mask.height)
-        func point(_ x: Double, _ y: Double) -> CGPoint {
-            CGPoint(x: x / width, y: y / height)
-        }
-        return TicketFrame(topLeft: point(left, top.y(at: left)),
-                           topRight: point(right, top.y(at: right)),
-                           bottomRight: point(right, bottom.y(at: right)),
-                           bottomLeft: point(left, bottom.y(at: left)),
+        // 取两条虚线的**内沿**，不是中线 —— 号码区是夹在它们**中间**那一块。
+        //
+        // 拿中线当边界的话，虚线自己的墨会落进号码区里：最后一注和下面那条
+        // 虚线在投影上连成一条带，一行切出几十段，整行的格子就此消失
+        // （实测大乐透第③注的格子就是这么丢的）。往里让半条线的厚度加 1px 就好。
+        // 顺带把绿色的基准线从蓝框底下露出来了，两条线不再重叠。
+        let topInset = Double(top.thickness) / 2 + 1
+        let bottomInset = Double(bottom.thickness) / 2 + 1
+        guard gap - topInset - bottomInset > 4 else { return nil }
+
+        func point(_ x: Double, _ y: Double) -> CGPoint { mask.imagePoint(x: x, y: y) }
+        return TicketFrame(topLeft: point(left, top.y(at: left) + topInset),
+                           topRight: point(right, top.y(at: right) + topInset),
+                           bottomRight: point(right, bottom.y(at: right) - bottomInset),
+                           bottomLeft: point(left, bottom.y(at: left) - bottomInset),
                            anchor: .dashedRules)
+    }
+
+    // MARK: - 票头区
+
+    /// 票面上「第 N 期 / 开奖日期」那一行。
+    ///
+    /// 体彩印成 `第26102期 2026年09月07日开奖`，福彩印成 `开奖期:2026091 26-04-11`。
+    /// 两家都在号码区上方，都是核奖必需的字段。
+    static let issuePattern = "第\\s*\\d{4,7}\\s*期|开奖期|\\d{4}\\s*年\\s*\\d{1,2}\\s*月"
+
+    /// 期号 / 开奖日期那一行的**顶**在哪儿（归一化，左上原点）。
+    ///
+    /// 只认号码区**上方**的碎片 —— 票底那行出票时间也带日期，
+    /// 拿它当锚点的话票头区会倒着罩下来。
+    static func issueTop(_ fragments: [TicketVisionScanner.TextFragment],
+                         above zoneTop: CGFloat) -> CGFloat? {
+        var best: CGFloat?
+        for fragment in fragments {
+            // Vision 的 y 向上为正，翻成左上原点
+            let top = 1 - fragment.box.maxY
+            let bottom = 1 - fragment.box.minY
+            guard bottom <= zoneTop else { continue }
+            guard fragment.text.range(of: issuePattern, options: .regularExpression) != nil
+            else { continue }
+            best = Swift.min(best ?? top, top)
+        }
+        return best
+    }
+
+    /// 把票头区接在号码区上面。
+    ///
+    /// 上边是一条**和号码区上边平行**的线，穿过期号那一行的顶；底边就是
+    /// 号码区的上边本身，两块严丝合缝。平行是关键 —— 票斜着的时候，
+    /// 横平竖直的框会一边压住字、一边空一大块，反而看不出基准准不准。
+    func addingHead(topAt top: CGFloat) -> TicketFrame {
+        let edge = Swift.min(topLeft.y, topRight.y)
+        let shift = edge - top
+        // 期号行得在号码区上面，而且不能一路顶到票外面去
+        guard shift > 0.005, topLeft.y - shift >= 0, topRight.y - shift >= 0 else { return self }
+        var copy = self
+        copy.headCorners = [CGPoint(x: topLeft.x, y: topLeft.y - shift),
+                            CGPoint(x: topRight.x, y: topRight.y - shift),
+                            topRight,
+                            topLeft]
+        return copy
     }
 
     // MARK: - 左右边界
