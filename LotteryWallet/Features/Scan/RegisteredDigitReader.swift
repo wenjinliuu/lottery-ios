@@ -26,13 +26,28 @@ enum RegisteredDigitReader {
         var grid: NumberGrid
     }
 
+    /// 读数的结果 + **一句说明**。
+    ///
+    /// 说明是这一版专门加的。上一轮我对着识别结果猜"到底走的哪条路、卡在哪一步"，
+    /// 猜错了两次 —— 因为「退回老路」和「新路读错」在结果上长得一模一样。
+    /// 现在每一步都留一句话，调试图上直接写出来，不用再猜。
+    struct Outcome {
+        var reading: Reading?
+        var note: String
+    }
+
     static func read(image: UIImage,
                      frame: TicketFrame,
-                     layout: DigitTicketLayout) async -> Reading? {
-        guard let cgImage = image.cgImage,
-              let zoneImage = TicketRegistration.rectified(cgImage, frame: frame),
-              let mask = InkMask.make(zoneImage), mask.width > 8, mask.height > 8
-        else { return nil }
+                     layout: DigitTicketLayout) async -> Outcome {
+        guard let cgImage = image.cgImage else {
+            return Outcome(reading: nil, note: "格子路：图片读不出来")
+        }
+        guard let zoneImage = TicketRegistration.rectified(cgImage, frame: frame) else {
+            return Outcome(reading: nil, note: "格子路：号码区裁不出正片")
+        }
+        guard let mask = InkMask.make(zoneImage), mask.width > 8, mask.height > 8 else {
+            return Outcome(reading: nil, note: "格子路：配准后的号码区量不出墨迹")
+        }
 
         let span = TicketRegistration.zoneColumns(frame: frame, width: mask.width)
         let zone = UIImage(cgImage: zoneImage)
@@ -45,7 +60,15 @@ enum RegisteredDigitReader {
         let centers = chars.map { Double($0.box.midX) * Double(mask.width) }
         guard let grid = NumberGrid.build(mask: mask, within: span,
                                           layout: layout, digitCenters: centers) else {
-            return nil
+            // 划不出格子时，把中间量到的数报出来 —— 否则只能盯着识别结果猜
+            let rough = NumberGrid.candidates(in: mask, within: span, columns: layout.columns)
+            let consensus = NumberGrid.betRows(rough, columns: layout.columns)
+            let shape = consensus.map { String($0.segments.count) }.joined(separator: "/")
+            return Outcome(reading: nil,
+                           note: "格子路：划不齐（要 \(layout.columns) 位）。"
+                               + "号码区 \(mask.width)×\(mask.height)，"
+                               + "候选行 \(rough.count) 条，对得齐 \(consensus.count) 条，"
+                               + "每行切出 \(shape.isEmpty ? "—" : shape) 段")
         }
 
         var values = [[Int?]](repeating: [Int?](repeating: nil, count: layout.columns),
@@ -77,17 +100,28 @@ enum RegisteredDigitReader {
 
         // 一多半都是问号就别拿出来了，那多半根本没划对地方
         let known = values.reduce(0) { $0 + $1.compactMap { $0 }.count }
-        guard known * 2 >= values.count * layout.columns else { return nil }
+        let total = values.count * layout.columns
+        guard known * 2 >= total else {
+            return Outcome(reading: nil,
+                           note: "格子路：\(total) 格里只认出 \(known) 格，一多半是问号，不敢用")
+        }
 
         var rows: [DigitMatrixReader.Row] = []
         for (index, line) in values.enumerated() {
-            guard let band = visionBand(of: grid.rows[index], frame: frame) else { return nil }
+            guard let band = visionBand(of: grid.rows[index], frame: frame) else {
+                return Outcome(reading: nil, note: "格子路：格子映射不回票面")
+            }
             rows.append(DigitMatrixReader.Row(band: band, values: line))
         }
-        guard !rows.isEmpty else { return nil }
+        guard !rows.isEmpty else {
+            return Outcome(reading: nil, note: "格子路：一注都没切出来")
+        }
         let low = rows.map(\.band.lowerBound).min() ?? 0
         let high = rows.map(\.band.upperBound).max() ?? 1
-        return Reading(matrix: .init(rows: rows, span: low...high), grid: grid)
+        return Outcome(
+            reading: Reading(matrix: .init(rows: rows, span: low...high), grid: grid),
+            note: "号码按配准后的格子读：\(rows.count) 注 × \(layout.columns) 位，"
+                + "\(total) 格里认出 \(known) 格")
     }
 
     // MARK: - 把数字分进格子

@@ -67,8 +67,12 @@ enum TicketVisionScanner {
         // 现在画的是真正拿去认号码的那些格子，位置对不对一眼就看得出来。
         if let grid = merged.grid, let frame = registration.frame {
             registration.debug.cells = grid.debugCells(frame: frame)
-            registration.debug.notes.append("号码按配准后的格子读：\(grid.rows.count) 注 × \(grid.columns.count) 位")
         }
+        // **号码走了哪条路，永远写一句。**
+        //
+        // 「退回老路」和「新路读错」在识别结果上长得一模一样，没有这一句
+        // 就只能对着号码猜 —— 上一轮我就猜错了两次。
+        if let note = merged.note { registration.debug.notes.append(note) }
         var result = TicketTextParser.parse(merged.text)
         if result.tickets.isEmpty {
             // 再放大一遍重试。裁切之后还认不出，多半是原图本身就糊。
@@ -110,8 +114,16 @@ enum TicketVisionScanner {
     /// 它们的号码印成一个紧密的矩阵，上下的空隙比左右的窄好几倍，
     /// Vision 干脆**按竖列**读 —— 分行结果本身就是错的，基于它修修补补没有意义。
     /// 所以整段交给 `DigitMatrixReader` 按坐标重建。
+    /// 号码那一段的产物：文本 + 格子 + 走了哪条路。
+    struct DigitPass {
+        var text: String
+        var grid: NumberGrid?
+        /// 调试图上写出来的那句话。号码路没跑（不是数字型彩种）时为 nil。
+        var note: String?
+    }
+
     static func mergedText(image: UIImage, base: [TextFragment],
-                          frame: TicketFrame? = nil) async -> (text: String, grid: NumberGrid?) {
+                          frame: TicketFrame? = nil) async -> DigitPass {
         let baseRows = LayoutSegmenter.rows(base)
         let originals = baseRows.map(LayoutSegmenter.join)
         // 彩种要先认出来，二次识别的结果才有得校验 —— 见 `isImprovement`。
@@ -121,22 +133,43 @@ enum TicketVisionScanner {
         if let game, let layout = DigitTicketLayout.of(game) {
             // 阶段 2：配准成功就走格子那条路 —— 先有格子再去认，
             // 几何不再是从识别结果里估出来的。
-            if let frame,
-               let reading = await RegisteredDigitReader.read(image: image, frame: frame,
-                                                              layout: layout) {
-                return (compose(rows: baseRows, originals: originals, matrix: reading.matrix),
-                        reading.grid)
+            var note = "格子路：没配准成功，基准都没找到"
+            if let frame {
+                let outcome = await RegisteredDigitReader.read(image: image, frame: frame,
+                                                              layout: layout)
+                note = outcome.note
+                if let reading = outcome.reading {
+                    return DigitPass(
+                        text: compose(rows: baseRows, originals: originals,
+                                      matrix: reading.matrix),
+                        grid: reading.grid, note: note)
+                }
             }
             // 配准没成功（基准没找到、格子划不齐）就退回老路。
             // 老路会从识别结果里估几何，没有配准那么稳，但总比什么都不给强。
             if let matrix = await DigitMatrixReader.read(image: image, layout: layout,
                                                         labelBoundary: rowLabelBoundary(base)) {
-                return (compose(rows: baseRows, originals: originals, matrix: matrix), nil)
+                return DigitPass(
+                    text: compose(rows: baseRows, originals: originals, matrix: matrix),
+                    grid: nil, note: note + "；退回老路（按字符坐标估几何）")
             }
+            return DigitPass(text: await secondPass(image: image, rows: baseRows,
+                                                    originals: originals, game: game),
+                             grid: nil,
+                             note: note + "；老路也没读出来，退回逐行二次识别")
         }
 
+        return DigitPass(text: await secondPass(image: image, rows: baseRows,
+                                               originals: originals, game: game),
+                         grid: nil, note: nil)
+    }
+
+    /// 最老的那条路：一行一行裁出来再认一遍。
+    /// 不是数字型彩种的票走它，数字型的两条路都失败时也退到它。
+    private static func secondPass(image: UIImage, rows: [[TextFragment]],
+                                   originals: [String], game: GameKey?) async -> String {
         var result: [String] = []
-        for (index, row) in baseRows.enumerated() {
+        for (index, row) in rows.enumerated() {
             let original = originals[index]
             guard looksLikeNumberRow(original) else {
                 result.append(original)
@@ -151,7 +184,7 @@ enum TicketVisionScanner {
             }
             result.append(graft(prefix: original, digits: better))
         }
-        return (result.joined(separator: "\n"), nil)
+        return result.joined(separator: "\n")
     }
 
     /// 票面左边那一竖排注序号的右边界 —— `①②③④⑤`、`A. B. C.`、3D 的 `组六:`。

@@ -170,8 +170,15 @@ struct NumberGrid: Equatable {
             let kept = Array(ranges[first...last])
             let centers = kept.map { Double($0.lowerBound + $0.upperBound) / 2 }
             let gaps = zip(centers, centers.dropFirst()).map { $1 - $0 }
-            guard let lastGap = gaps.last, gaps.count >= 2 else { return nil }
-            let typical = median(Array(gaps.dropLast()))
+            guard let lastGap = gaps.last, gaps.count >= 2,
+                  let typical = gaps.dropLast().min() else { return nil }
+            // 拿**最小**的那个列距当基准，不拿中位数。
+            //
+            // 中位数在只剩两个间隙时会取到较大的那个，判据一下子松掉一半：
+            // 实测福彩 3D 的 `(1)` 离号码 132.5px、号码之间 39.5px，
+            // 按中位数算阈值是 129.6 —— 只剩 2% 余量，票面稍微变一点就翻过去。
+            // 按最小值算阈值是 71.1，余量大得多，而且七星彩那边
+            // （特别号 103px、最小列距 62.5px、阈值 112.5）照样不会误伤。
             if typical > 0, lastGap > typical * 1.8 {
                 last -= 1
                 continue
@@ -198,6 +205,21 @@ struct NumberGrid: Equatable {
         guard let low = picked.map(\.lowerBound).min(),
               let high = picked.map(\.upperBound).max(), high >= low else { return nil }
         return low...high
+    }
+
+    /// 末列再往左让出一个字宽 —— **哪怕墨迹里根本没切出十位来**。
+    ///
+    /// 并集只在"十位那一笔进了墨迹图"时才管用。`13` 的十位是一竖，
+    /// 又细又淡，配准+缩放之后很可能整笔掉出二值化；而 Vision 在原图上
+    /// 照样认得出它。这时候并集没变宽，Vision 认出来的 `1` 落在列外面，
+    /// 又被丢了 —— 和修之前一模一样。
+    ///
+    /// 所以这一列的宽度不能只靠墨迹说了算，按版式硬让出一个字宽：
+    /// 特别号离前一位 1.58 个列距（实测 103px，字宽 21px），
+    /// 中间空着 80 多像素，让出 25px 碰不到邻居。
+    static func wideningTail(_ range: ClosedRange<Int>, by width: Double) -> ClosedRange<Int> {
+        let low = Swift.max(0, range.lowerBound - Int((width * 1.2).rounded()))
+        return low...range.upperBound
     }
 
     /// 缺的那一列按版式**算**出来，不去找。
@@ -273,14 +295,17 @@ struct NumberGrid: Equatable {
                                       digitCenters: digitCenters) else { return nil }
             // 两位数的那一列要取并集（见 `unionRange`）。裁完才知道哪一列是
             // 真正的末列 —— 倍数列在右边，不裁掉的话会union错人。
-            if layout.trailingMaximum > 9,
-               let union = unionRange(consensus, at: kept.upperBound) {
-                ranges[kept.upperBound] = union
+            if layout.trailingMaximum > 9 {
+                let widths = kept.map { Double(ranges[$0].upperBound - ranges[$0].lowerBound + 1) }
+                let glyph = median(widths)
+                let base = unionRange(consensus, at: kept.upperBound) ?? ranges[kept.upperBound]
+                ranges[kept.upperBound] = wideningTail(base, by: glyph)
             }
             ranges = kept.map { ranges[$0] }
-        } else if layout.trailingMaximum > 9, ranges.count == layout.columns,
-                  let union = unionRange(consensus, at: ranges.count - 1) {
-            ranges[ranges.count - 1] = union
+        } else if layout.trailingMaximum > 9, ranges.count == layout.columns {
+            let glyph = median(ranges.map { Double($0.upperBound - $0.lowerBound + 1) })
+            let base = unionRange(consensus, at: ranges.count - 1) ?? ranges[ranges.count - 1]
+            ranges[ranges.count - 1] = wideningTail(base, by: glyph)
         }
 
         if ranges.count == layout.columns - 1 {
