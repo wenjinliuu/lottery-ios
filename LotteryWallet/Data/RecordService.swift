@@ -289,6 +289,11 @@ struct TicketCard: Identifiable, Hashable {
         let matched: [SectionKey: [Bool]]
         let prizeAmount: Double
         let status: RecordStatus
+        /// 这一注自己的玩法名（组三 / 组六 / 单选 / 选八）。没有就留空。
+        ///
+        /// 3D 和排列3 一张票上每一注可以是不同玩法，票面就是这么打的 ——
+        /// 卡片上也该照样标出来，用「1. 2. 3.」代替就把最要紧的信息抹掉了。
+        let playLabel: String
         /// 这一注是否已经核对过 —— 也就是**有没有命中标记可以拿来渲染**。
         ///
         /// 导入恢复的老票状态是 won / lost，命中标记却是空的，
@@ -407,6 +412,7 @@ extension TicketCard {
                  matched: record.matched,
                  prizeAmount: record.prizeAmount,
                  status: record.status,
+                 playLabel: key.lineLabel(playMode: record.playMode),
                  hasResult: !record.matched.isEmpty)
         }
 

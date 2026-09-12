@@ -117,8 +117,10 @@ final class TicketTextParserGamesTests: XCTestCase {
     // MARK: - 福彩 3D
 
     /// 一张 3D 票上可以混着好几种玩法，样票就是组六 ×2、组三 ×1、单选 ×2。
-    /// 玩法决定奖级，所以要按玩法拆成三张，合计 10 元按注数分摊。
-    func testFuCai3DSplitsByPlayMode() {
+    ///
+    /// **不拆票** —— 用户手里就是一张彩票，票夹里也该是一张卡片，
+    /// 玩法落到每一注上。曾经按玩法拆成三张，金额还要分摊，反而更难核对。
+    func testFuCai3DKeepsOneTicketWithPerLineModes() {
         let text = """
         玩法:3D-单式   机号:31130622
         7D92-04AE-1FB5-E411-B960/32798871/C084C
@@ -132,17 +134,16 @@ final class TicketTextParserGamesTests: XCTestCase {
         感谢您为公益慈善事业贡献3.40元
         """
         let tickets = TicketTextParser.parseTickets(text)
-        XCTAssertEqual(tickets.count, 3)
-        XCTAssertTrue(tickets.allSatisfy { $0.game == .fc3d })
-        XCTAssertEqual(tickets.map(\.playMode), ["group6", "group3", "single"])
-        XCTAssertEqual(tickets.map(\.count), [2, 1, 2])
-        // 分摊之后每一张的合计都要和自己的注数对得上
-        for ticket in tickets {
-            XCTAssertEqual(ticket.totalCost, ticket.totalAmount ?? -1, accuracy: 0.001)
-        }
-        XCTAssertEqual(tickets.first?.lines.first?[.nums3], [1, 8, 9])
+        XCTAssertEqual(tickets.count, 1, "一张票就该是一张票")
+        guard let ticket = tickets.first else { return }
+        XCTAssertEqual(ticket.game, .fc3d)
+        XCTAssertEqual(ticket.count, 5)
+        XCTAssertEqual(ticket.totalCost, 10, accuracy: 0.001)
+        XCTAssertEqual(ticket.lineModes,
+                       ["group6", "group6", "group3", "single", "single"])
+        XCTAssertEqual(ticket.lines.first?[.nums3], [1, 8, 9])
         // 带 0 的那一注不能丢
-        XCTAssertEqual(tickets.first?.lines.dropFirst().first?[.nums3], [0, 1, 7])
+        XCTAssertEqual(ticket.lines.dropFirst().first?[.nums3], [0, 1, 7])
     }
 
     // MARK: - 排列3
@@ -172,10 +173,10 @@ final class TicketTextParserGamesTests: XCTestCase {
 
     /// 体彩排列3 组选单式，3 注 × 2 元 = 6 元。
     ///
-    /// **票面只印「组选」，不说是组三还是组六** —— 那是由号码本身决定的：
+    /// 票面只印「组选」，不说是组三还是组六 —— 那由号码本身决定：
     /// `0 1 5`、`3 6 7` 三位都不同是组六，`0 4 4` 有一对相同是组三。
-    /// 两者奖级不同，所以要拆成两张记录，6 元按注数分摊成 4 元 + 2 元。
-    func testPaiLie3GroupPickSplitsByRepeatedDigits() {
+    /// 奖级不同，但**仍然是一张票**，所以只标到每一注上，不拆。
+    func testPaiLie3GroupPickResolvesPerLine() {
         let text = """
         体彩 排列3
         第 26088期   2026年04月08日开奖
@@ -188,13 +189,12 @@ final class TicketTextParserGamesTests: XCTestCase {
         感谢您为公益事业贡献 2.04元
         """
         let tickets = TicketTextParser.parseTickets(text)
-        XCTAssertEqual(tickets.count, 2)
-        XCTAssertEqual(tickets.map(\.playMode), ["group6", "group3"])
-        XCTAssertEqual(tickets.map(\.count), [2, 1])
-        // accuracy 版的 XCTAssertEqual 不收可选值，先摊平再比
-        XCTAssertEqual(tickets.map(\.totalCost), [4, 2])
-        XCTAssertEqual(tickets.first?.lines.first?[.nums3], [0, 1, 5])
-        XCTAssertEqual(tickets.dropFirst().first?.lines.first?[.nums3], [0, 4, 4])
+        XCTAssertEqual(tickets.count, 1)
+        guard let ticket = tickets.first else { return }
+        XCTAssertEqual(ticket.count, 3)
+        XCTAssertEqual(ticket.totalCost, 6, accuracy: 0.001)
+        XCTAssertEqual(ticket.lineModes, ["group6", "group6", "group3"])
+        XCTAssertEqual(ticket.lines.last?[.nums3], [0, 4, 4])
     }
 
     // MARK: - 回归：这两个坑是上一版真踩出来的
@@ -221,6 +221,37 @@ final class TicketTextParserGamesTests: XCTestCase {
         }
         // 体彩那边仍然是 5 位
         XCTAssertEqual(TicketTextParser.extractIssue("第 26042期  2026年04月17日开奖", game: .qxc), "26042")
+    }
+
+    /// OCR 经常只认出倍数括号的半边。真实识别结果里出现过
+    /// `... 63 72 1 )`（丢了左括号）和 `... 23 25(1`（丢了右括号），
+    /// 那个残缺的 `1` 会被当成一个号码，整注被判掉 —— 用户看到「少了一注」。
+    func testBrokenMultipleParenthesisStillStripped() {
+        let missingLeft = """
+        玩法: 快乐8-选八单式
+        A.05 16 24 33 45 52 66 80    (1)
+        B.01 14 27 31 39 58 63 72 1 )
+        开奖期:2026081 26-04-01   合计4元
+        """
+        XCTAssertEqual(TicketTextParser.parseTickets(missingLeft).first?.count, 2)
+
+        let missingRight = """
+        玩法: 七乐彩-单式
+        A.09 12 16 18 19 23 25(1)
+        B.05 16 17 18 19 23 25(1
+        开奖期:2026018 26-02-11   合计4元
+        """
+        XCTAssertEqual(TicketTextParser.parseTickets(missingRight).first?.count, 2)
+    }
+
+    /// 但括号一个都没有时**不能动** —— 否则双色球每一注都要少一个蓝球。
+    func testTrailingNumberWithoutParenthesisIsKept() {
+        let text = """
+        玩法: 双色球-单式
+        A.11 13 14 27 31 33-04
+        开奖期:2026106 26-09-13   合计2元
+        """
+        XCTAssertEqual(TicketTextParser.parseTickets(text).first?.lines.first?[.blue], [4])
     }
 
     // MARK: - 不能误伤原有彩种

@@ -36,6 +36,14 @@ struct ScannedTicket: Identifiable, Hashable {
     var selections: [SectionKey: SectionSelection] = [:]
     /// 单式票的每一注。
     var lines: [NumberSet] = []
+    /// 每一注自己的玩法，和 `lines` 一一对应。空数组表示整票共用 `playMode`。
+    ///
+    /// 3D 和排列3 需要它：**一张票上每一注可以是不同玩法**。
+    /// 3D 的样票是「组六 / 组六 / 组三 / 单选 / 单选」打在一张纸上；
+    /// 排列3 的组选票只印「组选」两个字，具体是组三还是组六由号码自己决定
+    /// （有重复就是组三）。这两种情况都**不能拆票** —— 用户手里就是一张票，
+    /// 票夹里也该是一张卡片，只是卡片里每一注各自标着自己的玩法。
+    var lineModes: [String] = []
     var multiple: Int = 1
     /// 票面印的玩法键。
     ///
@@ -265,8 +273,17 @@ enum TicketTextParser {
     private static func singleLine(_ line: String, game: GameKey) -> (numbers: NumberSet, multiple: Int?)? {
         // 行尾括号里的倍数和行首的注序号都不是号码，先摘掉
         let multiple = lineMultiple(line)
-        var body = line.replacingOccurrences(of: "\\(\\s*[-—0-9OQDIloq|!]{1,3}\\s*\\)\\s*$",
-                                             with: "", options: .regularExpression)
+        // 行尾那个倍数括号 OCR 经常只认出半边 —— 真实结果里有
+        // `... 63 72 1 )`（丢了左括号）和 `... 23 25(1`（丢了右括号）。
+        // 括号必须写成可选，否则那个残缺的 `1` 会被当成一个号码，
+        // 号码个数多出一个，整注就被判掉了 —— 用户看到的是「少了一注」。
+        //
+        // **至少要有一边括号在**。两边都写成可选的话，
+        // `A.11 13 14 27 31 33-04` 结尾的 `-04` 会被当成倍数削掉 ——
+        // 每一张双色球单式票都要少一个蓝球。
+        var body = line.replacingOccurrences(
+            of: "(?:[(（]\\s*[-—0-9OQDIloq|!]{1,3}\\s*[)）]?|[-—0-9OQDIloq|!]{1,3}\\s*[)）])\\s*$",
+            with: "", options: .regularExpression)
         body = body.replacingOccurrences(of: lineIndexPrefix, with: "", options: .regularExpression)
         // 3D 每一注行首印着自己的玩法：`组六: 1 8 9`。摘掉它，
         // 剩下的才是号码 —— 玩法由 `perLineModes` 单独去读。
@@ -402,43 +419,23 @@ enum TicketTextParser {
 
     /// 一块文本解析出的全部票。
     ///
-    /// 绝大多数时候就是一张。唯一的例外是 3D / 排列3：**同一张票上每一注
-    /// 可以是不同玩法** —— 样票里就有「组六 / 组六 / 组三 / 单选 / 单选」
-    /// 打在一张纸上。玩法决定奖级，混在一张记录里没法核对，
-    /// 所以按玩法拆成几张，合计金额也跟着按注数分摊。
+    /// 就是一张。曾经为了 3D 的混合玩法在这里按玩法拆过票 —— 那是错的：
+    /// 用户手里明明是一张彩票，票夹里冒出两三张卡片，和票面对不上，
+    /// 金额也要跟着分摊，反而更难核对。现在玩法落到每一注上（`lineModes`），
+    /// 一张票还是一张票。
     static func parseTickets(_ block: String) -> [ScannedTicket] {
-        guard let ticket = parseTicket(block) else { return [] }
+        guard var ticket = parseTicket(block) else { return [] }
         guard ticket.game == .fc3d || ticket.game == .pl3, ticket.play == .single else {
             return [ticket]
         }
         let modes = perLineModes(block, game: ticket.game)
         guard modes.count == ticket.lines.count else { return [ticket] }
-        let distinct = Set(modes)
-        guard distinct.count > 1 else {
-            var single = ticket
-            if let only = distinct.first, !only.isEmpty { single.playMode = only }
-            return [single]
+        ticket.lineModes = modes
+        // 整票只有一种玩法时顺手也写到票级别上，复核页顶上那一行要用
+        if let only = Set(modes).first, Set(modes).count == 1, !only.isEmpty {
+            ticket.playMode = only
         }
-
-        var grouped: [String: [NumberSet]] = [:]
-        var order: [String] = []
-        for (line, mode) in zip(ticket.lines, modes) {
-            if grouped[mode] == nil { order.append(mode) }
-            grouped[mode, default: []].append(line)
-        }
-        let totalLines = ticket.lines.count
-        return order.compactMap { mode in
-            guard let lines = grouped[mode] else { return nil }
-            var piece = ticket
-            piece.id = UUID()
-            piece.lines = lines
-            piece.playMode = mode
-            // 合计按注数分摊，否则每一张都顶着整张票的金额，校验必然报错
-            if let total = ticket.totalAmount, totalLines > 0 {
-                piece.totalAmount = total * Double(lines.count) / Double(totalLines)
-            }
-            return piece
-        }
+        return [ticket]
     }
 
     /// 每一注的玩法。

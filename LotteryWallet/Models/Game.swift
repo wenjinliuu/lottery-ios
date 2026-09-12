@@ -134,6 +134,15 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     ///
     /// 大乐透的「追加」原来在票夹里完全看不见 —— 票面只显示录入方式
     /// （随机/普通/复式/胆拖），玩法字段虽然存了却没有任何地方读它。
+    /// 票夹卡片上每一注前面标的玩法。
+    ///
+    /// 只有「同一张票上每一注可以不一样」的彩种才需要 —— 也就是 3D 和排列3。
+    /// 其余彩种整票一个玩法，标在卡片头部就够了，每行再重复一遍是噪声。
+    func lineLabel(playMode: String) -> String {
+        guard self == .fc3d || self == .pl3 else { return "" }
+        return playLabel(playMode: playMode, addOn: false)
+    }
+
     func playLabel(playMode: String, addOn: Bool) -> String {
         switch self {
         case .dlt: return addOn ? "追加" : "普通"

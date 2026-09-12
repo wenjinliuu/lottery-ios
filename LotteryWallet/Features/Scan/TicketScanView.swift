@@ -488,11 +488,17 @@ struct TicketScanView: View {
                         zoneEditorTarget = ZoneEditorTarget(ticketID: ticket.id, lineIndex: index)
                     } label: {
                         HStack(alignment: .top, spacing: 8) {
-                            Text("\(index + 1).")
+                            // 3D / 排列3 每一注的玩法各不相同，复核时这一格
+                            // 比注序号有用得多 —— 用户要核的正是「这注是组三还是组六」。
+                            let mode = ticket.lineModes.indices.contains(index)
+                                ? ticket.game.lineLabel(playMode: ticket.lineModes[index]) : ""
+                            Text(mode.isEmpty ? "\(index + 1)." : mode)
                                 .font(.caption.weight(.bold))
                                 .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                                .frame(width: 24, alignment: .leading)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                                .foregroundStyle(mode.isEmpty ? Color.secondary : ticket.game.tint)
+                                .frame(width: mode.isEmpty ? 24 : 34, alignment: .leading)
                                 .padding(.top, 3)
                             TicketNumbersSnapshotView(game: ticket.game, numbers: numbers.values, size: 26)
                             Spacer(minLength: 0)
@@ -798,11 +804,16 @@ struct TicketScanView: View {
         do {
             for ticket in tickets {
                 for target in targets(for: ticket) {
-                    let built = ticket.expandedLines.map { numbers -> Ticket in
-                        // 玩法必须跟着存：快乐8 的「选几」和 3D 的组三/组六/单选
-                        // 决定按哪一档奖级核对。丢了它，一张选八票会被当成选十。
+                    let built = ticket.expandedLines.enumerated().map { index, numbers -> Ticket in
+                        // 玩法必须跟着存，而且**要精确到每一注**：
+                        // 快乐8 的「选几」决定按哪一档奖级算；3D 和排列3 一张票上
+                        // 每一注可以是不同玩法（组三/组六/单选），奖级完全不同。
                         let mode: String = {
                             if ticket.game == .dlt { return ticket.addOn ? "add" : "normal" }
+                            if ticket.lineModes.indices.contains(index),
+                               !ticket.lineModes[index].isEmpty {
+                                return ticket.lineModes[index]
+                            }
                             return ticket.playMode
                         }()
                         var item = Ticket(numbers: numbers,

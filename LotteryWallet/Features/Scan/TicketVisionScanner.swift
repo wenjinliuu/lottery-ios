@@ -46,7 +46,7 @@ enum TicketVisionScanner {
         //
         // 现在整块文本一起交给解析器，同一张纸上连着打两张票的情况
         // 由 `splitBlocks` 按「玩法:」这类票头来切，那是按内容切的，不会误伤。
-        var result = TicketTextParser.parse(LayoutSegmenter.lines(fragments))
+        var result = TicketTextParser.parse(await mergedText(image: image, base: fragments))
         if result.tickets.isEmpty {
             // 再放大一遍重试。裁切之后还认不出，多半是原图本身就糊。
             if let upscaled = upscale(image, factor: 1.6),
@@ -67,6 +67,70 @@ enum TicketVisionScanner {
         let content = contentCrop(image, fragments: fragments) ?? image
         for ticket in result.tickets { page.images[ticket.id] = content }
         return page
+    }
+
+    // MARK: - 号码行的二次识别
+
+    /// 中文模型 + 拉丁数字混在一起时，**间距很宽的单个数字最容易被并掉或漏掉**。
+    ///
+    /// 双色球和大乐透之所以准，是因为它们印的是两位数、还带 `-` `+` 分隔符，
+    /// 整体是一团紧凑的字符；而排列3/5、七星彩印的是一个个孤零零的个位数，
+    /// 中间空好几个字符宽 —— 这正是中文识别模型最容易把它们当成排版空白、
+    /// 或者干脆并成一个 token 的地方。真实识别结果里
+    /// `8 4 4 1 5` 认成 `8 4 1`、`3 6 7` 认成 `3 6`，都是这个原因。
+    ///
+    /// 所以号码行单独再认一遍：图放大两倍、**只挂英数模型**。
+    /// 非号码行（彩种名、玩法、期号、金额）仍然用中文那一遍的结果。
+    static func mergedText(image: UIImage, base: [TextFragment]) async -> String {
+        let baseRows = LayoutSegmenter.rows(base)
+        guard let upscaled = upscale(image, factor: 2),
+              let digitFragments = try? await recognizeFragments(in: upscaled, languages: ["en-US"]) else {
+            return LayoutSegmenter.lines(base)
+        }
+        let digitRows = LayoutSegmenter.rows(digitFragments)
+
+        return baseRows.map { row -> String in
+            let original = LayoutSegmenter.join(row)
+            guard looksLikeNumberRow(original) else { return original }
+            let band = LayoutSegmenter.band(row)
+            // 放大不改变归一化坐标，所以两遍的纵向位置可以直接比
+            let overlapping = digitRows.filter { LayoutSegmenter.band($0).overlaps(band) }
+            guard let better = overlapping
+                .map(LayoutSegmenter.join)
+                .max(by: { digitCount($0) < digitCount($1) }),
+                digitCount(better) > digitCount(original) else { return original }
+            return graft(prefix: original, digits: better)
+        }
+        .joined(separator: "\n")
+    }
+
+    /// 这一行看着像不像一排号码：数字占了绝大多数。
+    ///
+    /// 判松了会把「开奖期:2026091 26-04-11 合计10元」也送去数字识别 ——
+    /// 那一行恰恰需要中文才能读出「合计」和「开奖期」。
+    static func looksLikeNumberRow(_ text: String) -> Bool {
+        let meaningful = text.filter { !$0.isWhitespace }
+        guard meaningful.count >= 3 else { return false }
+        let digits = meaningful.filter(\.isNumber).count
+        return Double(digits) / Double(meaningful.count) >= 0.6
+    }
+
+    private static func digitCount(_ text: String) -> Int {
+        text.filter(\.isNumber).count
+    }
+
+    /// 保留原行开头的非数字部分（`A.`、`组六:`、`①`），号码换成数字那一遍的。
+    ///
+    /// 前缀必须留着 —— 玩法和注序号都在那里，而只认英数的那一遍读不出中文。
+    private static func graft(prefix original: String, digits: String) -> String {
+        guard let firstDigit = original.firstIndex(where: { $0.isNumber || $0 == "-" }) else {
+            return digits
+        }
+        let head = original[original.startIndex..<firstDigit]
+        // 纯空白的前缀没有意义，别在行首留一串空格
+        let trimmedHead = head.trimmingCharacters(in: .whitespaces)
+        guard !trimmedHead.isEmpty else { return digits }
+        return "\(trimmedHead) \(digits.trimmingCharacters(in: .whitespaces))"
     }
 
     /// 票面最后一行**有意义的内容**通常带着这些词。
@@ -135,7 +199,8 @@ enum TicketVisionScanner {
         let box: CGRect
     }
 
-    static func recognizeFragments(in image: UIImage) async throws -> [TextFragment] {
+    static func recognizeFragments(in image: UIImage,
+                                   languages: [String] = ["zh-Hans", "en-US"]) async throws -> [TextFragment] {
         guard let cgImage = image.cgImage else { throw ScanError.invalidImage }
         let orientation = cgOrientation(image.imageOrientation)
 
@@ -143,7 +208,7 @@ enum TicketVisionScanner {
         let observations: [VNRecognizedTextObservation] = try await Task.detached(priority: .userInitiated) {
             let request = VNRecognizeTextRequest()
             request.recognitionLevel = .accurate
-            request.recognitionLanguages = ["zh-Hans", "en-US"]
+            request.recognitionLanguages = languages
             // 彩票号码不是自然语言，语言纠正只会把号码改坏
             request.usesLanguageCorrection = false
             request.minimumTextHeight = 0.008
@@ -261,7 +326,24 @@ enum LayoutSegmenter {
 
     /// 把一组文字块按纵坐标聚成行、行内按横坐标排序，拼成逐行文本。
     static func lines(_ fragments: [TicketVisionScanner.TextFragment]) -> String {
-        guard !fragments.isEmpty else { return "" }
+        rows(fragments).map(join).joined(separator: "\n")
+    }
+
+    /// 一行里的碎片按 x 排好拼成文本。
+    static func join(_ row: [TicketVisionScanner.TextFragment]) -> String {
+        row.sorted { $0.box.minX < $1.box.minX }.map(\.text).joined(separator: " ")
+    }
+
+    /// 这一行占的纵向区间。两遍识别靠它对齐同一行。
+    static func band(_ row: [TicketVisionScanner.TextFragment]) -> ClosedRange<CGFloat> {
+        let lower = row.map(\.box.minY).min() ?? 0
+        let upper = row.map(\.box.maxY).max() ?? 0
+        return Swift.min(lower, upper)...Swift.max(lower, upper)
+    }
+
+    /// 把碎片按纵向位置聚成一行一行。
+    static func rows(_ fragments: [TicketVisionScanner.TextFragment]) -> [[TicketVisionScanner.TextFragment]] {
+        guard !fragments.isEmpty else { return [] }
         // Vision 的坐标原点在左下角，纵坐标要倒过来排
         let sorted = fragments.sorted { $0.box.midY > $1.box.midY }
         let averageHeight = fragments.map(\.box.height).reduce(0, +) / CGFloat(fragments.count)
@@ -278,9 +360,5 @@ enum LayoutSegmenter {
             }
         }
         return rows
-            .map { row in
-                row.sorted { $0.box.minX < $1.box.minX }.map(\.text).joined(separator: " ")
-            }
-            .joined(separator: "\n")
     }
 }

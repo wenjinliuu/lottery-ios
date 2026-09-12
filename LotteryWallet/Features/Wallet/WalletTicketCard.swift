@@ -155,11 +155,17 @@ struct WalletTicketCard: View {
 
     private func lineRow(index: Int, line: TicketCard.Line) -> some View {
         HStack(spacing: 9) {
-            Text("\(index + 1)")
-                .font(.caption2.weight(.medium))
+            // 3D / 排列3 一张票上每一注可以是不同玩法，票面就是这么打的
+            // （组六 / 组六 / 组三 / 单选…），卡片上也要照样标出来 ——
+            // 用「1. 2. 3.」代替就把这一注最要紧的信息抹掉了。
+            // 其余彩种整票一个玩法，仍然显示注序号。
+            Text(line.playLabel.isEmpty ? "\(index + 1)" : line.playLabel)
+                .font(.caption2.weight(line.playLabel.isEmpty ? .medium : .semibold))
                 .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(width: 20)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .foregroundStyle(line.playLabel.isEmpty ? Color.secondary : game.tint)
+                .frame(width: line.playLabel.isEmpty ? 20 : 30)
 
             TicketNumbersSnapshotView(
                 game: game,
