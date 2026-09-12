@@ -59,10 +59,9 @@ enum DigitMatrixReader {
     // MARK: - 入口
 
     static func read(image: UIImage,
-                     columns: Int,
-                     labelBoundary: CGFloat?,
-                     trailingMaximum: Int) async -> Matrix? {
-        guard columns > 0 else { return nil }
+                     layout: DigitTicketLayout,
+                     labelBoundary: CGFloat?) async -> Matrix? {
+        let columns = layout.columns
         var chars = await allDigits(in: image)
         // 票面左边那一竖排注序号（`①②③④⑤` / `A. B. C.`）**和号码列同一个间距**
         // （实测 62.5 对 65），几何上分不开。而 `.fast` 会把圈码读成 `0`，
@@ -78,34 +77,25 @@ enum DigitMatrixReader {
         let glyphWidth = median(chars.map(\.box.width))
         guard glyphHeight > 0, glyphWidth > 0 else { return nil }
 
-        var candidates = betRows(chars, columns: columns,
+        let candidates = betRows(chars, columns: columns,
                                  glyphWidth: glyphWidth, glyphHeight: glyphHeight)
         guard !candidates.isEmpty else { return nil }
         var grid = columnGrid(candidates.map(\.tokens), columns: columns, glyphWidth: glyphWidth)
 
-        // 最后一列整列都没认出来时，到右边去把它找回来。
+        // 最后一列整列都没认出来时，**按版式算出它在哪儿**。
         //
-        // 七星彩的特别号离前六位更远（实测间距是号码间距的 1.6 倍），
+        // 七星彩的特别号印得比别的号码远（实测 1.58 个列距），
         // Vision 的文本行到那儿就断了，整列一个字符都拿不到。
-        // 但行带和列距都已经知道了，那一列在哪儿是算得出来的。
+        // 之前是在右边扫一大片碰运气；现在位置是算出来的，
+        // 直接把这一列摆上去，每一格再单独裁出来认。
         if grid == nil,
            let partial = columnGrid(candidates.map(\.tokens), columns: columns - 1,
                                     glyphWidth: glyphWidth),
-           let last = partial.last {
-            let extra = await trailingColumn(image: image,
-                                             bands: candidates.map(\.band),
-                                             after: last,
-                                             pitch: pitch(of: partial),
-                                             glyphWidth: glyphWidth)
-            if !extra.isEmpty {
-                chars.append(contentsOf: extra)
-                candidates = betRows(chars, columns: columns,
-                                     glyphWidth: glyphWidth, glyphHeight: glyphHeight)
-                grid = columnGrid(candidates.map(\.tokens), columns: columns,
-                                  glyphWidth: glyphWidth)
-            }
+           let last = partial.last,
+           let trailing = layout.trailingColumn(after: last, pitch: pitch(of: partial)) {
+            grid = partial + [trailing]
         }
-        guard let grid, !candidates.isEmpty else { return nil }
+        guard let grid else { return nil }
 
         var rows: [Row] = []
         for candidate in candidates {
@@ -120,13 +110,14 @@ enum DigitMatrixReader {
                                                column: grid[index],
                                                band: candidate.band,
                                                width: glyphWidth,
-                                               maximum: index == columns - 1 ? trailingMaximum : 9)
+                                               maximum: index == columns - 1
+                                                   ? layout.trailingMaximum : 9)
             }
             rows.append(Row(band: candidate.band, values: values))
         }
         guard !rows.isEmpty else { return nil }
         rows = await recoveringTens(rows, grid: grid, image: image,
-                                    glyphWidth: glyphWidth, maximum: trailingMaximum)
+                                    glyphWidth: glyphWidth, maximum: layout.trailingMaximum)
         // 一多半都是问号就别拿出来了，那多半根本没找对地方
         let known = rows.reduce(0) { $0 + $1.values.compactMap { $0 }.count }
         guard known * 2 >= rows.count * columns else { return nil }
@@ -154,65 +145,6 @@ enum DigitMatrixReader {
         return median(zip(centers, centers.dropFirst()).map { $1 - $0 })
     }
 
-    /// 到最后一列右边去找那一整列。
-    ///
-    /// 只认「每一条行带在那片区域里都只有一个号码、而且这些号码横向对得齐」
-    /// 的情况 —— 找到一堆散的东西就当没找到，宁可退回旧办法。
-    private static func trailingColumn(image: UIImage,
-                                       bands: [ClosedRange<CGFloat>],
-                                       after last: ClosedRange<CGFloat>,
-                                       pitch: CGFloat,
-                                       glyphWidth: CGFloat) async -> [TicketVisionScanner.DigitChar] {
-        guard pitch > 0 else { return [] }
-        let from = last.upperBound + glyphWidth * 0.3
-        let to = Swift.min(last.upperBound + pitch * 2.4, 1)
-        guard to > from + glyphWidth else { return [] }
-
-        var found: [TicketVisionScanner.DigitChar] = []
-        var boxes: [CGRect] = []
-        for band in bands {
-            let chars = await digits(in: image, columns: from...to, band: band)
-            guard let first = chars.first else { continue }
-            let box = chars.dropFirst().reduce(first.box) { $0.union($1.box) }
-            // 一个号码最多两位。一长串说明裁到别的东西上去了
-            guard box.width <= glyphWidth * 2.6 else { continue }
-            found.append(contentsOf: chars)
-            boxes.append(box)
-        }
-        // 一半以上的行都在同一个地方找到号码，才认这是一列
-        guard boxes.count * 2 >= bands.count else { return [] }
-        let spread = (boxes.map(\.midX).max() ?? 0) - (boxes.map(\.midX).min() ?? 0)
-        guard spread <= glyphWidth * 1.5 else { return [] }
-        return found
-    }
-
-    /// 裁一小块出来认里面的数字。
-    private static func digits(in image: UIImage,
-                               columns: ClosedRange<CGFloat>,
-                               band: ClosedRange<CGFloat>) async -> [TicketVisionScanner.DigitChar] {
-        guard let strip = TicketVisionScanner.strip(image, band: band, columns: columns) else { return [] }
-        // 裁条两边放宽过，换算坐标要按它**实际**裁到的区间来
-        let span = TicketVisionScanner.stripColumns(columns)
-        let spanWidth = span.upperBound - span.lowerBound
-        let slice = UIImage(cgImage: strip, scale: 1, orientation: .up)
-        for source in [slice, TicketVisionScanner.contrastBoosted(slice) ?? slice] {
-            guard let big = TicketVisionScanner.upscaled(source, factor: 6) else { continue }
-            let chars = await TicketVisionScanner.recognizeDigits(in: big)
-                .filter { (0.2...0.8).contains($0.box.midY) }
-            guard !chars.isEmpty else { continue }
-            // 裁条的坐标换算回整张图
-            return chars.map { char in
-                TicketVisionScanner.DigitChar(
-                    value: char.value,
-                    box: CGRect(x: span.lowerBound + char.box.minX * spanWidth,
-                                y: band.lowerBound,
-                                width: char.box.width * spanWidth,
-                                height: band.upperBound - band.lowerBound))
-            }
-        }
-        return []
-    }
-
     // MARK: - 取字符
 
     /// 整张票上所有的数字字符。
@@ -225,7 +157,7 @@ enum DigitMatrixReader {
         var sources = [image]
         if let boosted = TicketVisionScanner.contrastBoosted(image) { sources.append(boosted) }
         for source in sources {
-            for char in await TicketVisionScanner.recognizeDigits(in: source, fast: true) {
+            for char in await TicketVisionScanner.recognizeDigits(in: source) {
                 guard !kept.contains(where: { $0.box.intersects(char.box) }) else { continue }
                 kept.append(char)
             }

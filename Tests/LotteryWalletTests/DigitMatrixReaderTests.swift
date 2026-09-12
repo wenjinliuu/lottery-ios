@@ -468,17 +468,72 @@ final class UnknownDigitPlumbingTests: XCTestCase {
         XCTAssertNil(TicketTextParser.singleLineForTesting("组六: 01 5", game: .fc3d))
     }
 
-    /// 只有最后一列可能印成两位数的彩种，才需要回头去找丢掉的十位。
+    /// 票面版式：全是比值，一个像素数都没有。
     ///
-    /// 七星彩的特别号是 0-14，`13` `10` 在票面上占两个字符、整列右对齐，
-    /// 十位那个又窄又靠左，实测就是被丢掉的那一个。
-    /// 排列3/5、福彩3D 每一位都是 0-9，不存在这回事 ——
-    /// 给它们开这一步只会平白多出误判的机会。
-    func testTrailingColumnMaximum() {
-        XCTAssertEqual(TicketVisionScanner.trailingColumnMaximum(.qxc), 14)
-        XCTAssertEqual(TicketVisionScanner.trailingColumnMaximum(.pl5), 9)
-        XCTAssertEqual(TicketVisionScanner.trailingColumnMaximum(.pl3), 9)
-        XCTAssertEqual(TicketVisionScanner.trailingColumnMaximum(.fc3d), 9)
+    /// 三张真票逐像素量出来的：七星彩 列距÷字宽 3.62、排列5 3.74、排列3 3.43；
+    /// 七星彩的特别号偏移 1.58 个列距。两家不同的打票机比值几乎一样，
+    /// 说明这是**印刷版式**决定的，可以当先验用。
+    func testLayoutOnlyCoversDigitGames() {
+        XCTAssertEqual(DigitTicketLayout.of(.pl3)?.columns, 3)
+        XCTAssertEqual(DigitTicketLayout.of(.fc3d)?.columns, 3)
+        XCTAssertEqual(DigitTicketLayout.of(.pl5)?.columns, 5)
+        XCTAssertEqual(DigitTicketLayout.of(.qxc)?.columns, 7)
+        // 七乐彩、快乐8 印的是正常行距的两位数，双色球、大乐透还带分隔符 ——
+        // 它们的行 Vision 横着读得好好的，不该按矩阵去拆。
+        XCTAssertNil(DigitTicketLayout.of(.qlc))
+        XCTAssertNil(DigitTicketLayout.of(.k8))
+        XCTAssertNil(DigitTicketLayout.of(.ssq))
+        XCTAssertNil(DigitTicketLayout.of(.dlt))
+    }
+
+    /// 只有七星彩的最后一列印成两位数。
+    func testTrailingMaximum() {
+        XCTAssertEqual(DigitTicketLayout.of(.qxc)?.trailingMaximum, 14)
+        XCTAssertEqual(DigitTicketLayout.of(.pl5)?.trailingMaximum, 9)
+        XCTAssertEqual(DigitTicketLayout.of(.pl3)?.trailingMaximum, 9)
+    }
+
+    /// 最后一列整列没认出来时，位置是**算**出来的，不是找出来的。
+    ///
+    /// 七星彩的特别号在前一列右边 1.58 个列距处；之前是在右边扫一大片
+    /// 碰运气，既容易扫到票号，也容易什么都扫不着。
+    func testTrailingColumnIsPredictedFromLayout() {
+        guard let layout = DigitTicketLayout.of(.qxc) else { return XCTFail("七星彩该有版式") }
+        let last: ClosedRange<CGFloat> = 0.40...0.44      // 中心 0.42
+        let column = layout.trailingColumn(after: last, pitch: 0.1)
+        XCTAssertEqual(column.map { ($0.lowerBound + $0.upperBound) / 2 } ?? 0,
+                       0.42 + 0.158, accuracy: 0.0001)
+        // 宽度跟着前一列走
+        XCTAssertEqual((column?.upperBound ?? 0) - (column?.lowerBound ?? 0), 0.04, accuracy: 0.0001)
+    }
+
+    /// 其余数字型彩种的最后一列和别的列一样，就在一个列距之后。
+    func testTrailingColumnForEvenlySpacedGames() {
+        guard let layout = DigitTicketLayout.of(.pl5) else { return XCTFail("排列5 该有版式") }
+        let column = layout.trailingColumn(after: 0.40...0.44, pitch: 0.1)
+        XCTAssertEqual(column.map { ($0.lowerBound + $0.upperBound) / 2 } ?? 0,
+                       0.52, accuracy: 0.0001)
+    }
+
+    /// 算到票外面去了就是算错了，宁可不补这一列。
+    func testTrailingColumnOffTicketIsRejected() {
+        guard let layout = DigitTicketLayout.of(.qxc) else { return XCTFail("七星彩该有版式") }
+        XCTAssertNil(layout.trailingColumn(after: 0.90...0.95, pitch: 0.2))
+    }
+
+    /// 标签右边界是**相对票面内容**算的，不是相对整张照片。
+    ///
+    /// 用户裁得松、票只占画面一半时，按整张图算的比例全都会偏 ——
+    /// 这正是「裁切稍微不准就识别失败」的来源之一。
+    func testRowLabelBoundaryIsRelativeToTheTicketNotThePhoto() {
+        // 票只占画面右半边：注序号在 0.52，号码在 0.58 往右
+        let fragments = [
+            fragment("②", x: 0.52, width: 0.02),
+            fragment("③", x: 0.52, width: 0.02),
+            fragment("3 9 5 4 7 7 13", x: 0.58, width: 0.34)
+        ]
+        let boundary = TicketVisionScanner.rowLabelBoundary(fragments)
+        XCTAssertEqual(boundary ?? 0, 0.54, accuracy: 0.001)
     }
 
     /// 十位补回来之后，整行要能照常解析成一注。
@@ -490,17 +545,4 @@ final class UnknownDigitPlumbingTests: XCTestCase {
         XCTAssertEqual(numbers?[.tail], [13])
     }
 
-    /// 只有**每一位印一个号码**的彩种才走矩阵重建。
-    /// 七乐彩、快乐8 印的是两位数且号码之间间距正常，双色球、大乐透还带分隔符 ——
-    /// 它们的行本来就横着读得好好的，不该去动。
-    func testOnlyDigitGamesUseMatrixRebuild() {
-        XCTAssertEqual(TicketVisionScanner.positionalDigitCount(.pl3), 3)
-        XCTAssertEqual(TicketVisionScanner.positionalDigitCount(.fc3d), 3)
-        XCTAssertEqual(TicketVisionScanner.positionalDigitCount(.pl5), 5)
-        XCTAssertEqual(TicketVisionScanner.positionalDigitCount(.qxc), 7)
-        XCTAssertNil(TicketVisionScanner.positionalDigitCount(.qlc))
-        XCTAssertNil(TicketVisionScanner.positionalDigitCount(.k8))
-        XCTAssertNil(TicketVisionScanner.positionalDigitCount(.ssq))
-        XCTAssertNil(TicketVisionScanner.positionalDigitCount(.dlt))
-    }
 }

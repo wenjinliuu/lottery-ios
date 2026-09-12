@@ -95,10 +95,9 @@ enum TicketVisionScanner {
         let game = TicketTextParser.detectGame(originals.joined(separator: "\n"))
         // 数字型彩种先走矩阵重建。它**整段接管**号码区，因为对这些票来说
         // Vision 的分行结果本身就是错的（它按竖列读），基于它再修修补补没有意义。
-        if let game, let width = positionalDigitCount(game),
-           let matrix = await DigitMatrixReader.read(image: image, columns: width,
-                                                     labelBoundary: rowLabelBoundary(base),
-                                                     trailingMaximum: trailingColumnMaximum(game)) {
+        if let game, let layout = DigitTicketLayout.of(game),
+           let matrix = await DigitMatrixReader.read(image: image, layout: layout,
+                                                     labelBoundary: rowLabelBoundary(base)) {
             return compose(rows: baseRows, originals: originals, matrix: matrix)
         }
 
@@ -121,32 +120,33 @@ enum TicketVisionScanner {
         return result.joined(separator: "\n")
     }
 
-    /// 最后一列的上限。
-    ///
-    /// 七星彩的特别号是 0-14，票面上会印成两位数，而且整列**右对齐** ——
-    /// 十位那个字符又窄又靠左，最容易被丢。知道这一列可能有两位，
-    /// 才谈得上专门回去把它找回来（见 `DigitMatrixReader.recoverTens`）。
-    /// 排列3/5、福彩3D 每一位都是 0-9，不存在这回事。
-    static func trailingColumnMaximum(_ game: GameKey) -> Int {
-        game.sections.last?.range.upperBound ?? 9
-    }
-
     /// 票面左边那一竖排注序号的右边界 —— `①②③④⑤`、`A. B. C.`、3D 的 `组六:`。
     ///
     /// 号码矩阵全在它右边。这一条是防止注序号被当成一列号码的**主闸**：
     /// 实测注序号列和号码列的间距完全一样（62.5 对 65），几何上根本分不开，
     /// 而 `.fast` 又会把圈码读成 `0`，靠字符本身也挡不住。
     /// 不挡的话整个矩阵右移一格、真正的最后一列被挤掉。
+    ///
+    /// 判据是**相对票面内容**算的，不是相对整张照片 —— 用户裁得松一点、
+    /// 票只占画面一半时，按整张图算的比例全都会偏，
+    /// 这正是「裁切稍微不准就识别失败」的来源之一。
     static func rowLabelBoundary(_ fragments: [TextFragment]) -> CGFloat? {
+        guard let content = contentBox(fragments), content.width > 0 else { return nil }
         let labels = fragments.filter { fragment in
             // 太宽的不是标签 —— 整行号码也可能以 `A.` 开头，
             // 拿它当边界会把半张票的号码切掉。
-            guard fragment.box.width < 0.12 else { return false }
+            guard fragment.box.width < content.width * 0.12 else { return false }
             // 注序号印在票面左边。右半张票上碰巧匹配到的东西不能当边界。
-            guard fragment.box.maxX < 0.4 else { return false }
+            guard fragment.box.maxX < content.minX + content.width * 0.4 else { return false }
             return fragment.text.range(of: rowLabelPrefix, options: .regularExpression) != nil
         }
         return labels.map(\.box.maxX).max()
+    }
+
+    /// 票面上所有文字占的那一块。
+    static func contentBox(_ fragments: [TextFragment]) -> CGRect? {
+        guard let first = fragments.first else { return nil }
+        return fragments.dropFirst().reduce(first.box) { $0.union($1.box) }
     }
 
     /// 把重建出来的号码矩阵拼回整篇文本。
@@ -198,24 +198,6 @@ enum TicketVisionScanner {
             return "\(label) \(digits)"
         }
         return digits
-    }
-
-    /// 号码矩阵有几列 —— 也就是这个彩种一注有几个号。
-    ///
-    /// 只有**号码之间空得很开、靠位置就能分清**的彩种才走矩阵那条路：
-    /// 排列3/5、福彩3D、七星彩，票面实测左右空白有两个半字宽，
-    /// 而上下只有半个字高。
-    ///
-    /// 七乐彩、快乐8 的号码是正常行距的两位数，双色球、大乐透还带分隔符 ——
-    /// 它们的行 Vision 横着读得好好的，去动只会弄坏。
-    /// 它们本来也不需要：两位数 + 窄值域 + 定长注本身就带着纠错冗余。
-    static func positionalDigitCount(_ game: GameKey) -> Int? {
-        switch game {
-        case .fc3d, .pl3: 3
-        case .pl5: 5
-        case .qxc: 7
-        default: nil
-        }
     }
 
     /// 栅格铺成文本。认不出的那一位写成 `?`，由解析器带到复核页去。
