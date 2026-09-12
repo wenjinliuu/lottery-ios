@@ -58,26 +58,51 @@ enum DigitMatrixReader {
 
     // MARK: - 入口
 
-    static func read(image: UIImage, columns: Int) async -> Matrix? {
+    static func read(image: UIImage, columns: Int, labelBoundary: CGFloat?) async -> Matrix? {
         guard columns > 0 else { return nil }
-        let chars = await allDigits(in: image)
+        var chars = await allDigits(in: image)
+        // 票面左边那一竖排注序号（`①②③④⑤` / `A. B. C.`）**和号码列同一个间距**
+        // （实测 62.5 对 65），几何上分不开。而 `.fast` 会把圈码读成 `0`，
+        // 靠字符本身也挡不住。所以这一刀必须靠标签的位置来切：
+        // 号码矩阵全在标签右边。不切的话整个矩阵右移一格、最后一列被挤掉 ——
+        // 用户看到的就是每一注前面凭空多个 0、特别号整列消失。
+        if let labelBoundary {
+            chars = chars.filter { $0.box.minX > labelBoundary }
+        }
         guard chars.count >= columns else { return nil }
 
         let glyphHeight = median(chars.map(\.box.height))
         let glyphWidth = median(chars.map(\.box.width))
         guard glyphHeight > 0, glyphWidth > 0 else { return nil }
 
-        let bands = groupIntoBands(chars, glyphHeight: glyphHeight)
-        let candidates = bands.compactMap { band -> (band: ClosedRange<CGFloat>, tokens: [Token])? in
-            let tokens = tokenize(band, glyphWidth: glyphWidth)
-            guard isBetRow(tokens, columns: columns, glyphWidth: glyphWidth) else { return nil }
-            return (bandRange(band), tokens)
-        }
+        var candidates = betRows(chars, columns: columns,
+                                 glyphWidth: glyphWidth, glyphHeight: glyphHeight)
         guard !candidates.isEmpty else { return nil }
+        var grid = columnGrid(candidates.map(\.tokens), columns: columns, glyphWidth: glyphWidth)
 
-        guard let grid = columnGrid(candidates.map(\.tokens),
-                                    columns: columns,
-                                    glyphWidth: glyphWidth) else { return nil }
+        // 最后一列整列都没认出来时，到右边去把它找回来。
+        //
+        // 七星彩的特别号离前六位更远（实测间距是号码间距的 1.6 倍），
+        // Vision 的文本行到那儿就断了，整列一个字符都拿不到。
+        // 但行带和列距都已经知道了，那一列在哪儿是算得出来的。
+        if grid == nil,
+           let partial = columnGrid(candidates.map(\.tokens), columns: columns - 1,
+                                    glyphWidth: glyphWidth),
+           let last = partial.last {
+            let extra = await trailingColumn(image: image,
+                                             bands: candidates.map(\.band),
+                                             after: last,
+                                             pitch: pitch(of: partial),
+                                             glyphWidth: glyphWidth)
+            if !extra.isEmpty {
+                chars.append(contentsOf: extra)
+                candidates = betRows(chars, columns: columns,
+                                     glyphWidth: glyphWidth, glyphHeight: glyphHeight)
+                grid = columnGrid(candidates.map(\.tokens), columns: columns,
+                                  glyphWidth: glyphWidth)
+            }
+        }
+        guard let grid, !candidates.isEmpty else { return nil }
 
         var rows: [Row] = []
         for candidate in candidates {
@@ -103,6 +128,83 @@ enum DigitMatrixReader {
         let low = rows.map(\.band.lowerBound).min() ?? 0
         let high = rows.map(\.band.upperBound).max() ?? 1
         return Matrix(rows: rows, span: low...high)
+    }
+
+    /// 看起来像投注号码的那几条横带。
+    static func betRows(_ chars: [TicketVisionScanner.DigitChar],
+                        columns: Int,
+                        glyphWidth: CGFloat,
+                        glyphHeight: CGFloat) -> [(band: ClosedRange<CGFloat>, tokens: [Token])] {
+        groupIntoBands(chars, glyphHeight: glyphHeight).compactMap { band in
+            let tokens = tokenize(band, glyphWidth: glyphWidth)
+            guard isBetRow(tokens, columns: columns, glyphWidth: glyphWidth) else { return nil }
+            return (bandRange(band), tokens)
+        }
+    }
+
+    /// 列距：相邻两列中心的间距中位数。
+    static func pitch(of grid: [ClosedRange<CGFloat>]) -> CGFloat {
+        let centers = grid.map(midpoint)
+        return median(zip(centers, centers.dropFirst()).map { $1 - $0 })
+    }
+
+    /// 到最后一列右边去找那一整列。
+    ///
+    /// 只认「每一条行带在那片区域里都只有一个号码、而且这些号码横向对得齐」
+    /// 的情况 —— 找到一堆散的东西就当没找到，宁可退回旧办法。
+    private static func trailingColumn(image: UIImage,
+                                       bands: [ClosedRange<CGFloat>],
+                                       after last: ClosedRange<CGFloat>,
+                                       pitch: CGFloat,
+                                       glyphWidth: CGFloat) async -> [TicketVisionScanner.DigitChar] {
+        guard pitch > 0 else { return [] }
+        let from = last.upperBound + glyphWidth * 0.3
+        let to = Swift.min(last.upperBound + pitch * 2.4, 1)
+        guard to > from + glyphWidth else { return [] }
+
+        var found: [TicketVisionScanner.DigitChar] = []
+        var boxes: [CGRect] = []
+        for band in bands {
+            let chars = await digits(in: image, columns: from...to, band: band)
+            guard let first = chars.first else { continue }
+            let box = chars.dropFirst().reduce(first.box) { $0.union($1.box) }
+            // 一个号码最多两位。一长串说明裁到别的东西上去了
+            guard box.width <= glyphWidth * 2.6 else { continue }
+            found.append(contentsOf: chars)
+            boxes.append(box)
+        }
+        // 一半以上的行都在同一个地方找到号码，才认这是一列
+        guard boxes.count * 2 >= bands.count else { return [] }
+        let spread = (boxes.map(\.midX).max() ?? 0) - (boxes.map(\.midX).min() ?? 0)
+        guard spread <= glyphWidth * 1.5 else { return [] }
+        return found
+    }
+
+    /// 裁一小块出来认里面的数字。
+    private static func digits(in image: UIImage,
+                               columns: ClosedRange<CGFloat>,
+                               band: ClosedRange<CGFloat>) async -> [TicketVisionScanner.DigitChar] {
+        guard let strip = TicketVisionScanner.strip(image, band: band, columns: columns) else { return [] }
+        // 裁条两边放宽过，换算坐标要按它**实际**裁到的区间来
+        let span = TicketVisionScanner.stripColumns(columns)
+        let spanWidth = span.upperBound - span.lowerBound
+        let slice = UIImage(cgImage: strip, scale: 1, orientation: .up)
+        for source in [slice, TicketVisionScanner.contrastBoosted(slice) ?? slice] {
+            guard let big = TicketVisionScanner.upscaled(source, factor: 6) else { continue }
+            let chars = await TicketVisionScanner.recognizeDigits(in: big)
+                .filter { (0.2...0.8).contains($0.box.midY) }
+            guard !chars.isEmpty else { continue }
+            // 裁条的坐标换算回整张图
+            return chars.map { char in
+                TicketVisionScanner.DigitChar(
+                    value: char.value,
+                    box: CGRect(x: span.lowerBound + char.box.minX * spanWidth,
+                                y: band.lowerBound,
+                                width: char.box.width * spanWidth,
+                                height: band.upperBound - band.lowerBound))
+            }
+        }
+        return []
     }
 
     // MARK: - 取字符

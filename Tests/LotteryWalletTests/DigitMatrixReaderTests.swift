@@ -15,15 +15,18 @@ import XCTest
 final class DigitMatrixReaderTests: XCTestCase {
 
     // 票面实测（像素，左上角为原点）
-    private let blockWidth: CGFloat = 605
+    private let blockWidth: CGFloat = 720
     private let blockHeight: CGFloat = 220
     private let glyphWidth: CGFloat = 21
     private let glyphHeight: CGFloat = 29
     /// 六个单字符列的左边界
-    private let columnLefts: [CGFloat] = [25.5, 101.5, 178.5, 254.5, 329.5, 406.5]
+    private let columnLefts: [CGFloat] = [105.5, 181.5, 258.5, 334.5, 409.5, 486.5]
+    /// 注序号那一列（`①②③④⑤`）。实测它和第一列号码的间距是 62.5，
+    /// 和号码之间的 65 几乎一样 —— 几何上分不开，只能靠标签位置切。
+    private let rowIndexLeft: CGFloat = 39.5
     /// 第七列（特别号）是**右对齐**的：两位数的十位往左探出去
-    private let tailUnitsLeft: CGFloat = 534
-    private let tailTensLeft: CGFloat = 514
+    private let tailUnitsLeft: CGFloat = 614
+    private let tailTensLeft: CGFloat = 594
     private let tailTensWidth: CGFloat = 7
     private let rowTops: [CGFloat] = [12.5, 53.5, 94.5, 135.5, 181.5]
 
@@ -197,7 +200,7 @@ final class DigitMatrixReaderTests: XCTestCase {
                                                       glyphWidth: normalizedGlyphWidth) else {
             return XCTFail("应该估得出列栅格")
         }
-        let stray = [token(9, left: 220, width: 21)] + candidates[0].dropFirst()
+        let stray = [token(9, left: 300, width: 21)] + candidates[0].dropFirst()
         XCTAssertNil(DigitMatrixReader.assign(stray, to: grid, glyphWidth: normalizedGlyphWidth))
     }
 
@@ -235,6 +238,103 @@ final class DigitMatrixReaderTests: XCTestCase {
             }
         }
         XCTAssertEqual(rebuild(chars, columns: 3), rows.map { row in row.map { Optional($0) } })
+    }
+
+    // MARK: - 注序号那一列（实测到的错位）
+
+    /// 复现 build 30 在真机上的错位，并钉住修法。
+    ///
+    /// 实测原文是每一注前面凭空多一个数字、特别号整列消失：
+    /// `0 3 9 5 4 7 7`，而票面是 `3 9 5 4 7 7 13`。
+    ///
+    /// 两件事凑在一起才出这个结果：
+    /// 1. 特别号那一列离前六位远（间距是号码间距的 1.6 倍），Vision 的
+    ///    文本行到那儿就断了，**整列一个字符都没拿到**。
+    /// 2. 左边那一竖排注序号被当成了一列号码 —— `.fast` 把 `①` 读成 `0`、
+    ///    `③` 读成 `1`，而它和号码列的间距几乎一样（62.5 对 65），
+    ///    几何上根本分不开。
+    ///
+    /// 于是正好还是 7 列，栅格照样成立，整排右移一格。
+    func testRowIndexColumnMustNotBecomeANumberColumn() {
+        let tailColumn: Set<[Int]> = Set((0..<5).map { [$0, 6] })
+        // `.fast` 实际把五个圈码读成了这些
+        let misread = [0, 0, 1, 0, 0]
+        let indexColumn = misread.enumerated().map { index, value in
+            char(value, left: rowIndexLeft, top: rowTops[index])
+        }
+
+        // 不挡：和真机上一模一样地错位
+        let wrong = rebuild(indexColumn + layout(dropping: tailColumn))
+        XCTAssertEqual(wrong?[0], [0, 3, 9, 5, 4, 7, 7])
+        XCTAssertEqual(wrong?[2], [1, 7, 8, 1, 7, 1, 5])
+
+        // 按标签右边界挡掉注序号之后：特别号找回来了就完全正确
+        XCTAssertEqual(rebuild(keptRightOfLabels(indexColumn + layout())),
+                       ticket.map { row in row.map { Optional($0) } })
+    }
+
+    /// 挡掉注序号、而特别号那一列**又没找回来**时，只剩 6 列 ——
+    /// 这时候必须**整个矩阵作废**退回旧办法，绝不能拿 6 列硬凑成 7 列。
+    ///
+    /// 少认一列是可以接受的（退回去还有别的路），摆错位不行。
+    func testSixColumnsIsRejectedRatherThanShifted() {
+        let tailColumn: Set<[Int]> = Set((0..<5).map { [$0, 6] })
+        XCTAssertNil(rebuild(keptRightOfLabels(layout(dropping: tailColumn))))
+    }
+
+    /// 模拟「按注序号的右边界过滤」。
+    private func keptRightOfLabels(_ chars: [TicketVisionScanner.DigitChar])
+        -> [TicketVisionScanner.DigitChar] {
+        let boundary = (rowIndexLeft + glyphWidth) / blockWidth
+        return chars.filter { $0.box.minX > boundary }
+    }
+
+    /// 圈码本身不能被当成数字。
+    ///
+    /// `①` 在 Unicode 里**是个有数值的数字字符**（numericValue 就是 1），
+    /// 所以按坐标取字符时不能用宽容的 `digitValue`。
+    func testCircledNumeralsAreNotDigits() {
+        XCTAssertEqual(TicketTextParser.digitValue("①"), 1)
+        XCTAssertNil(TicketTextParser.plainDigitValue("①"))
+        XCTAssertNil(TicketTextParser.plainDigitValue("⑤"))
+        // 半角数字和热敏票常见的误读字母照常认
+        XCTAssertEqual(TicketTextParser.plainDigitValue("7"), 7)
+        XCTAssertEqual(TicketTextParser.plainDigitValue("O"), 0)
+        XCTAssertEqual(TicketTextParser.plainDigitValue("l"), 1)
+    }
+
+    /// 标签右边界取的是**窄而且靠左**的那些碎片。
+    func testRowLabelBoundaryPicksTheIndexColumn() {
+        let labels = [
+            fragment("②", x: 0.05, width: 0.03),
+            fragment("③", x: 0.05, width: 0.03),
+            // 整行号码也可能以 A. 开头 —— 太宽，不能拿来当边界
+            fragment("A.05 16 24 33 45 52", x: 0.05, width: 0.5),
+            // 右半张票上的东西更不能
+            fragment("(1)", x: 0.8, width: 0.04)
+        ]
+        let boundary = TicketVisionScanner.rowLabelBoundary(labels)
+        XCTAssertEqual(boundary ?? 0, 0.08, accuracy: 0.001)
+    }
+
+    /// 一张没有注序号的票不该凭空造出边界。
+    func testRowLabelBoundaryIsNilWithoutLabels() {
+        XCTAssertNil(TicketVisionScanner.rowLabelBoundary([
+            fragment("合计10元", x: 0.7, width: 0.2),
+            fragment("26/04/17 16:21:04", x: 0.3, width: 0.4)
+        ]))
+    }
+
+    private func fragment(_ text: String, x: CGFloat, width: CGFloat) -> TicketVisionScanner.TextFragment {
+        TicketVisionScanner.TextFragment(
+            text: text,
+            box: CGRect(x: x, y: 0.5, width: width, height: 0.02))
+    }
+
+    /// 列距用来到右边找丢失的那一列。
+    func testPitchOfGrid() {
+        let grid: [ClosedRange<CGFloat>] = [0.1...0.14, 0.2...0.24, 0.3...0.34]
+        XCTAssertEqual(DigitMatrixReader.pitch(of: grid), 0.1, accuracy: 0.0001)
     }
 }
 

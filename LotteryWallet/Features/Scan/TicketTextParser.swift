@@ -153,6 +153,24 @@ enum TicketTextParser {
         character.wholeNumberValue.flatMap { (0...9).contains($0) ? $0 : nil } ?? confusion[character]
     }
 
+    /// 只认**半角阿拉伯数字**和几个热敏票上常见的误读字母。
+    ///
+    /// 和 `digitValue` 的区别，以及为什么必须有这一个：
+    /// `digitValue` 走的是 `wholeNumberValue`，而圈码 `①` 在 Unicode 里
+    /// **是个有数值的数字字符**（numericValue 就是 1）。按坐标重建矩阵时，
+    /// 票面左边那一竖排注序号于是被当成了一列号码 ——
+    /// 整个矩阵右移一格，真正的最后一列反而被挤掉。
+    /// 实测到的就是这个：七星彩每一注前面多出一个数字、特别号整列丢失。
+    ///
+    /// 按文本解析那条路仍然用 `digitValue`：那里圈码早就被
+    /// `lineIndexPrefix` 摘掉了，而对 O/I/l 的宽容是有用的。
+    static func plainDigitValue(_ character: Character) -> Int? {
+        if let ascii = character.asciiValue, ascii >= 48, ascii <= 57 {
+            return Int(ascii - 48)
+        }
+        return confusion[character]
+    }
+
     // MARK: - 号码抽取
 
     /// 从一段文本里读出一串号码。

@@ -96,7 +96,8 @@ enum TicketVisionScanner {
         // 数字型彩种先走矩阵重建。它**整段接管**号码区，因为对这些票来说
         // Vision 的分行结果本身就是错的（它按竖列读），基于它再修修补补没有意义。
         if let game, let width = positionalDigitCount(game),
-           let matrix = await DigitMatrixReader.read(image: image, columns: width) {
+           let matrix = await DigitMatrixReader.read(image: image, columns: width,
+                                                     labelBoundary: rowLabelBoundary(base)) {
             return compose(rows: baseRows, originals: originals, matrix: matrix)
         }
 
@@ -117,6 +118,24 @@ enum TicketVisionScanner {
             result.append(graft(prefix: original, digits: better))
         }
         return result.joined(separator: "\n")
+    }
+
+    /// 票面左边那一竖排注序号的右边界 —— `①②③④⑤`、`A. B. C.`、3D 的 `组六:`。
+    ///
+    /// 号码矩阵全在它右边。这一条是防止注序号被当成一列号码的**主闸**：
+    /// 实测注序号列和号码列的间距完全一样（62.5 对 65），几何上根本分不开，
+    /// 而 `.fast` 又会把圈码读成 `0`，靠字符本身也挡不住。
+    /// 不挡的话整个矩阵右移一格、真正的最后一列被挤掉。
+    static func rowLabelBoundary(_ fragments: [TextFragment]) -> CGFloat? {
+        let labels = fragments.filter { fragment in
+            // 太宽的不是标签 —— 整行号码也可能以 `A.` 开头，
+            // 拿它当边界会把半张票的号码切掉。
+            guard fragment.box.width < 0.12 else { return false }
+            // 注序号印在票面左边。右半张票上碰巧匹配到的东西不能当边界。
+            guard fragment.box.maxX < 0.4 else { return false }
+            return fragment.text.range(of: rowLabelPrefix, options: .regularExpression) != nil
+        }
+        return labels.map(\.box.maxX).max()
     }
 
     /// 把重建出来的号码矩阵拼回整篇文本。
@@ -264,17 +283,23 @@ enum TicketVisionScanner {
         let width = CGFloat(cgImage.width)
         let height = CGFloat(cgImage.height)
         let padY = Swift.max((band.upperBound - band.lowerBound) * 0.45, 0.004)
-        // 左右放宽一点，接住首尾那个可能整块没认出来的数字
-        let padX = Swift.max((columns.upperBound - columns.lowerBound) * 0.08, 0.03)
         // Vision 的 y 向上为正，位图向下，所以要翻过来
         let top = (1 - Swift.min(band.upperBound + padY, 1)) * height
         let bottom = (1 - Swift.max(band.lowerBound - padY, 0)) * height
-        let left = Swift.max(columns.lowerBound - padX, 0) * width
-        let right = Swift.min(columns.upperBound + padX, 1) * width
+        let span = stripColumns(columns)
+        let left = span.lowerBound * width
+        let right = span.upperBound * width
         let rect = CGRect(x: left, y: top, width: right - left, height: bottom - top)
             .intersection(CGRect(x: 0, y: 0, width: width, height: height))
         guard rect.height > 8, rect.width > 24 else { return nil }
         return cgImage.cropping(to: rect)
+    }
+
+    /// `strip` 实际裁到的横向区间 —— 两边各放宽一点，接住首尾那个
+    /// 可能整块没认出来的数字。在裁条上认完之后要按它把坐标换算回整张图。
+    static func stripColumns(_ columns: ClosedRange<CGFloat>) -> ClosedRange<CGFloat> {
+        let pad = Swift.max((columns.upperBound - columns.lowerBound) * 0.08, 0.03)
+        return Swift.max(columns.lowerBound - pad, 0)...Swift.min(columns.upperBound + pad, 1)
     }
 
     /// 一个认出来的数字字符及其位置。
@@ -319,7 +344,9 @@ enum TicketVisionScanner {
                 while index < text.endIndex {
                     let next = text.index(after: index)
                     defer { index = next }
-                    guard let value = TicketTextParser.digitValue(text[index]) else { continue }
+                    // 这里**不能**用 `digitValue` —— 它把圈码 `①` 认成数字 1，
+                    // 于是票面左边那一竖排注序号会被当成一列号码。
+                    guard let value = TicketTextParser.plainDigitValue(text[index]) else { continue }
                     // `try?` 会把 `throws -> VNRectangleObservation?` 压成一层 optional，
                     // 所以这里拿到的已经是非可选的观测结果，不要再点问号。
                     guard let rect = try? candidate.boundingBox(for: index..<next) else { continue }
