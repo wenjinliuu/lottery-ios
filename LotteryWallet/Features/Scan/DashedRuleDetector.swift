@@ -58,6 +58,32 @@ enum DashedRuleDetector {
         var maximumSegmentWidth = 0.05
         var minimumFill = 0.25
         var maximumFill = 0.75
+        /// 两条线之间至少要隔票面高度的这么多。
+        ///
+        /// 这一条是**成对**的判据，前面那几条都是单条线自己的。加它的原因是
+        /// 大乐透 26102 那张票：照片歪 3.6°，超出了 ±2° 的兜底扫描范围，
+        /// 真虚线一个倾角都量不出来；而沿 +2.0° 投影时，票头的
+        /// `第26102期` 行和哈希行 `110310-292261-…` 被**摊成了两条 5 格高的窄带**，
+        /// 五条判据全部通过 —— 一行数字加短横，本来就长得像虚线。
+        /// 于是号码区被框在了票头上，而且看起来一切正常（硬约束二针对的正是这个）。
+        ///
+        /// 实测三张真票（都是紧裁）：
+        ///
+        /// | | 两条线相距 ÷ 票高 |
+        /// |---|---|
+        /// | 七星彩 26051 真虚线 | 26% |
+        /// | 排列5 26088 真虚线 | 29% |
+        /// | 大乐透 26102 真虚线 | 27% |
+        /// | 排列5 26088 沿 −1.15° 的假线对 | **4%** |
+        /// | 大乐透 26102 沿 +2.0° 的假线对 | **8%** |
+        ///
+        /// 取 8% 和 25% 的几何中点 **15%**，两头各留 1.7 倍余量。
+        /// 号码区里至少要装下「玩法/合计那一行 + 一注」，装不下就不是号码区。
+        ///
+        /// 试过而**没走通**的判据：「带内墨量 ÷ 带外一个字高内的墨量」（集中度）。
+        /// 实测七星彩 26051 真虚线的上面那条只有 0.36（它下面紧挨着合计行），
+        /// 而排列5 那对假线是 0.45/0.41 —— 真的比假的还低，分不开。
+        var minimumSeparation = 0.15
 
         static let measured = Criteria()
     }
@@ -105,10 +131,31 @@ enum DashedRuleDetector {
         var fallback: [DashedRule] = []
         for (index, slope) in slopes(around: tilt).enumerated() {
             let found = rules(in: mask, slope: slope, criteria: criteria)
-            if found.count == 2 { return found }
-            if index == 0 { fallback = found }
+            if found.count == 2, encloseAZone(found, in: mask, criteria: criteria) {
+                return found
+            }
+            // 兜底那一份是给调试图看的（"一条也没找到"还是"找到三条不敢挑"）。
+            // 但**正好两条、中间却装不下号码区**的那种不能留 ——
+            // 留着的话 `TicketFrame.between(rules:)` 照样会拿它去配准，等于没挡。
+            if index == 0, found.count != 2 || encloseAZone(found, in: mask, criteria: criteria) {
+                fallback = found
+            }
         }
         return fallback
+    }
+
+    /// 这两条线中间装不装得下一个号码区。
+    ///
+    /// 沿一个错的倾角投影时，票头那几行文字会被摊成几条又薄又长的窄带，
+    /// 单条线的五条判据全都通得过（见 `Criteria.minimumSeparation`）。
+    /// 它们之间只隔着几行字的距离 —— 而真正的两条虚线中间要装下
+    /// 玩法行加上每一注，实测占票面高度的四分之一还多。
+    static func encloseAZone(_ rules: [DashedRule],
+                             in mask: InkMask,
+                             criteria: Criteria = .measured) -> Bool {
+        guard rules.count == 2, mask.height > 0 else { return false }
+        let gap = abs(rules[1].midY - rules[0].midY)
+        return gap >= Double(mask.height) * criteria.minimumSeparation
     }
 
     /// 沿某一个倾角量一遍。

@@ -121,6 +121,34 @@ final class DashedRuleDetectorTests: XCTestCase {
         XCTAssertTrue(DashedRuleDetector.rules(in: short.mask).isEmpty, "横跨不够就不是基准")
     }
 
+    /// **挨得太近的两条不是号码区的上下沿。**
+    ///
+    /// 大乐透 26102 那张真票逼出来的：照片歪 3.6°，超出 ±2° 的兜底扫描范围，
+    /// 真虚线一个倾角都量不出来；而沿 +2.0° 投影时，票头的期号行和哈希行
+    /// `110310-292261-…` 被摊成两条 5 格高的窄带，五条判据全通过 ——
+    /// 一行数字加短横本来就长得像虚线。号码区于是被框到了票头上，
+    /// **而且看起来一切正常**，这正是硬约束二要挡的那种错。
+    ///
+    /// 实测：三张真票的真虚线相距 26%/29%/27% 票高，
+    /// 两对假线是 4% 和 8% —— 取几何中点 15%。
+    func testTooCloseAPairIsNotAZone() {
+        let canvas = Canvas(width: width, height: height)
+        // 两条**完全合格**的虚线，只是挨得太近（相距 30 行 = 7.5% 票高）
+        canvas.dashedRule(top: 60)
+        canvas.dashedRule(top: 90)
+        let pair = DashedRuleDetector.rules(in: canvas.mask, slope: 0, criteria: .measured)
+        XCTAssertEqual(pair.count, 2, "单条线的判据它们都过得去")
+        XCTAssertFalse(DashedRuleDetector.encloseAZone(pair, in: canvas.mask),
+                       "中间装不下一注，不该拿来当号码区")
+        XCTAssertNotEqual(DashedRuleDetector.rules(in: canvas.mask).count, 2,
+                          "挑基准时就该把它们排除掉")
+
+        // 真票那种间距（相距 250 行 = 62% 票高）照旧通过
+        let real = ticket().mask
+        XCTAssertTrue(DashedRuleDetector.encloseAZone(DashedRuleDetector.rules(in: real),
+                                                      in: real))
+    }
+
     /// 票还歪着 0.46° 时也得找得到 —— 而且要把倾角一并量出来。
     ///
     /// 这是**按行投影办不到**的事：一条横跨 950px 的线歪 0.46°，
