@@ -8,9 +8,7 @@ import SwiftData
 /// 也没法像在彩票站那样把好几注打在同一张票上。现在手选可以攒候选注，
 /// 复式和胆拖则按真实票面的排版（红单/红复、前区胆/前区拖…）画出来。
 struct EntryFlowView: View {
-    // 录入页装在自绘抽屉里（见 Design/Drawer.swift），关闭走 drawerDismiss
-    @Environment(\.drawerDismiss) private var dismiss
-    @Environment(\.drawerExpand) private var expandDrawer
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Environment(DrawStore.self) private var drawStore
     @Environment(AppSettings.self) private var settings
@@ -134,9 +132,6 @@ struct EntryFlowView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) { saveBar }
-            // 抽屉是自绘的，录入页一上来就要整屏 —— 这里再确认一次，
-            // 免得从扫描抽屉接力过来时沿用了半屏高度。
-            .onAppear { expandDrawer(.large) }
             .sheet(isPresented: $isIssuePickerPresented) {
                 IssuePickerSheet(game: game, current: target.expect) { issue in
                     pickedIssue = issue
@@ -160,6 +155,11 @@ struct EntryFlowView: View {
                 await drawStore.loadYearCalendars()
             }
         }
+        // 录入一上来就要整屏：选号盘加整票预览，半屏根本摆不下。
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Palette.canvas)
+        .presentationCornerRadius(28)
     }
 
     // MARK: - 彩种

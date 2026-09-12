@@ -12,16 +12,14 @@ struct TicketScanView: View {
     /// 手动录入是它里面的一个分支。
     var onManualEntry: (() -> Void)?
 
-    // 抽屉是自绘的（见 Design/Drawer.swift），不是系统 sheet，
-    // 所以关闭动作走 drawerDismiss。调用方式和 \.dismiss 一样。
-    @Environment(\.drawerDismiss) private var dismiss
-    @Environment(\.drawerExpand) private var expandDrawer
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.showToast) private var showToast
     @Environment(\.celebrate) private var celebrate
 
     @State private var stage: Stage = .intro
+    @State private var detent: PresentationDetent = .medium
     @State private var isCameraPresented = false
     @State private var photoItem: PhotosPickerItem?
     @State private var preview: UIImage?
@@ -107,11 +105,18 @@ struct TicketScanView: View {
                 Text(errorText ?? "")
             }
         }
-        // 抽屉：入口半屏，一旦开始处理图片就长到整屏。
-        // 高度归抽屉那一层管，这里只声明「这个阶段该多高」，
-        // 各处再单独去改高度就会漏掉分支（老代码里 reset 之后就没缩回去）。
+        // 入口半屏，一旦开始处理图片就长到整屏。
+        // 高度只在这一处按阶段决定 —— 各处再单独去改就会漏掉分支
+        // （老代码里 reset 之后就没缩回去）。
+        .presentationDetents(stage == .intro ? [.medium, .large] : [.large],
+                             selection: $detent)
+        .presentationDragIndicator(.visible)
+        // 不透明底色，和页面同色。半透明材质会让背面那一层透上来，
+        // 抽屉上下就会出现和内容对不上的色带。
+        .presentationBackground(Palette.canvas)
+        .presentationCornerRadius(28)
         .onChange(of: stage) { _, value in
-            expandDrawer(value == .intro ? .medium : .large)
+            detent = value == .intro ? .medium : .large
         }
         .fullScreenCover(isPresented: $isCameraPresented) {
             CameraPicker { image in

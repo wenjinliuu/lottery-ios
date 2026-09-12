@@ -98,40 +98,34 @@ struct RootView: View {
             .accessibilityLabel("扫描彩票")
         }
 
-        // **抽屉不走系统 sheet。**
+        // **抽屉用回系统 sheet。**
         //
-        // 系统 sheet 弹出时会把呈现方一起做动画（缩小、压暗、加圆角），
-        // 而扫描抽屉是半透明的，背面那一层看得一清二楚 —— 每次点扫描，
-        // 首页/票夹/设置都跟着抖一下。这个行为没有开关可关。
+        // 一开始报的「点扫描时背景闪一下」，我误判成了 sheet 的呈现动画，
+        // 于是把它换成自绘的 overlay —— 结果换来一连串新毛病：没有动画、
+        // 底部灰带、拖拽时整棵内容树每帧重建（手感是抽搐 + 内容闪烁）。
         //
-        // 换成自绘的一层 overlay 之后，抽屉只是盖在上面，**底下那棵视图树
-        // 一帧都不会重画**。实现见 `Design/Drawer.swift`。
+        // 真凶其实是标签栏：`role: .search` 的那一页会被真的切上来、
+        // 过一会儿才退回去。那一闪从来不是 sheet 干的。挡住它的是
+        // `ScreenBackdrop` 的快照，和用什么方式呈现抽屉无关。
         //
-        // 两张抽屉仍然共用一个出口、用枚举驱动：既不会再有「某一张的修饰符
-        // 不知不觉丢了」（手动录入就是这么点不动的），也不用担心同一视图上
-        // 挂多个呈现器的那些不确定行为。
-        //
-        // 抽屉之间的接力放在 `onDismissed` 里 —— 那时候前一张已经真的落下去了。
-        .overlay {
-            DrawerLayer(item: $activeSheet, initialHeight: { sheet in
-                // 扫描入口只是选张照片，半屏就够；手动录入一上来就要整套选号盘。
-                sheet == .entry ? .large : .medium
-            }, onDismissed: {
-                guard let next = queuedSheet else {
-                    // 抽屉全关完了，快照没用了 —— 留着会在下次点开时
-                    // 先闪一张上一回的旧画面。
-                    backdrop = nil
-                    return
-                }
-                queuedSheet = nil
-                activeSheet = next
-            }) { sheet in
-                switch sheet {
-                case .scan:
-                    TicketScanView(onManualEntry: { queuedSheet = .entry })
-                case .entry:
-                    EntryFlowView()
-                }
+        // 认清这一点之后就没有理由自己造轮子了：拖拽、吸附、回弹、
+        // 跟手的高度切换，系统这套是渲染服务级别的，而自绘版本每一帧
+        // 都要让 SwiftUI 重新过一遍整个扫描页 —— 差距不是调参能补上的。
+        .sheet(item: $activeSheet, onDismiss: {
+            guard let next = queuedSheet else {
+                // 抽屉全关完了，快照没用了 —— 留着会在下次点开时
+                // 先闪一张上一回的旧画面。
+                backdrop = nil
+                return
+            }
+            queuedSheet = nil
+            activeSheet = next
+        }) { sheet in
+            switch sheet {
+            case .scan:
+                TicketScanView(onManualEntry: { queuedSheet = .entry })
+            case .entry:
+                EntryFlowView()
             }
         }
         // 这里**不能**用 withAnimation 包住状态变更。
