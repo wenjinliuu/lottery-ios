@@ -154,12 +154,20 @@ struct WalletView: View {
                 }
             }
             .refreshable {
-                await drawStore.refresh()
-                await recheck(silent: true)
-                // 用户主动下拉，就是明确要看最新的一屏 —— 这时候重排是他要的
-                commitSeen()
+                // **刷新过程中不能重建列表。**
+                //
+                // 原来在这里直接调 rebuild()，等于在下拉刷新还没结束时
+                // 把 ScrollView 的内容整个换掉 —— 系统那个转圈控件跟着丢了状态，
+                // 于是卡在顶上不收，非得手动往上推一把才复位。
+                //
+                // 现在只置一个标记：真正的重排交给 `.task(id:)`，
+                // 等记录变化引发的那次正常重建顺带做掉。
                 needsRefreeze = true
-                rebuild()
+                commitSeen()
+                await drawStore.refresh()
+                // 下拉就是「再核对一遍」，和右上角那颗按钮同一件事，
+                // 所以也给同样的结果提示，别让人以为什么都没发生。
+                await recheck()
             }
             .task(id: RecordsToken(records)) { rebuild() }
             .onChange(of: filter) { _, _ in applyFilter() }

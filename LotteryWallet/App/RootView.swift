@@ -171,6 +171,9 @@ struct RootView: View {
         // 提示又补一记重的，慢半拍到手上，像是点了两下。
         .sensoryFeedback(trigger: toast?.id) { _, _ in toast?.feedback }
         .task {
+            // 弹抽屉时不要把背后染灰 —— 那套行为在这里恢复得不跟手，
+            // 设置页「外观」那一行的图标甚至根本恢复不回来。见 TintDimming。
+            TintDimming.disable()
             await drawStore.bootstrap()
             await runStartupChecks()
         }

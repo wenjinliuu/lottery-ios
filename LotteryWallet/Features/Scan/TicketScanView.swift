@@ -799,10 +799,17 @@ struct TicketScanView: View {
             for ticket in tickets {
                 for target in targets(for: ticket) {
                     let built = ticket.expandedLines.map { numbers -> Ticket in
+                        // 玩法必须跟着存：快乐8 的「选几」和 3D 的组三/组六/单选
+                        // 决定按哪一档奖级核对。丢了它，一张选八票会被当成选十。
+                        let mode: String = {
+                            if ticket.game == .dlt { return ticket.addOn ? "add" : "normal" }
+                            return ticket.playMode
+                        }()
                         var item = Ticket(numbers: numbers,
-                                          playMode: ticket.game == .dlt ? (ticket.addOn ? "add" : "normal") : "",
+                                          playMode: mode,
                                           entryLabel: EntryKind.scan.label)
                         item.addOn = ticket.addOn
+                        if ticket.game == .k8, let count = Int(mode) { item.playCount = count }
                         return item
                     }
                     guard !built.isEmpty else { continue }
