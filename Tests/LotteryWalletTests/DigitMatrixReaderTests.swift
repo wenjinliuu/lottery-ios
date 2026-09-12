@@ -365,6 +365,21 @@ final class DigitMatrixReaderTests: XCTestCase {
         ]))
     }
 
+    /// 标签右边界是**相对票面内容**算的，不是相对整张照片。
+    ///
+    /// 用户裁得松、票只占画面一半时，按整张图算的比例全都会偏 ——
+    /// 这正是「裁切稍微不准就识别失败」的来源之一。
+    func testRowLabelBoundaryIsRelativeToTheTicketNotThePhoto() {
+        // 票只占画面右半边：注序号在 0.52，号码在 0.58 往右
+        let fragments = [
+            fragment("②", x: 0.52, width: 0.02),
+            fragment("③", x: 0.52, width: 0.02),
+            fragment("3 9 5 4 7 7 13", x: 0.58, width: 0.34)
+        ]
+        let boundary = TicketVisionScanner.rowLabelBoundary(fragments)
+        XCTAssertEqual(boundary ?? 0, 0.54, accuracy: 0.001)
+    }
+
     private func fragment(_ text: String, x: CGFloat, width: CGFloat) -> TicketVisionScanner.TextFragment {
         TicketVisionScanner.TextFragment(
             text: text,
@@ -519,21 +534,6 @@ final class UnknownDigitPlumbingTests: XCTestCase {
     func testTrailingColumnOffTicketIsRejected() {
         guard let layout = DigitTicketLayout.of(.qxc) else { return XCTFail("七星彩该有版式") }
         XCTAssertNil(layout.trailingColumn(after: 0.90...0.95, pitch: 0.2))
-    }
-
-    /// 标签右边界是**相对票面内容**算的，不是相对整张照片。
-    ///
-    /// 用户裁得松、票只占画面一半时，按整张图算的比例全都会偏 ——
-    /// 这正是「裁切稍微不准就识别失败」的来源之一。
-    func testRowLabelBoundaryIsRelativeToTheTicketNotThePhoto() {
-        // 票只占画面右半边：注序号在 0.52，号码在 0.58 往右
-        let fragments = [
-            fragment("②", x: 0.52, width: 0.02),
-            fragment("③", x: 0.52, width: 0.02),
-            fragment("3 9 5 4 7 7 13", x: 0.58, width: 0.34)
-        ]
-        let boundary = TicketVisionScanner.rowLabelBoundary(fragments)
-        XCTAssertEqual(boundary ?? 0, 0.54, accuracy: 0.001)
     }
 
     /// 十位补回来之后，整行要能照常解析成一注。
