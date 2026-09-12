@@ -399,6 +399,75 @@ final class UnknownDigitPlumbingTests: XCTestCase {
         XCTAssertEqual(TicketVisionScanner.slotText([nil, nil]), "? ?")
     }
 
+    /// 票底的流水号绝不能被当成一注号码。
+    ///
+    /// 真机上出过最严重的一次：一张排列5 的两注都因为少认一位被丢掉，
+    /// 而票底那个 `00084`（流水号）**被读成了唯一的一注**，
+    /// 票夹里于是躺着一注根本不存在的号码。
+    ///
+    /// 排列5 的值域是 0-9，`00084` 五个数字每一个都合法，光数个数拦不住。
+    /// 唯一可靠的判据是：票面上号码是**一个个隔开印**的，流水号是连着印的。
+    func testSerialNumberIsNotABet() {
+        XCTAssertNil(TicketTextParser.positionalValues(in: "00084", count: 5))
+        XCTAssertNil(TicketTextParser.singleLineForTesting("00084", game: .pl5))
+        XCTAssertNil(TicketTextParser.singleLineForTesting("26088", game: .pl5))
+        XCTAssertNil(TicketTextParser.singleLineForTesting("054049", game: .pl3))
+        // 隔开印的才是号码
+        XCTAssertEqual(TicketTextParser.positionalValues(in: "8 4 4 1 5", count: 5),
+                       [8, 4, 4, 1, 5])
+        XCTAssertEqual(TicketTextParser.singleLineForTesting("① 8 4 4 1 5", game: .pl5)?[.nums5],
+                       [8, 4, 4, 1, 5])
+    }
+
+    /// 粘在一起的两位数不能顶替两个号码的位置。
+    ///
+    /// `84 4 1 5` 只有四组，读成一注就等于把 `8` 和 `4` 并成了 `84`。
+    /// 宁可这一行读不出来（退回旧办法、或者标成问号），也不能读错。
+    func testGluedDigitsAreRejectedForPositionalGames() {
+        XCTAssertNil(TicketTextParser.singleLineForTesting("① 84 4 1 5", game: .pl5))
+        XCTAssertNil(TicketTextParser.singleLineForTesting("组六: 01 5", game: .fc3d))
+    }
+
+    // MARK: - 整列没认出来时按列距插回去
+
+    private func column(_ center: CGFloat) -> ClosedRange<CGFloat> {
+        (center - 10.5) / blockWidth ... (center + 10.5) / blockWidth
+    }
+
+    /// 中间整整一列都没认出来：按列距把它插回去，位置是算出来的。
+    func testMissingMiddleColumnIsInterpolated() {
+        let clusters = [column(116), column(192), column(345), column(420)]
+        guard let grid = DigitMatrixReader.filledGrid(clusters, columns: 5) else {
+            return XCTFail("应该插得回去")
+        }
+        XCTAssertEqual(grid.count, 5)
+        let centers = grid.map { ($0.lowerBound + $0.upperBound) / 2 * blockWidth }
+        XCTAssertEqual(centers[2], 268.5, accuracy: 1)
+    }
+
+    /// 列数已经够了就**原样返回，一点都不插**。
+    ///
+    /// 七星彩的特别号那一列离前六位是 1.6 个列距（票面实测），
+    /// 硬按整数倍去套只会把整张票判掉。
+    func testCompleteGridIsLeftAlone() {
+        let uneven = [column(116), column(192), column(269), column(345),
+                      column(420), column(497), column(600)]
+        XCTAssertEqual(DigitMatrixReader.filledGrid(uneven, columns: 7)?.count, 7)
+    }
+
+    /// 插完还是不够列数就作废 —— 缺在两头的情况定不了位，
+    /// 宁可退回旧办法，也不能猜一个位置摆上去。
+    func testStillShortAfterInterpolationIsRejected() {
+        let clusters = [column(116), column(192), column(269)]
+        XCTAssertNil(DigitMatrixReader.filledGrid(clusters, columns: 5))
+    }
+
+    /// 认出来的列比该有的还多，一律作废。
+    func testTooManyColumnsIsRejected() {
+        let clusters = (0..<8).map { column(116 + CGFloat($0) * 76) }
+        XCTAssertNil(DigitMatrixReader.filledGrid(clusters, columns: 7))
+    }
+
     /// 只有最后一列可能印成两位数的彩种，才需要回头去找丢掉的十位。
     ///
     /// 七星彩的特别号是 0-14，`13` `10` 在票面上占两个字符、整列右对齐，

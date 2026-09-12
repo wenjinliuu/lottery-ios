@@ -264,24 +264,39 @@ enum TicketTextParser {
 
     /// 数字型号码行：一位一个号，`?` 表示**那一位没认出来**。
     ///
-    /// 这个 `?` 是 `DigitRowReader` 按坐标补位的产物：栅格上那一格是空的，
+    /// 这个 `?` 是 `DigitMatrixReader` 按坐标重建矩阵的产物：栅格上那一格是空的，
     /// 位置是算出来的，值没认出来。以前这种行只能整条丢掉 ——
     /// 一张排列5 少认一位，用户看到的就是"没有识别到彩票"，
     /// 明明另外四位都是对的。现在把它照实带下去，复核页标成问号让人点一下补。
     ///
     /// 顺序**不能排序也不能去重**：`0 4 4` 和 `4 0 4` 是两注不同的号。
     static func positionalValues(in text: String, count: Int) -> [Int]? {
+        // **必须按空白切开数。** 这一条是防止把票底的流水号当成一注号码
+        // 的唯一办法：排列5 的值域是 0-9，`00084` 五个数字每一个都合法，
+        // 光数个数根本拦不住 —— 真机上就是这么把 `00084` 读成了一注，
+        // 而真正的两注反而因为少认一位被丢掉了。
+        //
+        // 票面上这些号码是**一个个隔开印**的（实测左右空白有两个半字宽），
+        // 而流水号是连着印的。所以「有没有隔开」就是最可靠的判据。
+        let groups = text.split(whereSeparator: \.isWhitespace)
+        guard groups.count == count else { return nil }
+
         var values: [Int] = []
-        for character in text {
-            if character.isWhitespace { continue }
-            if character == "?" || character == "？" {
+        for group in groups {
+            if group == "?" || group == "？" {
                 values.append(NumberSet.unknown)
                 continue
             }
-            guard let value = digitValue(character) else { return nil }
+            // 一个号码最多两位（七星彩的特别号 0-14）
+            guard group.count <= 2 else { return nil }
+            var value = 0
+            for character in group {
+                guard let digit = digitValue(character) else { return nil }
+                value = value * 10 + digit
+            }
             values.append(value)
         }
-        return values.count == count ? values : nil
+        return values
     }
 
     static func isAscendingUnique(_ values: [Int]) -> Bool {
@@ -421,6 +436,10 @@ enum TicketTextParser {
         // 不能走"按 token 读出一堆号码再数个数"。
         if section.isPositional {
             guard let values = positionalValues(in: body, count: section.count) else { return nil }
+            // 每一位都是 0-9。按空白切出来的一组可能有两位（七星彩的特别号），
+            // 落在这里就说明认错了。
+            guard values.allSatisfy({ $0 == NumberSet.unknown || section.range.contains($0) })
+            else { return nil }
             return (NumberSet([section.key: values]), multiple)
         }
 

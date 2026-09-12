@@ -305,30 +305,72 @@ enum DigitMatrixReader {
     /// 这是矩阵这条路比逐行分析强的地方 —— 7 列 5 行就是 35 个样本去估 7 个列位，
     /// 哪怕漏掉一小半，列的位置依然是稳的。
     static func columnGrid(_ rows: [[Token]],
-                                   columns: Int,
-                                   glyphWidth: CGFloat) -> [ClosedRange<CGFloat>]? {
+                           columns: Int,
+                           glyphWidth: CGFloat) -> [ClosedRange<CGFloat>]? {
         // 优先只用**号码个数正好齐**的那几行来定列位：它们每一列都有样本，
         // 缺号的行反而会把某一列的中心带偏。一行齐的都没有才退回全用。
         let complete = rows.filter { $0.count == columns }
         let pool = (complete.isEmpty ? rows : complete).flatMap { $0 }
-        let sorted = pool.sorted { $0.center < $1.center }
+        guard let clusters = columnClusters(pool, glyphWidth: glyphWidth) else { return nil }
+        return filledGrid(clusters, columns: columns)
+    }
+
+    /// 把所有号码按横坐标聚成一列一列。
+    static func columnClusters(_ tokens: [Token],
+                               glyphWidth: CGFloat) -> [ClosedRange<CGFloat>]? {
+        let sorted = tokens.sorted { $0.center < $1.center }
         guard let first = sorted.first else { return nil }
         var clusters: [[Token]] = [[first]]
         for token in sorted.dropFirst() {
-            let anchor = clusters[clusters.count - 1].map(\.center).reduce(0, +)
-                / CGFloat(clusters[clusters.count - 1].count)
+            let last = clusters[clusters.count - 1]
+            let anchor = last.map(\.center).reduce(0, +) / CGFloat(last.count)
             if token.center - anchor <= glyphWidth * 1.2 {
                 clusters[clusters.count - 1].append(token)
             } else {
                 clusters.append([token])
             }
         }
-        guard clusters.count == columns else { return nil }
         return clusters.map { cluster in
             let low = cluster.map(\.box.minX).min() ?? 0
             let high = cluster.map(\.box.maxX).max() ?? 0
             return Swift.min(low, high)...Swift.max(low, high)
         }
+    }
+
+    /// 把**整列都没认出来**的那些列按列距插回去。
+    ///
+    /// 号码是等距印的，所以「某两列之间隔了两个列距」就等于中间那一列
+    /// 一个字符都没认出来 —— 位置是算得出来的，插回去之后那几格
+    /// 会被单独裁出来再认一遍，认不出就标成问号。
+    ///
+    /// 列数已经够了就**原样返回，一点都不插**：七星彩的特别号那一列
+    /// 离前六位是 1.6 个列距（票面实测），硬按整数倍去套只会把它判掉。
+    static func filledGrid(_ clusters: [ClosedRange<CGFloat>],
+                           columns: Int) -> [ClosedRange<CGFloat>]? {
+        guard clusters.count <= columns else { return nil }
+        guard clusters.count != columns else { return clusters }
+        guard clusters.count >= 2 else { return nil }
+
+        let centers = clusters.map(midpoint)
+        let gaps = zip(centers, centers.dropFirst()).map { $1 - $0 }
+        guard let step = gaps.min(), step > 0 else { return nil }
+
+        var filled: [ClosedRange<CGFloat>] = [clusters[0]]
+        for (index, gap) in gaps.enumerated() {
+            let slots = (gap / step).rounded()
+            guard slots >= 1, abs(gap / step - slots) <= 0.3 else { return nil }
+            let width = clusters[index].upperBound - clusters[index].lowerBound
+            let pitch = gap / slots
+            if slots > 1 {
+                for offset in 1...(Int(slots) - 1) {
+                    let center = centers[index] + CGFloat(offset) * pitch
+                    filled.append((center - width / 2)...(center + width / 2))
+                }
+            }
+            filled.append(clusters[index + 1])
+        }
+        guard filled.count == columns else { return nil }
+        return filled
     }
 
     /// 把一行的号码归到各自的列上。归不进去的就整行作废 —— 摆错位比认不出更糟。
@@ -383,24 +425,34 @@ enum DigitMatrixReader {
         // 裁出来这一小块在整张图里占多宽 —— 把块内坐标换算回去要用
         let cellWidth = (right - left) / imageWidth
         let slice = UIImage(cgImage: cell, scale: 1, orientation: .up)
-        for boosted in [false, true] {
-            let source = boosted ? (TicketVisionScanner.contrastBoosted(slice) ?? slice) : slice
-            guard let big = TicketVisionScanner.upscaled(source, factor: 10) else { continue }
-            let chars = await TicketVisionScanner.recognizeDigits(in: big, fast: true)
-                .filter { (0.15...0.85).contains($0.box.midY) }
-                .sorted { $0.box.minX < $1.box.minX }
-            guard (1...2).contains(chars.count) else { continue }
-            if chars.count == 2 {
-                let gap = (chars[1].box.minX - chars[0].box.maxX) * cellWidth
-                guard gap <= glyphWidth * 0.9 else { continue }
+
+        // **取认得最全的那一遍，不是第一遍成功的那一遍。**
+        // 上一版是先成功先返回，于是"只认出个位"的那一遍一旦先跑出来，
+        // 后面那些本来能认出两位的就再也没机会了 —— 七星彩的 `13`
+        // 就这么一直读成 `3`。
+        var best: Int?
+        var bestCount = 0
+        for factor in [10.0, 16.0] as [CGFloat] {
+            for boosted in [false, true] {
+                let source = boosted ? (TicketVisionScanner.contrastBoosted(slice) ?? slice) : slice
+                guard let big = TicketVisionScanner.upscaled(source, factor: factor) else { continue }
+                let chars = await TicketVisionScanner.recognizeDigits(in: big, fast: true)
+                    .filter { (0.15...0.85).contains($0.box.midY) }
+                guard (1...2).contains(chars.count) else { continue }
+                if chars.count == 2 {
+                    // 两个字符必须挨得够近，隔开的那是旁边一列的东西
+                    let gap = (chars[1].box.minX - chars[0].box.maxX) * cellWidth
+                    guard gap <= glyphWidth * 0.9 else { continue }
+                }
+                let value = chars.reduce(0) { $0 * 10 + $1.value }
+                // 超过这一列的上限说明认进来了别的东西。排列3/5、福彩3D 的
+                // 每一格都是一位数，上限 9，两位的结果一律不收。
+                guard value <= maximum, chars.count > bestCount else { continue }
+                bestCount = chars.count
+                best = value
             }
-            let value = chars.reduce(0) { $0 * 10 + $1.value }
-            // 超过这一列的上限说明认进来了别的东西。排列3/5、福彩3D 的每一格
-            // 都是一位数，上限 9，两位的结果一律不收。
-            guard value <= maximum else { continue }
-            return value
         }
-        return nil
+        return best
     }
 
     /// 最后一列印成两位数时，把丢掉的十位找回来。
