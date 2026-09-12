@@ -145,6 +145,58 @@ final class TicketTextParserGamesTests: XCTestCase {
         XCTAssertEqual(tickets.first?.lines.dropFirst().first?[.nums3], [0, 1, 7])
     }
 
+    // MARK: - 排列3
+
+    /// 体彩排列3 直选单式，2 注 × 2 元 = 4 元。
+    func testPaiLie3Direct() {
+        let text = """
+        体彩 排列3
+        第 26088期    2026年04月08日开奖
+        110310-276861-120948-245844 158739  UvDpAQ
+        直选单式票    1倍    合计4元
+        ① 9 5 0
+        ② 3 9 2
+        理性购买彩票，享受小小乐趣
+        感谢您为公益事业贡献 1.36元
+        """
+        let tickets = TicketTextParser.parseTickets(text)
+        XCTAssertEqual(tickets.count, 1)
+        guard let ticket = tickets.first else { return }
+        XCTAssertEqual(ticket.game, .pl3)
+        XCTAssertEqual(ticket.playMode, "single")
+        XCTAssertEqual(ticket.count, 2)
+        XCTAssertEqual(ticket.totalCost, 4, accuracy: 0.001)
+        XCTAssertEqual(ticket.lines.first?[.nums3], [9, 5, 0])
+        XCTAssertEqual(ticket.lines.dropFirst().first?[.nums3], [3, 9, 2])
+    }
+
+    /// 体彩排列3 组选单式，3 注 × 2 元 = 6 元。
+    ///
+    /// **票面只印「组选」，不说是组三还是组六** —— 那是由号码本身决定的：
+    /// `0 1 5`、`3 6 7` 三位都不同是组六，`0 4 4` 有一对相同是组三。
+    /// 两者奖级不同，所以要拆成两张记录，6 元按注数分摊成 4 元 + 2 元。
+    func testPaiLie3GroupPickSplitsByRepeatedDigits() {
+        let text = """
+        体彩 排列3
+        第 26088期   2026年04月08日开奖
+        110310-276961-120948-245833 054049  4VCFpg
+        组选单式票   1倍   合计6元
+        ① 0 1 5
+        ② 3 6 7
+        ③ 0 4 4
+        理性购买彩票，享受小小乐趣
+        感谢您为公益事业贡献 2.04元
+        """
+        let tickets = TicketTextParser.parseTickets(text)
+        XCTAssertEqual(tickets.count, 2)
+        XCTAssertEqual(tickets.map(\.playMode), ["group6", "group3"])
+        XCTAssertEqual(tickets.map(\.count), [2, 1])
+        XCTAssertEqual(tickets.first?.totalCost, 4, accuracy: 0.001)
+        XCTAssertEqual(tickets.dropFirst().first?.totalCost, 2, accuracy: 0.001)
+        XCTAssertEqual(tickets.first?.lines.first?[.nums3], [0, 1, 5])
+        XCTAssertEqual(tickets.dropFirst().first?.lines.first?[.nums3], [0, 4, 4])
+    }
+
     // MARK: - 不能误伤原有彩种
 
     func testWelfareHeaderStillResolvesDoubleColourBall() {

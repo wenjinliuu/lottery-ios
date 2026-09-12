@@ -408,15 +408,38 @@ enum TicketTextParser {
         }
     }
 
-    /// 3D / 排列3 每一注行首印的玩法。读不出来的行留空字符串。
+    /// 每一注的玩法。
+    ///
+    /// 三种来源，优先级从高到低：
+    /// 1. **行首自己印着**。福彩 3D 是这样打的：`组六: 1 8 9`。
+    /// 2. **票头写着「组选」**。体彩排列3 只印「组选单式票」，不说是组三还是
+    ///    组六 —— 因为那是由号码本身决定的，见 `groupKind`。
+    /// 3. 退回票头声明的玩法（直选单式票之类）。
     private static func perLineModes(_ block: String, game: GameKey) -> [String] {
+        let headerMode = detectPlayMode(game: game, text: block)
+        let isGroupPick = block.contains("组选")
         var modes: [String] = []
         for raw in normalize(block).split(separator: "\n", omittingEmptySubsequences: false) {
             let line = raw.trimmingCharacters(in: .whitespaces)
-            guard !line.isEmpty, singleLine(line, game: game) != nil else { continue }
-            modes.append(detectPlayMode(game: game, text: line))
+            guard !line.isEmpty, let parsed = singleLine(line, game: game) else { continue }
+            let own = detectPlayMode(game: game, text: line)
+            if !own.isEmpty {
+                modes.append(own)
+            } else if isGroupPick {
+                modes.append(groupKind(of: parsed.numbers[.nums3]))
+            } else {
+                modes.append(headerMode)
+            }
         }
         return modes
+    }
+
+    /// 组选票是组三还是组六，看号码有没有重复：
+    /// 三位里有一对相同就是组三（`0 4 4`），三位都不同就是组六（`0 1 5`）。
+    ///
+    /// 这一步不能省 —— 两者奖级完全不同，都按「组选」存进去就没法核对。
+    private static func groupKind(of digits: [Int]) -> String {
+        Set(digits).count == 3 ? "group6" : "group3"
     }
 
     static func parseTicket(_ block: String) -> ScannedTicket? {
@@ -500,7 +523,7 @@ enum TicketTextParser {
         // 快乐8：玩法说选几，每一注就必须正好几个号。读出来对不上的那几注
         // 多半是把机号或金额当成号码了，宁可丢掉也不要留一注错的。
         if game == .k8, let want = Int(ticket.playMode) {
-            ticket.lines = ticket.lines.filter { ($0[.nums]?.count ?? 0) == want }
+            ticket.lines = ticket.lines.filter { $0[.nums].count == want }
         }
         ticket.addOn = detectAddOn(block)
         ticket.periods = extractPeriods(block)
@@ -585,6 +608,11 @@ enum TicketTextParser {
         case .fc3d, .pl3:
             if text.contains("组六") || text.contains("组6") { return "group6" }
             if text.contains("组三") || text.contains("组3") { return "group3" }
+            // 「组选」要留空：体彩排列3 只印这两个字，具体是组三还是组六
+            // 得看号码有没有重复，交给 `perLineModes` 逐注判断。
+            // 这一句必须排在「直选」前面 —— 否则「组选单式票」里的"选"字
+            // 匹配不到，但将来若有票同时印着两种字样会判错。
+            if text.contains("组选") { return "" }
             if text.contains("单选") || text.contains("直选") { return "single" }
             return ""
         default:
