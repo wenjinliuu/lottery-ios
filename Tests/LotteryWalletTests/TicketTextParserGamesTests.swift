@@ -254,6 +254,55 @@ final class TicketTextParserGamesTests: XCTestCase {
         XCTAssertEqual(TicketTextParser.parseTickets(text).first?.lines.first?[.blue], [4])
     }
 
+    // MARK: - 票面那句话
+
+    /// 卡片头部要写得和实体票面一字不差。
+    func testTicketHeadLabelMatchesPrintedWording() {
+        // 排列3 票面只分直选/组选，组三组六是组选里按号码再分的
+        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["single"], shape: "单式"), "直选单式")
+        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["group6", "group3"], shape: "单式"), "组选单式")
+        // 3D 逐注印玩法，票头只写「单式」
+        XCTAssertEqual(GameKey.fc3d.ticketLabel(modes: ["group6", "single"], shape: "单式"), "单式")
+        XCTAssertEqual(GameKey.k8.ticketLabel(modes: ["8"], shape: "单式"), "选八单式")
+        XCTAssertEqual(GameKey.dlt.ticketLabel(modes: ["add"], shape: "单式"), "追加单式")
+        XCTAssertEqual(GameKey.ssq.ticketLabel(modes: [""], shape: "复式"), "复式")
+    }
+
+    /// 同一个玩法两家印法不同：3D 叫「单选」，排列3 叫「直选」。
+    func testSinglePickWordingDiffersByIssuer() {
+        XCTAssertEqual(GameKey.fc3d.playLabel(playMode: "single", addOn: false), "单选")
+        XCTAssertEqual(GameKey.pl3.playLabel(playMode: "single", addOn: false), "直选")
+    }
+
+    /// 号码行的判据是**结构**，不是数字占比。
+    ///
+    /// 按占比判两头都会错：期号行数字占 61% 会被当成号码行（于是被纵向相邻的
+    /// 票号行覆盖掉，排列3 从此读不到期号），而 `组六: U 7` 数字只占 20%
+    /// 会被跳过 —— 那恰恰是最需要二次识别的一行。
+    func testNumberRowDetectionUsesStructure() {
+        XCTAssertFalse(TicketVisionScanner.looksLikeNumberRow("第26088期 2026年04月08日开奖"))
+        XCTAssertFalse(TicketVisionScanner.looksLikeNumberRow("开奖期:2026018 26-02-11 合计6元"))
+        XCTAssertFalse(TicketVisionScanner.looksLikeNumberRow("单式票 1倍 合计10元"))
+        XCTAssertTrue(TicketVisionScanner.looksLikeNumberRow("① 0 1 5"))
+        XCTAssertTrue(TicketVisionScanner.looksLikeNumberRow("A.09 12 16 18 19 23 25"))
+        XCTAssertTrue(TicketVisionScanner.looksLikeNumberRow("组六: U 7"))
+    }
+
+    /// Vision 偶尔把注序号的 A 认成西里尔字母 А，还可能认出两遍。
+    /// 两者都会让整行过不了「只有数字」那道闸，一注就丢了。
+    func testCyrillicAndDoubledLineLabelStillParse() {
+        let cyrillicA = "\u{0410}"
+        let text = """
+        玩法: 快乐8-选八单式
+        A. \(cyrillicA).05 16 24 33 45 52 66 80 ( 1 )
+        B.01 14 27 31 39 58 63 72 1 )
+        开奖期:2026081 26-04-01   合计4元
+        """
+        let ticket = TicketTextParser.parseTickets(text).first
+        XCTAssertEqual(ticket?.count, 2, "西里尔 А 或重复的注序号不该丢注")
+        XCTAssertEqual(ticket?.lines.first?[.nums], [5, 16, 24, 33, 45, 52, 66, 80])
+    }
+
     // MARK: - 不能误伤原有彩种
 
     func testWelfareHeaderStillResolvesDoubleColourBall() {
