@@ -362,7 +362,10 @@ struct TicketScanView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: .infinity)
-                        .frame(maxHeight: 260)
+                        // 它的职责是"确认框对没框对"，一眼扫过即可；
+                        // 真要看清小字有「放大核对」。给太高会把下面的识别结果
+                        // 挤出屏幕，而那才是这一页的主角。
+                        .frame(maxHeight: 170)
                     Label("放大核对", systemImage: "arrow.up.left.and.arrow.down.right")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white)

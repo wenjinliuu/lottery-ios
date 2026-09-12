@@ -76,7 +76,6 @@ struct DrawerLayer<Item: Identifiable & Equatable, Content: View>: View {
 
     /// 正在画的那一张。它比 `item` 多活一段 —— 关闭动画要跑完。
     @State private var rendered: Item?
-    @State private var shown = false
     @State private var height: DrawerHeight = .medium
     /// 手指当前拖出来的位移。不参与隐式动画，要跟手。
     @State private var drag: CGFloat = 0
@@ -84,48 +83,55 @@ struct DrawerLayer<Item: Identifiable & Equatable, Content: View>: View {
     private static var rise: Animation { .spring(duration: 0.42, bounce: 0.12) }
 
     var body: some View {
+        // **整层忽略安全区**，面板因此贴着屏幕物理底边。
+        //
+        // 原来面板底边停在安全区底部，靠背景多画 240pt 去盖 Home 指示条那一带 ——
+        // 于是内容到安全区就结束了，下面那一截只有背景色，看着就是一条灰带。
+        // 忽略安全区之后，Home 指示条那一条归内容自己所有（由 bottomInset 垫出来），
+        // 整块面板从上到下是同一个底，没有接缝可露。
         GeometryReader { proxy in
-            let available = proxy.size.height
+            let insets = proxy.safeAreaInsets
+            let available = proxy.size.height - insets.top - insets.bottom
             ZStack(alignment: .bottom) {
                 if let rendered {
                     dimmer
-                    panel(for: rendered, available: available)
-                        .offset(y: shown ? drag : available + 120)
+                        .transition(.opacity)
+                    panel(for: rendered, available: available, bottomInset: insets.bottom)
+                        .offset(y: drag)
+                        // **动画要挂在这里，不能靠 offset 的前后差。**
+                        //
+                        // 面板是在 rendered 由 nil 变成有值的那一帧被**插入**的，
+                        // 插入时它没有"上一个位置"，offset 算出来直接就是终点 ——
+                        // 所以上一版是"啪"地出现，一点动画都没有。
+                        // transition 描述的正是"插入/移除该怎么演"。
+                        .transition(.move(edge: .bottom))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // 只让「开/关」和「高度」两件事带动画。`drag` 不在这里，
-            // 它要一比一跟着手指，回弹时另外用 withAnimation 显式动画。
-            .animation(Self.rise, value: shown)
             .animation(Self.rise, value: height)
         }
-        // 这里**不加** .ignoresSafeArea(.keyboard)：录入页里有要打字的地方，
-        // 抽屉得跟着键盘抬起来，否则输入框会被键盘压住。
+        .ignoresSafeArea()
         .onChange(of: item) { _, new in
             if let new {
-                rendered = new
                 height = initialHeight(new)
                 drag = 0
-                shown = true
+                withAnimation(Self.rise) { rendered = new }
             } else if rendered != nil {
-                shown = false
-            }
-        }
-        .onChange(of: shown) { _, isShown in
-            guard !isShown else { return }
-            // 等落下去之后再把内容拆掉，否则关到一半整块就消失了
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(0.42))
-                guard !shown else { return }
-                rendered = nil
-                onDismissed()
+                withAnimation(Self.rise) { rendered = nil }
+                // 落完再交棒。下一张抽屉要等这一张真的退场，
+                // 在同一帧里开会被吞掉。
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(0.42))
+                    guard item == nil else { return }
+                    onDismissed()
+                }
             }
         }
     }
 
     private var dimmer: some View {
         Color.black
-            .opacity(shown ? 0.32 : 0)
+            .opacity(0.32)
             .ignoresSafeArea()
             .contentShape(Rectangle())
             .onTapGesture { close() }
@@ -133,37 +139,31 @@ struct DrawerLayer<Item: Identifiable & Equatable, Content: View>: View {
             .accessibilityAddTraits(.isButton)
     }
 
-    private func panel(for value: Item, available: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            grabber(available: available)
+    private func panel(for value: Item, available: CGFloat, bottomInset: CGFloat) -> some View {
+        let shape = UnevenRoundedRectangle(topLeadingRadius: 26, topTrailingRadius: 26,
+                                           style: .continuous)
+        return VStack(spacing: 0) {
+            grabber()
             content(value)
                 .environment(\.drawerDismiss, DrawerDismissAction { close() })
                 .environment(\.drawerExpand, DrawerExpandAction { height = $0 })
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // 只裁内容，**不能裁整块面板**：面板的背景刻意向下多画了
-                // 240pt 去盖住 Home 指示条那一带，裁了就会在底部露出一条缝，
-                // 透出下面的标签栏 —— 就是那条来路不明的横条。
-                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 26,
-                                                  topTrailingRadius: 26,
-                                                  style: .continuous))
         }
         .frame(height: height.points(in: available))
-        .background(alignment: .top) {
-            // 多画 240pt 藏到屏幕下面，这样 Home 指示条那一条也被盖住，
-            // 不用去算安全区，拖拽时也不会在底下露出一条缝。
-            UnevenRoundedRectangle(topLeadingRadius: 26, topTrailingRadius: 26,
-                                   style: .continuous)
-                .fill(Palette.canvas)
-                .frame(height: height.points(in: available) + 240)
-                .shadow(color: .black.opacity(0.20), radius: 24, y: -6)
-        }
+        // Home 指示条那一条：让内容整体上移，空出来的地方仍然是面板自己的底色。
+        // 这样从抓手到屏幕最底下是连续的一块，没有色差。
+        .padding(.bottom, bottomInset)
+        .frame(maxWidth: .infinity)
+        .background(shape.fill(Palette.canvas))
+        .clipShape(shape)
+        .shadow(color: .black.opacity(0.18), radius: 22, y: -4)
     }
 
     /// 抓手。
     ///
     /// 拖拽手势**只挂在这一条**，不挂整块面板 —— 挂整块的话，
     /// 内容里的 ScrollView 就抢不到滑动手势了，复核页会变得没法滚。
-    private func grabber(available: CGFloat) -> some View {
+    private func grabber() -> some View {
         VStack(spacing: 0) {
             Capsule()
                 .fill(Color.primary.opacity(0.22))
@@ -194,8 +194,9 @@ struct DrawerLayer<Item: Identifiable & Equatable, Content: View>: View {
     }
 
     private func close() {
-        withAnimation(Self.rise) { drag = 0 }
+        drag = 0
+        // 只改 item，升起/落下的动画统一由 onChange 处理，
+        // 免得两处各写一份、对不齐。
         item = nil
-        shown = false
     }
 }

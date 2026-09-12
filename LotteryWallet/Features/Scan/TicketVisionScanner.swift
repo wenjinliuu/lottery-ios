@@ -69,13 +69,45 @@ enum TicketVisionScanner {
         return page
     }
 
+    /// 票面最后一行**有意义的内容**通常带着这些词。
+    ///
+    /// 它们下面那一截 —— 条形码、以及「XX市福利彩票发行中心承销」这类落款 ——
+    /// 核对时一点用都没有，却占掉预览框近一半高度。福彩票尤其明显：
+    /// 落款那行字也会被 OCR 认出来，于是"所有文字的并集"把条码整个圈了进去。
+    private static let footerAnchors = ["公益", "合计", "开奖期", "销售期", "兑奖", "有效期"]
+
+    /// 丢掉落款行以下的碎片。
+    ///
+    /// 认不出任何锚点时原样返回 —— 宁可裁得松一点，也不能因为一条启发式规则
+    /// 把号码那几行切掉。
+    static func fragmentsAboveFooter(_ fragments: [TextFragment]) -> [TextFragment] {
+        // Vision 的 y 向上为正，所以「更靠下」= minY 更小
+        let anchors = fragments.filter { fragment in
+            footerAnchors.contains { fragment.text.contains($0) }
+        }
+        guard let bottom = anchors.map(\.box.minY).min() else { return fragments }
+        let kept = fragments.filter { $0.box.minY >= bottom - 0.005 }
+        guard let full = span(of: fragments), let trimmed = span(of: kept) else { return fragments }
+        // 砍掉一多半就不对劲了，多半是锚点认错了位置，退回原样更安全
+        guard trimmed >= full * 0.5 else { return fragments }
+        return kept
+    }
+
+    private static func span(of fragments: [TextFragment]) -> CGFloat? {
+        guard let low = fragments.map(\.box.minY).min(),
+              let high = fragments.map(\.box.maxY).max() else { return nil }
+        return high - low
+    }
+
     /// 按识别到的文字把图裁到内容区。
     ///
     /// Vision 的框是归一化坐标、原点在**左下角**，UIImage 是左上角，
     /// 所以 y 要翻过来。四周各留一点余量，免得贴着字边切、看着发憋。
     static func contentCrop(_ image: UIImage, fragments: [TextFragment]) -> UIImage? {
         guard !fragments.isEmpty, let cgImage = image.cgImage else { return nil }
-        let union = fragments.dropFirst().reduce(fragments[0].box) { $0.union($1.box) }
+        let kept = fragmentsAboveFooter(fragments)
+        guard let first = kept.first else { return nil }
+        let union = kept.dropFirst().reduce(first.box) { $0.union($1.box) }
         // 几乎占满整张图就没必要裁了，白费一次重绘
         guard union.width < 0.97 || union.height < 0.94 else { return nil }
 
