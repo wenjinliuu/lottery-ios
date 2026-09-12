@@ -83,22 +83,54 @@ enum TicketVisionScanner {
     /// 非号码行（彩种名、玩法、期号、金额）仍然用中文那一遍的结果。
     static func mergedText(image: UIImage, base: [TextFragment]) async -> String {
         let baseRows = LayoutSegmenter.rows(base)
+        let originals = baseRows.map(LayoutSegmenter.join)
+        // 彩种要先认出来，二次识别的结果才有得校验 —— 见 `isImprovement`。
+        let game = TicketTextParser.detectGame(originals.joined(separator: "\n"))
         var result: [String] = []
-        for row in baseRows {
-            let original = LayoutSegmenter.join(row)
+        for (index, row) in baseRows.enumerated() {
+            let original = originals[index]
             guard looksLikeNumberRow(original) else {
                 result.append(original)
                 continue
             }
-            let band = LayoutSegmenter.band(row)
-            let better = await bestDigitReading(image: image, band: band)
-            guard let better, digitCount(better) > digitCount(original) else {
+            let better = await bestDigitReading(image: image,
+                                                band: LayoutSegmenter.band(row),
+                                                columns: LayoutSegmenter.columns(row))
+            guard let better, isImprovement(better, over: original, game: game) else {
                 result.append(original)
                 continue
             }
             result.append(graft(prefix: original, digits: better))
         }
         return result.joined(separator: "\n")
+    }
+
+    /// 二次识别的结果该不该采纳。
+    ///
+    /// 上一版的判据是「数字更多就换」，方向**正好是反的**：裁条时扫进来的
+    /// 机号、金额、邻行残字天生数字更多，垃圾永远赢。真实结果里
+    /// `A.05 16 24 33 45 52 66 80` 被换成了
+    /// `A.05 16 24 33 45 52 66 80 ( 1 R 1. 07 Z0 CO 70`，
+    /// 一整张快乐8 票就此读不出任何一注。
+    ///
+    /// 现在的判据是**这一行读不读得成一注**，而不是有几个数字：
+    /// 1. 候选必须是**干干净净一排数字**。上面那串里的 `(` `R` `.` 一个都过不去。
+    /// 2. 原来读不成、现在读得成 —— 换。这正是二次识别要救的那种行。
+    /// 3. 原来读得成、现在读不成 —— 不换。只补漏，不改坏。
+    /// 4. 两边一样（都成或都不成）才退回比数字个数。
+    ///
+    /// 认不出彩种时没有第 2、3 条可用，只剩第 1 条加数字个数。
+    static func isImprovement(_ candidate: String, over original: String, game: GameKey?) -> Bool {
+        guard TicketTextParser.isBareNumberLine(candidate) else { return false }
+        guard let game else { return digitCount(candidate) > digitCount(original) }
+        let body = original.replacingOccurrences(of: Self.rowLabelPrefix,
+                                                 with: "", options: .regularExpression)
+        let originalReads = TicketTextParser.singleLineForTesting(body, game: game) != nil
+        let candidateReads = TicketTextParser.singleLineForTesting(candidate, game: game) != nil
+        // 原行里混进了右边那一竖排机号时，它本来就读不成一注；
+        // 裁条之后机号被挡在外面，数字反而**变少**了 —— 这时候按个数比就全错了。
+        if candidateReads != originalReads { return candidateReads }
+        return digitCount(candidate) > digitCount(original)
     }
 
     /// 把这一行**单独裁出来**再识别一遍。
@@ -111,27 +143,73 @@ enum TicketVisionScanner {
     /// 裁成一条窄带之后，这一行就占满了整幅输入：字被放大好几倍，
     /// 周围也没有别的东西来抢注意力。再挂上只认英数的模型，
     /// 中文识别那套「把宽间距当排版空白」的倾向也一并避开了。
-    private static func bestDigitReading(image: UIImage, band: ClosedRange<CGFloat>) async -> String? {
+    ///
+    /// **横向必须卡在这一行自己那一段。** 上一版裁的是整幅宽度，
+    /// 票面右边那一竖排机号于是行行都被扫进来。
+    private static func bestDigitReading(image: UIImage,
+                                         band: ClosedRange<CGFloat>,
+                                         columns: ClosedRange<CGFloat>) async -> String? {
         guard let cgImage = image.cgImage else { return nil }
+        let width = CGFloat(cgImage.width)
         let height = CGFloat(cgImage.height)
         // 上下各留半行余量，免得贴着字边切，笔画被削掉反而更难认
-        let pad = Swift.max((band.upperBound - band.lowerBound) * 0.45, 0.004)
+        let padY = Swift.max((band.upperBound - band.lowerBound) * 0.45, 0.004)
+        // 左右放宽一点，接住首尾那个可能整块没认出来的数字
+        let padX = Swift.max((columns.upperBound - columns.lowerBound) * 0.08, 0.03)
         // Vision 的 y 向上为正，位图向下，所以要翻过来
-        let top = (1 - Swift.min(band.upperBound + pad, 1)) * height
-        let bottom = (1 - Swift.max(band.lowerBound - pad, 0)) * height
-        let rect = CGRect(x: 0, y: top, width: CGFloat(cgImage.width), height: bottom - top)
-            .intersection(CGRect(x: 0, y: 0, width: CGFloat(cgImage.width), height: height))
-        guard rect.height > 8, let strip = cgImage.cropping(to: rect) else { return nil }
+        let top = (1 - Swift.min(band.upperBound + padY, 1)) * height
+        let bottom = (1 - Swift.max(band.lowerBound - padY, 0)) * height
+        let left = Swift.max(columns.lowerBound - padX, 0) * width
+        let right = Swift.min(columns.upperBound + padX, 1) * width
+        let rect = CGRect(x: left, y: top, width: right - left, height: bottom - top)
+            .intersection(CGRect(x: 0, y: 0, width: width, height: height))
+        guard rect.height > 8, rect.width > 24, let strip = cgImage.cropping(to: rect) else { return nil }
 
-        var candidates: [String] = []
-        // 一条窄带很小，放大三倍也不贵；两个倍数各试一次，取数字多的那个。
+        var tokens: [DigitToken] = []
+        // 一条窄带很小，放大三倍也不贵；两个倍数各认一遍，**按位置取并集**。
         for factor in [3.0, 5.0] as [CGFloat] {
             let slice = UIImage(cgImage: strip, scale: 1, orientation: .up)
             guard let big = upscale(slice, factor: factor),
                   let fragments = try? await recognizeFragments(in: big, languages: ["en-US"]) else { continue }
-            candidates.append(LayoutSegmenter.lines(fragments).replacingOccurrences(of: "\n", with: " "))
+            merge(digitTokens(in: fragments), into: &tokens)
         }
-        return candidates.max { digitCount($0) < digitCount($1) }
+        guard !tokens.isEmpty else { return nil }
+        return tokens.sorted { $0.box.minX < $1.box.minX }
+            .map(\.text)
+            .joined(separator: " ")
+    }
+
+    /// 裁条里认出来的一小块数字。
+    private struct DigitToken {
+        let text: String
+        let box: CGRect
+    }
+
+    /// 只收「落在条带正中间、而且只有数字」的碎片。
+    ///
+    /// 上下各留了 45% 余量，邻行的笔画会探进来一点；号码行左右也常有
+    /// 括号里的倍数。这两样都不能混进号码。
+    private static func digitTokens(in fragments: [TextFragment]) -> [DigitToken] {
+        fragments.compactMap { fragment in
+            guard (0.2...0.8).contains(fragment.box.midY) else { return nil }
+            let text = fragment.text.trimmingCharacters(in: .whitespaces)
+            guard !text.isEmpty, TicketTextParser.isBareNumberLine(text) else { return nil }
+            return DigitToken(text: text, box: fragment.box)
+        }
+    }
+
+    /// 多个放大倍数的结果按位置合并，而不是取数字最多的那一遍。
+    ///
+    /// 宽间距的个位数最要命的地方是**每一遍漏掉的不是同一位**：
+    /// 3 倍那遍读出 `8 4 1`，5 倍那遍读出 `4 1 5`，单看哪一遍都缺。
+    /// 按横坐标取并集，缺的那两位就补回来了。
+    ///
+    /// 位置重叠的一律跳过 —— Vision 有时把一整排号码当成一个碎片返回，
+    /// 它的框横跨整行，不跳过的话同一个号会被数两遍。
+    private static func merge(_ incoming: [DigitToken], into tokens: inout [DigitToken]) {
+        for token in incoming where !tokens.contains(where: { $0.box.intersects(token.box) }) {
+            tokens.append(token)
+        }
     }
 
     /// 这一行是不是一排号码。
@@ -390,6 +468,27 @@ enum LayoutSegmenter {
         let upper = row.map(\.box.maxY).max() ?? 0
         return Swift.min(lower, upper)...Swift.max(lower, upper)
     }
+
+    /// 这一行占的横向区间，右边那一竖排机号不算在内。
+    ///
+    /// 号码印在票面左边，机号、流水号印在右边，中间隔着很宽一条空白。
+    /// 按横坐标排开之后，第一个大缺口就是两者的分界 —— 只要左边这一簇。
+    /// 裁条的时候拿它当右边界，机号就进不来了。
+    static func columns(_ row: [TicketVisionScanner.TextFragment]) -> ClosedRange<CGFloat> {
+        let sorted = row.sorted { $0.box.minX < $1.box.minX }
+        guard let first = sorted.first else { return 0...1 }
+        var lower = first.box.minX
+        var upper = first.box.maxX
+        for fragment in sorted.dropFirst() {
+            guard fragment.box.minX - upper <= sideGap else { break }
+            lower = Swift.min(lower, fragment.box.minX)
+            upper = Swift.max(upper, fragment.box.maxX)
+        }
+        return Swift.min(lower, upper)...Swift.max(lower, upper)
+    }
+
+    /// 号码簇和机号之间至少有这么宽的空白。号码之间的间距远比它小。
+    private static let sideGap: CGFloat = 0.12
 
     /// 把碎片按纵向位置聚成一行一行。
     static func rows(_ fragments: [TicketVisionScanner.TextFragment]) -> [[TicketVisionScanner.TextFragment]] {

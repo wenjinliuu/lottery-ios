@@ -297,6 +297,14 @@ struct TicketCard: Identifiable, Hashable {
         /// `needsMatchRepair`），而不是在这里拿状态硬当"已核对"——
         /// 那样只会在标记补上之前把整注画成全灰，中奖票尤其离谱。
         let hasResult: Bool
+        /// 这一注自己印的玩法（`组六` / `组三` / `单选`）。
+        ///
+        /// 只有**票面逐注印玩法**的彩种才有值。福彩 3D 就是这么打的：
+        /// 号码柱前面明明白白印着「组六:」「组三:」，一张票上可以混着来。
+        /// 票夹要跟票面长一样，这一栏就必须跟着出现。
+        /// 排列3 的组三/组六 是按号码推出来的、票面并没有印，
+        /// 所以只在一张票上真的混了两种时才标出来。
+        let playLabel: String
     }
 
     let id: String
@@ -342,6 +350,18 @@ struct TicketCard: Identifiable, Hashable {
     }
 
     var netProfit: Double { prize - cost }
+
+    /// 每一注要不要各自标玩法。
+    ///
+    /// 福彩 3D 永远要：实体票的号码柱前面就印着「组六:」「组三:」，
+    /// 票夹里不标就和手里那张纸对不上。其余彩种只在一张票上真的混了
+    /// 两种玩法时才标 —— 票头那句「组选单式」已经说清楚的事，
+    /// 逐注再写一遍只是噪声。
+    static func showsLineModes(_ records: [TicketRecord], game: GameKey) -> Bool {
+        let modes = Set(records.map(\.playMode).filter { !$0.isEmpty })
+        guard !modes.isEmpty else { return false }
+        return game == .fc3d || modes.count > 1
+    }
 
     /// 把历史上各种写法的 `entryLabel` 折成票面用词。
     ///
@@ -496,13 +516,17 @@ extension TicketCard {
         prize = prizeSum
 
         let key = batch.game
+        let showsLineMode = TicketCard.showsLineModes(records, game: batch.game)
         lines = records.prefix(TicketCard.lineLimit).map { record in
             Line(id: record.id,
                  numbers: record.ticket.numbers.values,
                  matched: record.matched,
                  prizeAmount: record.prizeAmount,
                  status: record.status,
-                 hasResult: !record.matched.isEmpty)
+                 hasResult: !record.matched.isEmpty,
+                 playLabel: showsLineMode
+                     ? batch.game.playLabel(playMode: record.playMode, addOn: record.ticket.addOn)
+                     : "")
         }
 
         // 复制文本同样只取前 `lineLimit` 注。这里是主线程上重建快照的路径，

@@ -175,7 +175,7 @@ struct TicketScanView: View {
             VStack(spacing: 6) {
                 Text("把整张彩票放进取景框")
                     .font(.headline)
-                Text("识别全部在这台设备上完成，照片不上传也不保存。支持双色球和大乐透的单式、复式、胆拖票。\n拍好之后框一下票面，一次认一张。")
+                Text("识别全部在这台设备上完成，照片不上传也不保存。双色球、大乐透支持单式、复式、胆拖；七乐彩、快乐8、七星彩、排列3、排列5、福彩3D 目前支持单式票。\n拍好之后框一下票面，一次认一张。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -397,6 +397,51 @@ struct TicketScanView: View {
 
     // MARK: - 单张票
 
+    /// 复核页票头那一枚标签，写法和票夹里那张卡片**完全一致**。
+    ///
+    /// 之前这里只写 `单式 / 复式 / 胆拖`，票夹却写「组选单式」「选八单式」
+    /// —— 同一张票在两个页面上叫两个名字，用户没法确认自己扫对了没有。
+    /// 现在两边都走 `Game.ticketLabel`，玩法是从**每一注**的集合里取的：
+    /// 排列3 的组选票一眼能看出是组选还是直选，快乐8 看得出是选几。
+    private func headLabel(_ ticket: ScannedTicket) -> String {
+        ticket.game.ticketLabel(modes: playModes(ticket), shape: ticket.play.label)
+    }
+
+    /// 这张票上出现过的玩法。
+    ///
+    /// 大乐透的玩法不在 `playMode` 里，而是「追不追加」那个开关，
+    /// 要翻译成 `ticketLabel` 认得的键，否则追加票的票头少写两个字。
+    private func playModes(_ ticket: ScannedTicket) -> Set<String> {
+        if ticket.game == .dlt { return [ticket.addOn ? "add" : "normal"] }
+        let modes = ticket.lineModes.filter { !$0.isEmpty }
+        return modes.isEmpty ? [ticket.playMode] : Set(modes)
+    }
+
+    @ViewBuilder
+    private func lineModeBadge(_ ticket: ScannedTicket, index: Int) -> some View {
+        let label = lineModeLabel(ticket, index: index)
+        if !label.isEmpty {
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(ticket.game.accent.accentColor)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(ticket.game.tint.opacity(0.16), in: Capsule())
+                .fixedSize()
+                .padding(.top, 2)
+        }
+    }
+
+    /// 这一注自己要不要标玩法。判据和票夹那边是同一条
+    /// （`TicketCard.showsLineModes`）：3D 的实体票逐注印玩法，
+    /// 其余彩种只在一张票混了两种玩法时才标。
+    private func lineModeLabel(_ ticket: ScannedTicket, index: Int) -> String {
+        guard index < ticket.lineModes.count else { return "" }
+        let modes = Set(ticket.lineModes.filter { !$0.isEmpty })
+        guard !modes.isEmpty, ticket.game == .fc3d || modes.count > 1 else { return "" }
+        return ticket.game.playLabel(playMode: ticket.lineModes[index], addOn: ticket.addOn)
+    }
+
     private func ticketCard(_ ticket: Binding<ScannedTicket>) -> some View {
         let value = ticket.wrappedValue
         let game = value.game
@@ -405,7 +450,7 @@ struct TicketScanView: View {
                 Text(game.label)
                     .font(.headline)
                     .foregroundStyle(game.accent.accentColor)
-                Text(value.play.label)
+                Text(headLabel(value))
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(game.onTint)
                     .padding(.horizontal, 7)
@@ -488,13 +533,15 @@ struct TicketScanView: View {
                         zoneEditorTarget = ZoneEditorTarget(ticketID: ticket.id, lineIndex: index)
                     } label: {
                         HStack(alignment: .top, spacing: 8) {
-                            // 序号，和票面一致。玩法标在这张票的头部。
+                            // 序号，和票面一致。玩法一般标在这张票的头部，
+                            // 3D 那种逐注印玩法的票则每一注各标各的。
                             Text("\(index + 1).")
                                 .font(.caption.weight(.bold))
                                 .monospacedDigit()
                                 .foregroundStyle(.secondary)
                                 .frame(width: 24, alignment: .leading)
                                 .padding(.top, 3)
+                            lineModeBadge(ticket, index: index)
                             TicketNumbersSnapshotView(game: ticket.game, numbers: numbers.values, size: 26)
                             Spacer(minLength: 0)
                             Image(systemName: "square.and.pencil")

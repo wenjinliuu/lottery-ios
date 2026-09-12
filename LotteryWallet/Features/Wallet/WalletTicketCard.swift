@@ -211,17 +211,27 @@ struct WalletTicketCard: View {
 
     private func lineRow(index: Int, line: TicketCard.Line) -> some View {
         HStack(spacing: 9) {
-            // 每一注前面就是序号，和实体票面一致。
+            // 每一注前面是序号，和实体票面一致。
             //
-            // 曾经在这里标过玩法（组三/组六/单选）—— 但真实票面**并没有**
-            // 逐注印玩法，它只在票头写「组选单式票」。界面要跟票面统一，
-            // 玩法挪到卡片头部去标。底层每一注仍然各自带着自己的玩法，
-            // 核对走的是那份数据，不受显示影响。
+            // 玩法默认标在卡片头部（「组选单式」），逐注不再重复。
+            // 但福彩 3D 是例外：它的实体票**就是逐注印玩法**的，
+            // 号码柱前面写着「组六:」「组三:」，一张票上可以混着来。
+            // 那种票只在头部标就和手里的纸对不上了，所以这一栏跟着出现。
             Text("\(index + 1)")
                 .font(.caption2.weight(.medium))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
+
+            if !line.playLabel.isEmpty {
+                Text(line.playLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(game.accent.accentColor)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(game.tint.opacity(0.16), in: Capsule())
+                    .fixedSize()
+            }
 
             TicketNumbersSnapshotView(
                 game: game,
