@@ -1,6 +1,8 @@
 import Foundation
 import Vision
 import UIKit
+import CoreImage
+import CoreImage.CIFilterBuiltins
 
 /// 用 Apple Vision 在本机识别票面文字。
 /// 图片不上传、不写入数据库，识别完即释放。
@@ -82,15 +84,22 @@ enum TicketVisionScanner {
     /// 所以号码行单独再认一遍：图放大两倍、**只挂英数模型**。
     /// 非号码行（彩种名、玩法、期号、金额）仍然用中文那一遍的结果。
     ///
-    /// 一位一个数字的那几个彩种（排列3/5、福彩3D、七星彩）还要更进一步：
-    /// 先交给 `DigitRowReader` **按坐标补位** —— 这些票的号码没有任何
-    /// 纠错冗余（值域 0-9 意味着任何数字字符都合法），文本层面已经无路可走，
-    /// 只能靠"数字是等距印的"这条几何线索。
+    /// 一位一个数字的那几个彩种（排列3/5、福彩3D、七星彩）走的是另一条路：
+    /// 它们的号码印成一个紧密的矩阵，上下的空隙比左右的窄好几倍，
+    /// Vision 干脆**按竖列**读 —— 分行结果本身就是错的，基于它修修补补没有意义。
+    /// 所以整段交给 `DigitMatrixReader` 按坐标重建。
     static func mergedText(image: UIImage, base: [TextFragment]) async -> String {
         let baseRows = LayoutSegmenter.rows(base)
         let originals = baseRows.map(LayoutSegmenter.join)
         // 彩种要先认出来，二次识别的结果才有得校验 —— 见 `isImprovement`。
         let game = TicketTextParser.detectGame(originals.joined(separator: "\n"))
+        // 数字型彩种先走矩阵重建。它**整段接管**号码区，因为对这些票来说
+        // Vision 的分行结果本身就是错的（它按竖列读），基于它再修修补补没有意义。
+        if let game, let width = positionalDigitCount(game),
+           let matrix = await DigitMatrixReader.read(image: image, columns: width) {
+            return compose(rows: baseRows, originals: originals, matrix: matrix)
+        }
+
         var result: [String] = []
         for (index, row) in baseRows.enumerated() {
             let original = originals[index]
@@ -100,11 +109,6 @@ enum TicketVisionScanner {
             }
             let band = LayoutSegmenter.band(row)
             let columns = LayoutSegmenter.columns(row)
-            if let positional = await positionalReading(image: image, band: band, columns: columns,
-                                                        original: original, game: game) {
-                result.append(graft(prefix: original, digits: positional))
-                continue
-            }
             let better = await bestDigitReading(image: image, band: band, columns: columns)
             guard let better, isImprovement(better, over: original, game: game) else {
                 result.append(original)
@@ -115,14 +119,66 @@ enum TicketVisionScanner {
         return result.joined(separator: "\n")
     }
 
-    /// 一位一个数字的彩种，一行该有几个字符。
+    /// 把重建出来的号码矩阵拼回整篇文本。
     ///
-    /// 只有**每一位都恰好印一个字符**的彩种才摆得上栅格。
-    /// 七乐彩、快乐8 印的是两位数，双色球、大乐透还带分隔符，都不适用 ——
+    /// 矩阵占的那一段纵向区间里，Vision 原来的分行结果整段丢掉 —— 那几行
+    /// 十有八九是竖着读出来的，留着只会让解析器多读出几注不存在的号码。
+    /// 区间外的行（彩种名、期号、玩法、合计）原样保留，它们是横排文本，
+    /// Vision 读得好好的。
+    private static func compose(rows: [[TextFragment]],
+                                originals: [String],
+                                matrix: DigitMatrixReader.Matrix) -> String {
+        var result: [String] = []
+        var inserted = false
+        for (index, row) in rows.enumerated() {
+            let band = LayoutSegmenter.band(row)
+            let overlaps = band.lowerBound <= matrix.span.upperBound
+                && band.upperBound >= matrix.span.lowerBound
+            guard overlaps else {
+                result.append(originals[index])
+                continue
+            }
+            guard !inserted else { continue }
+            inserted = true
+            result.append(contentsOf: matrix.rows.map { line(for: $0, rows: rows) })
+        }
+        if !inserted {
+            result.append(contentsOf: matrix.rows.map { line(for: $0, rows: rows) })
+        }
+        return result.joined(separator: "\n")
+    }
+
+    /// 一注拼成一行文本，前面带上票面印的玩法标签。
+    ///
+    /// 标签只从**和这一注同高、而且不横跨多行**的碎片里找。
+    /// 福彩 3D 每一注前面印着「组六:」「组三:」，那是核奖要用的；
+    /// 而 `①②③④⑤` 那一竖排常常被 Vision 当成一个碎片整条读出来，
+    /// 它横跨所有行，认作谁的标签都不对。
+    private static func line(for row: DigitMatrixReader.Row, rows: [[TextFragment]]) -> String {
+        let digits = slotText(row.values)
+        let height = row.band.upperBound - row.band.lowerBound
+        for fragment in rows.flatMap({ $0 }) {
+            guard fragment.box.height < height * 2 else { continue }
+            let center = fragment.box.midY
+            guard row.band.contains(center) else { continue }
+            guard let range = fragment.text.range(of: Self.rowLabelPrefix, options: .regularExpression)
+            else { continue }
+            let label = fragment.text[range].trimmingCharacters(in: .whitespaces)
+            guard !label.isEmpty else { continue }
+            return "\(label) \(digits)"
+        }
+        return digits
+    }
+
+    /// 号码矩阵有几列 —— 也就是这个彩种一注有几个号。
+    ///
+    /// 只有**号码之间空得很开、靠位置就能分清**的彩种才走矩阵那条路：
+    /// 排列3/5、福彩3D、七星彩，票面实测左右空白有两个半字宽，
+    /// 而上下只有半个字高。
+    ///
+    /// 七乐彩、快乐8 的号码是正常行距的两位数，双色球、大乐透还带分隔符 ——
+    /// 它们的行 Vision 横着读得好好的，去动只会弄坏。
     /// 它们本来也不需要：两位数 + 窄值域 + 定长注本身就带着纠错冗余。
-    ///
-    /// 七星彩算七个字符：特别号是 0-9 的时候成立（大约七成的票），
-    /// 印成两位（10-14）时栅格自己会判不成立，安全退回文本那一遍。
     static func positionalDigitCount(_ game: GameKey) -> Int? {
         switch game {
         case .fc3d, .pl3: 3
@@ -130,37 +186,6 @@ enum TicketVisionScanner {
         case .qxc: 7
         default: nil
         }
-    }
-
-    /// 按坐标补位读一行，读得成才返回。
-    ///
-    /// 采纳的规矩很紧，因为这一步会**改写**号码：
-    /// - 每一位都认出来了 —— 一律采纳。位置是从等距栅格算出来的，
-    ///   比"整行文本认出几个数字"可靠得多。
-    /// - 还剩问号 —— 只有当原来这一行**根本读不成一注**时才采纳。
-    ///   本来好好的一行，绝不能被换成带问号的。
-    private static func positionalReading(image: UIImage,
-                                          band: ClosedRange<CGFloat>,
-                                          columns: ClosedRange<CGFloat>,
-                                          original: String,
-                                          game: GameKey?) async -> String? {
-        guard let game, let expected = positionalDigitCount(game) else { return nil }
-        // 只在「行首带着注序号/玩法标签」或者「整行除了数字什么都没有」的行上动手。
-        // 票面上的 `2.00` 同样是三个数字，不设这道闸，每张排列3 都会凭空多出一注。
-        let body = original.replacingOccurrences(of: Self.rowLabelPrefix,
-                                                 with: "", options: .regularExpression)
-        let hasLabel = original.range(of: Self.rowLabelPrefix, options: .regularExpression) != nil
-        guard hasLabel || TicketTextParser.isBareNumberLine(body) else { return nil }
-
-        guard let slots = await DigitRowReader.read(image: image, band: band,
-                                                    columns: columns, expected: expected)
-        else { return nil }
-        let text = slotText(slots)
-        guard slots.contains(where: { $0 == nil }) else { return text }
-        guard TicketTextParser.singleLineForTesting(body, game: game) == nil else { return nil }
-        // 一半以上都是问号就别拿出来丢人了，那多半根本不是号码行
-        guard slots.compactMap({ $0 }).count * 2 >= slots.count else { return nil }
-        return text
     }
 
     /// 栅格铺成文本。认不出的那一位写成 `?`，由解析器带到复核页去。
@@ -262,10 +287,19 @@ enum TicketVisionScanner {
     /// 认出图里每一个**数字字符**及其位置。
     ///
     /// 和 `recognizeFragments` 的区别在于按字符取框（`boundingBox(for:)`）。
-    /// 按坐标补位要知道"第几位在哪儿"，整块文本的框给不了这个 ——
-    /// Vision 有时把一整排号码当成一个碎片返回，那个框横跨整行。
+    /// 按坐标重建矩阵要知道"哪个数字在哪儿"，整块文本的框给不了这个 ——
+    /// Vision 经常把一整排号码当成一个碎片返回，那个框横跨整行。
+    ///
+    /// **必须用 `.fast`。** `.accurate` 下 `boundingBox(for:)` 对一个词里的
+    /// 每个字符返回的是**同一个框**（整个词的框）—— 这是 Apple 技术支持
+    /// 确认过的 bug，只有 `.fast` 给逐字符的框。上一版默认走 `.accurate`，
+    /// 于是所有字符的中心都一样、间距全是 0，按坐标补位那条路
+    /// **一次都没真正跑起来过**。
+    ///
+    /// 顺带：`.fast` 走的是按字符识别，`.accurate` 走的是整行的序列模型 ——
+    /// 对付票面上这种孤零零的个位数，前者本来就更合适。
     static func recognizeDigits(in image: UIImage,
-                                fast: Bool = false) async -> [DigitChar] {
+                                fast: Bool = true) async -> [DigitChar] {
         guard let cgImage = image.cgImage else { return [] }
         let orientation = cgOrientation(image.imageOrientation)
         let results: [DigitChar] = await Task.detached(priority: .userInitiated) {
@@ -479,6 +513,26 @@ enum TicketVisionScanner {
     /// 兼容旧调用：整张图当成一块，拼成逐行文本。
     static func recognizeText(in image: UIImage) async throws -> String {
         LayoutSegmenter.lines(try await recognizeFragments(in: image))
+    }
+
+    /// 拉一把对比度，顺手去色。
+    ///
+    /// 热敏票印在银灰色的纸上，票面反光、纸还是弯的 —— 有些笔画淡到
+    /// 识别模型直接看不见。去色是因为票面本来就只有明暗，留着色度只会带进噪声。
+    ///
+    /// 不做二值化：阈值一刀切在票面明暗不均的时候会**吃掉整片笔画**，
+    /// 比淡一点更糟。拉对比度是可逆的、温和的，认不出来还有原图那一遍兜着。
+    static func contrastBoosted(_ image: UIImage) -> UIImage? {
+        guard let cgImage = image.cgImage else { return nil }
+        let filter = CIFilter.colorControls()
+        filter.inputImage = CIImage(cgImage: cgImage)
+        filter.saturation = 0
+        filter.contrast = 1.7
+        filter.brightness = 0.03
+        guard let output = filter.outputImage,
+              let result = TicketImagePreprocessor.context.createCGImage(output, from: output.extent)
+        else { return nil }
+        return UIImage(cgImage: result)
     }
 
     /// 放大到 `factor` 倍，超限时**按比例收着放**而不是干脆不放。

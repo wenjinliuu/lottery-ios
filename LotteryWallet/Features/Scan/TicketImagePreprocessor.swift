@@ -45,7 +45,7 @@ enum TicketImagePreprocessor {
     /// 上限防止内存爆掉。
     private static let maximumSide: CGFloat = 4400
 
-    private static let context = CIContext(options: [.useSoftwareRenderer: false])
+    static let context = CIContext(options: [.useSoftwareRenderer: false])
 
     /// 猜一个票面框，给裁切界面当起点。
     ///
