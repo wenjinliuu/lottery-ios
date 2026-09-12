@@ -41,7 +41,7 @@ enum TicketRegistration {
         }
         let boundary = TicketVisionScanner.rowLabelBoundary(fragments)
         let contentWidth = TicketVisionScanner.contentBox(fragments)?.width ?? 1
-        let expectsRules = game.map { DigitTicketLayout.of($0) != nil && $0 != .fc3d } ?? true
+        let anchors = TicketFrame.TextAnchors.ordered(for: game)
         let region = ticketRegion(fragments)
         let size = CGSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height))
         let tilt = TicketVisionScanner.textTilt(fragments, size: size)
@@ -51,7 +51,7 @@ enum TicketRegistration {
                     fragments: fragments,
                     leftBoundary: boundary,
                     contentWidth: contentWidth,
-                    expectsRules: expectsRules,
+                    anchors: anchors,
                     region: region,
                     tilt: tilt)
         }.value
@@ -87,7 +87,7 @@ enum TicketRegistration {
                                 fragments: [TicketVisionScanner.TextFragment],
                                 leftBoundary: CGFloat?,
                                 contentWidth: CGFloat,
-                                expectsRules: Bool,
+                                anchors: [TicketFrame.TextAnchors],
                                 region: CGRect?,
                                 tilt: Double?) -> Result {
         var debug = ScanDebugReport()
@@ -109,14 +109,38 @@ enum TicketRegistration {
             baseline(rule, label: index == 0 ? "上虚线" : "下虚线", mask: mask)
         }
 
-        guard var frame = TicketFrame.between(rules: rules, in: mask) else {
-            if !expectsRules {
-                debug.notes.append("这个彩种票面上没有虚线，基准要用哈希行 + 开奖期行（阶段 3）")
-            } else if rules.count < 2 {
-                debug.notes.append("没找到上下两条虚线 —— 多半是裁切时把号码区上下那两条线切掉了")
+        // 虚线找得齐就用虚线（它夹得最紧），找不齐就退回**票面上那两行文字**。
+        //
+        // 文本行才是主力：虚线要同时过五道阈值，其中「横跨 > 80% 宽度」的分母
+        // 本身就没有稳定答案（纸宽？文字包络宽？印刷区宽？），票与票之间差
+        // 5–10%，正好在阈值上下横跳 —— 同样的票换一张纸边宽一点就翻过去了。
+        // 而机号行 / 哈希行这些格式固定的行，Vision 每张票都读得出来，
+        // 给的还是四边形，一道阈值都不用过。
+        var frame = TicketFrame.between(rules: rules, in: mask)
+        if frame != nil {
+            debug.notes.append("基准：号码区上下那两条虚线")
+        } else {
+            if rules.count < 2 {
+                debug.notes.append("没凑齐两条虚线（找到 \(rules.count) 条），改用票面上的文字行定位")
             } else {
-                debug.notes.append("找到 \(rules.count) 条虚线，多于两条时不猜是哪两条，整个退回")
+                debug.notes.append("找到 \(rules.count) 条虚线，多于两条时不猜是哪两条，改用文字行")
             }
+            for pair in anchors {
+                guard let found = TicketFrame.betweenTextLines(fragments, anchors: pair)
+                else { continue }
+                frame = found
+                debug.notes.append("基准：\(pair.name)")
+                // 文字行当基准时，把那两条线也画出来 —— 和虚线一样，
+                // 绿线压没压在票面那两行上，一眼就能判。
+                debug.baselines = [
+                    .init(label: "上基准", start: found.topLeft, end: found.topRight),
+                    .init(label: "下基准", start: found.bottomLeft, end: found.bottomRight)
+                ]
+                break
+            }
+        }
+        guard var frame = frame else {
+            debug.notes.append("票面上那两行基准文字也没认出来 —— 多半是裁切时切掉了机号行或者票底那行")
             return Result(debug: debug)
         }
 

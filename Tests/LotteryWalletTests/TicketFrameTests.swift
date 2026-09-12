@@ -148,6 +148,120 @@ final class TicketFrameTests: XCTestCase {
                                                     contentWidth: 1))
     }
 
+    // MARK: - 文本行基准（主力）
+
+    /// 按**左上原点**的坐标造一块文字（内部转成 Vision 的左下原点）。
+    private func line(_ text: String, left: CGFloat, right: CGFloat, top: CGFloat,
+                      height: CGFloat = 0.02,
+                      slope: CGFloat = 0) -> TicketVisionScanner.TextFragment {
+        func vision(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x, y: 1 - y) }
+        let drop = slope * (right - left)
+        let topLeft = vision(left, top)
+        let topRight = vision(right, top + drop)
+        let bottomLeft = vision(left, top + height)
+        let bottomRight = vision(right, top + height + drop)
+        let low = Swift.min(bottomLeft.y, bottomRight.y)
+        let high = Swift.max(topLeft.y, topRight.y)
+        return .init(text: text,
+                     box: CGRect(x: left, y: low, width: right - left, height: high - low),
+                     topLeft: topLeft, topRight: topRight,
+                     bottomLeft: bottomLeft, bottomRight: bottomRight)
+    }
+
+    /// 体彩：机号行 + 公益行夹出号码区。
+    ///
+    /// 这是**主力基准**。虚线要同时过五道阈值，其中「横跨 > 80% 宽度」的分母
+    /// 本身就没有稳定答案，实测五张真票只稳住两张；而这两行文字每张票都有，
+    /// Vision 给的还是四边形，一道阈值都不用过。
+    func testFrameFromSportsLotteryTextLines() {
+        let fragments = [
+            line("第26102期 2026年09月07日开奖", left: 0.1, right: 0.9, top: 0.20),
+            line("110310-292261-111967-377226 455878", left: 0.1, right: 0.9, top: 0.25),
+            line("① 12 15 19 31 33 + 05 09", left: 0.15, right: 0.85, top: 0.40),
+            line("感谢您为公益事业贡献 19.44元", left: 0.3, right: 0.7, top: 0.70)
+        ]
+        guard let frame = TicketFrame.betweenTextLines(
+            fragments, anchors: .sportsLottery) else {
+            return XCTFail("机号行 + 公益行应该夹得出号码区")
+        }
+        XCTAssertEqual(frame.anchor, .textLines)
+        // 上边是机号行的**下沿**
+        XCTAssertEqual(frame.topLeft.y, 0.27, accuracy: 1e-6)
+        XCTAssertEqual(frame.topLeft.x, 0.1, accuracy: 1e-6)
+        XCTAssertEqual(frame.topRight.x, 0.9, accuracy: 1e-6)
+        // 下边是公益行的**上沿**，而且横向被延长到和上边一样宽 ——
+        // 公益行居中而且短，直接拿它定宽度会把号码切掉
+        XCTAssertEqual(frame.bottomLeft.y, 0.70, accuracy: 1e-6)
+        XCTAssertEqual(frame.bottomLeft.x, 0.1, accuracy: 1e-6)
+        XCTAssertEqual(frame.bottomRight.x, 0.9, accuracy: 1e-6)
+    }
+
+    /// 票是斜的时候，两条基准跟着斜，号码区是个平行四边形。
+    func testTextLineFrameFollowsTheTilt() {
+        let fragments = [
+            line("110310-292261-111967-377226", left: 0.1, right: 0.9, top: 0.25, slope: 0.05),
+            line("感谢您为公益事业贡献", left: 0.3, right: 0.7, top: 0.70, slope: 0.05)
+        ]
+        guard let frame = TicketFrame.betweenTextLines(
+            fragments, anchors: .sportsLottery) else {
+            return XCTFail("歪票也该夹得出号码区")
+        }
+        XCTAssertEqual(frame.topLeft.y, 0.27, accuracy: 1e-6)
+        XCTAssertEqual(frame.topRight.y, 0.27 + 0.05 * 0.8, accuracy: 1e-6)
+        // 公益行只覆盖 0.3–0.7，两端要按它自己的方向延长出去
+        XCTAssertEqual(frame.bottomLeft.y, 0.70 - 0.05 * 0.2, accuracy: 1e-6)
+        XCTAssertEqual(frame.bottomRight.y, 0.70 + 0.05 * 0.6, accuracy: 1e-6)
+    }
+
+    /// 福彩走另一对基准：哈希行 + 开奖期行。
+    func testFrameFromWelfareLotteryTextLines() {
+        let fragments = [
+            line("玩法:3D-单式 机号:31130622", left: 0.1, right: 0.9, top: 0.20),
+            line("7D92-04AE-1FB5-E411-B960/32798871/C084C", left: 0.1, right: 0.9, top: 0.25),
+            line("开奖期:2026091 26-04-11 合计10元", left: 0.1, right: 0.8, top: 0.60)
+        ]
+        guard let frame = TicketFrame.betweenTextLines(
+            fragments, anchors: .welfareLottery) else {
+            return XCTFail("哈希行 + 开奖期行应该夹得出号码区")
+        }
+        XCTAssertEqual(frame.topLeft.y, 0.27, accuracy: 1e-6)
+        XCTAssertEqual(frame.bottomLeft.y, 0.60, accuracy: 1e-6)
+    }
+
+    /// 两套正则互不相容：拿错了只会一条都匹配不上，不会认错行。
+    func testAnchorPatternsDoNotCrossMatch() {
+        let machine = "110310-292261-111967-377226 455878"
+        let hash = "7D92-04AE-1FB5-E411-B960/32798871/C084C"
+        let sports = TicketFrame.TextAnchors.sportsLottery.top
+        let welfare = TicketFrame.TextAnchors.welfareLottery.top
+        XCTAssertNotNil(machine.range(of: sports, options: .regularExpression))
+        XCTAssertNil(machine.range(of: welfare, options: .regularExpression))
+        XCTAssertNotNil(hash.range(of: welfare, options: .regularExpression))
+        XCTAssertNil(hash.range(of: sports, options: .regularExpression))
+    }
+
+    /// 同一个模式命中好几行时：上基准取最靠下的，下基准取最靠上的 ——
+    /// 中间夹出来的那一块才是号码区。
+    func testAnchorLinePicksTheInnermost() {
+        let fragments = [
+            line("公益 上面那条", left: 0.3, right: 0.7, top: 0.60),
+            line("公益 下面那条", left: 0.3, right: 0.7, top: 0.80)
+        ]
+        let bottom = TicketFrame.anchorLine(fragments, matching: "公益", lowest: false)
+        XCTAssertEqual(bottom?.text, "公益 上面那条")
+        let lowest = TicketFrame.anchorLine(fragments, matching: "公益", lowest: true)
+        XCTAssertEqual(lowest?.text, "公益 下面那条")
+    }
+
+    /// 上下颠倒（公益行跑到机号行上面）时不硬凑，返回 nil。
+    func testTextLineFrameRefusesInvertedAnchors() {
+        let fragments = [
+            line("感谢您为公益事业贡献", left: 0.3, right: 0.7, top: 0.20),
+            line("110310-292261-111967-377226", left: 0.1, right: 0.9, top: 0.60)
+        ]
+        XCTAssertNil(TicketFrame.betweenTextLines(fragments, anchors: .sportsLottery))
+    }
+
     // MARK: - 票头区
 
     /// 期号那一行要认得出来，而且只认号码区**上面**的。

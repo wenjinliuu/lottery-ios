@@ -14,10 +14,54 @@ struct TicketFrame: Equatable {
     /// 基准是从哪儿来的。调试图上要写出来 —— 出问题时第一件事就是分清
     /// 「基准没找对」还是「基准对了但格子划歪了」。
     enum Anchor: String, Equatable {
-        /// 体彩数字型：号码区上下那两条长虚线。
+        /// 体彩数字型：号码区上下那两条长虚线。印得清楚时这个最紧。
         case dashedRules
-        /// 福彩：哈希行 + 开奖期行（阶段 3）。
+        /// 票面上那两行文字（体彩：机号行 + 公益行；福彩：哈希行 + 开奖期行）。
+        ///
+        /// **这个才是主力。** 虚线要同时过五道阈值，其中「横跨 > 80% 宽度」
+        /// 的分母（纸宽？文字包络宽？印刷区宽？）本身就没有稳定答案，
+        /// 票与票之间差 5–10%，正好在阈值上下横跳 —— 实测五张真票只稳住两张。
+        /// 而这两行文字 Vision 每张票都读得出来，给的还是四边形，
+        /// 一道阈值都不用过。
         case textLines
+    }
+
+    /// 上下两条基准线该去哪儿找。
+    ///
+    /// 这些正则钉的都是**格式固定**的行，不是内容固定的行 ——
+    /// 促销语每期都换（「超级大乐透8.8亿派奖」「理性购买彩票」「扫码参与」），
+    /// 拿它当锚点等于没有锚点。
+    struct TextAnchors {
+        /// 调试图上写出来，好让人知道这张票是靠哪两行定的位。
+        let name: String
+        /// 上基准：紧贴号码区上方那一行。
+        let top: String
+        /// 下基准：号码区下方第一行固定内容。
+        let bottom: String
+
+        /// 体彩：机号行（`110310-292261-111967-377226`）+ 公益行。
+        ///
+        /// 四张体彩真票（七星彩 ×2、排列3、排列5、大乐透）票面上都有这两行，
+        /// 而且都在号码区的正上方和正下方。
+        static let sportsLottery = TextAnchors(
+            name: "机号行 + 公益行",
+            top: "\\d{6}\\s*-\\s*\\d{6}\\s*-\\s*\\d{6}",
+            bottom: "公益")
+
+        /// 福彩：哈希行（`7D92-04AE-1FB5-E411-B960/32798871/C084C`）+ 开奖期行。
+        static let welfareLottery = TextAnchors(
+            name: "哈希行 + 开奖期行",
+            top: "[0-9A-Fa-f]{4}(?:\\s*-\\s*[0-9A-Fa-f]{4}){3,4}\\s*/",
+            bottom: "开奖期")
+
+        /// 先试哪一对。认不出彩种时两对都试 —— 正则本来就互不相容，
+        /// 拿错了只会一条都匹配不上，不会认错。
+        static func ordered(for game: GameKey?) -> [TextAnchors] {
+            switch game {
+            case .ssq, .qlc, .k8, .fc3d: [welfareLottery, sportsLottery]
+            default: [sportsLottery, welfareLottery]
+            }
+        }
     }
 
     var topLeft: CGPoint
@@ -112,13 +156,76 @@ struct TicketFrame: Equatable {
                            anchor: .dashedRules)
     }
 
+    // MARK: - 文本行基准
+
+    /// 两行文字夹出来的号码区。
+    ///
+    /// 上基准取那一行的**下沿**，下基准取那一行的**上沿** —— 夹出来的正好是
+    /// 两行之间那一块，号码全在里面。中间夹着的虚线、玩法/倍数/合计那一行、
+    /// 促销语，都留在区里不要紧：哪几行是投注号码，由墨迹投影去分（阶段 2），
+    /// 不靠这一层去猜。
+    ///
+    /// 横向按**上基准那一行**的宽度来 —— 机号行和哈希行都横跨整个印刷区，
+    /// 是票面上最宽的一行；下基准（公益行 / 开奖期行）居中而且短，
+    /// 拿它定宽度会把号码切掉，所以只取它的**方向**，把线延长过去。
+    static func between(top: TicketVisionScanner.TextFragment,
+                        bottom: TicketVisionScanner.TextFragment) -> TicketFrame? {
+        guard let (topLeft, topRight) = top.bottomEdge,
+              let (bottomLeftEdge, bottomRightEdge) = bottom.topEdge else { return nil }
+        guard topRight.x - topLeft.x > 0.2 else { return nil }
+
+        // 下基准那条线延长到上基准的左右两端
+        func extend(_ a: CGPoint, _ b: CGPoint, to x: CGFloat) -> CGPoint? {
+            let span = b.x - a.x
+            guard abs(span) > 1e-6 else { return nil }
+            return CGPoint(x: x, y: a.y + (x - a.x) / span * (b.y - a.y))
+        }
+        guard let bottomLeft = extend(bottomLeftEdge, bottomRightEdge, to: topLeft.x),
+              let bottomRight = extend(bottomLeftEdge, bottomRightEdge, to: topRight.x)
+        else { return nil }
+
+        // 上基准必须在上面，而且中间得装得下几行号码
+        let gap = Swift.min(bottomLeft.y, bottomRight.y) - Swift.max(topLeft.y, topRight.y)
+        guard gap > 0.02 else { return nil }
+
+        return TicketFrame(topLeft: topLeft, topRight: topRight,
+                           bottomRight: bottomRight, bottomLeft: bottomLeft,
+                           anchor: .textLines)
+    }
+
+    /// 按正则挑出当基准的那一行。
+    ///
+    /// 同一个模式命中好几块时，上基准取**最靠下**的（离号码区最近），
+    /// 下基准取**最靠上**的 —— 中间夹出来的那一块才是号码区。
+    static func anchorLine(_ fragments: [TicketVisionScanner.TextFragment],
+                           matching pattern: String,
+                           lowest: Bool) -> TicketVisionScanner.TextFragment? {
+        let matched = fragments.filter {
+            $0.text.range(of: pattern, options: .regularExpression) != nil
+        }
+        // Vision 的 y 向上为正：最靠下 = midY 最小
+        return lowest ? matched.min { $0.box.midY < $1.box.midY }
+                      : matched.max { $0.box.midY < $1.box.midY }
+    }
+
+    /// 用票面上那两行文字当基准，夹出号码区。
+    static func betweenTextLines(_ fragments: [TicketVisionScanner.TextFragment],
+                                 anchors: TextAnchors) -> TicketFrame? {
+        guard let top = anchorLine(fragments, matching: anchors.top, lowest: true),
+              let bottom = anchorLine(fragments, matching: anchors.bottom, lowest: false)
+        else { return nil }
+        return between(top: top, bottom: bottom)
+    }
+
     // MARK: - 票头区
 
-    /// 票面上「第 N 期 / 开奖日期」那一行。
+    /// 票头那一行 —— 号码区上方最值得单独框出来的那行。
     ///
-    /// 体彩印成 `第26102期 2026年09月07日开奖`，福彩印成 `开奖期:2026091 26-04-11`。
-    /// 两家都在号码区上方，都是核奖必需的字段。
-    static let issuePattern = "第\\s*\\d{4,7}\\s*期|开奖期|\\d{4}\\s*年\\s*\\d{1,2}\\s*月"
+    /// 体彩印成 `第26102期 2026年09月07日开奖`（期号 + 开奖日期）；
+    /// 福彩印成 `玩法:3D-单式  机号:31130622`（彩种玩法），就在哈希行上面。
+    /// 两家都是核奖要用的字段，都该说得出"来自票面哪一块"。
+    static let issuePattern =
+        "第\\s*\\d{4,7}\\s*期|玩法\\s*[:：]|\\d{4}\\s*年\\s*\\d{1,2}\\s*月"
 
     /// 期号 / 开奖日期那一行的**顶**在哪儿（归一化，左上原点）。
     ///

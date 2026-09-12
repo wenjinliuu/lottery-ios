@@ -511,14 +511,37 @@ enum TicketVisionScanner {
         let text: String
         /// Vision 归一化坐标，原点在**左下角**。
         let box: CGRect
-        /// 这一块文字的**上边两个角**（Vision 归一化坐标）。
+        /// 这一块文字的**四个角**（Vision 归一化坐标，原点左下）。
         ///
         /// `VNRecognizedTextObservation` 继承自 `VNRectangleObservation`，
-        /// 给的是四边形而不是正框 —— 这两个角连起来就是票面上这一行的走向，
-        /// 也就是**票还歪着多少度**。配准要沿票面自己的方向去投影，
-        /// 量的就是它；不用凭空扫一大圈倾角去猜。
+        /// 给的是四边形而不是正框 —— 里面自带这一行的走向和透视信息。
+        ///
+        /// 两个用处：
+        /// 1. 上下两角连起来就是票面的倾角，投影方向照它来（`textTilt`）。
+        /// 2. **它就是基准本身。** 机号行、公益行、福彩的哈希行和开奖期行，
+        ///    Vision 每张票都读得出来；两行 8 个点，拟合单应绰绰有余。
+        ///    比虚线可靠得多 —— 虚线要过五道阈值，这个一道都不用过。
         var topLeft: CGPoint?
         var topRight: CGPoint?
+        var bottomLeft: CGPoint?
+        var bottomRight: CGPoint?
+
+        /// 上边那条线（左上 → 右上），左上原点的归一化坐标。
+        var topEdge: (CGPoint, CGPoint)? {
+            guard let topLeft, let topRight else { return nil }
+            return (Self.flip(topLeft), Self.flip(topRight))
+        }
+
+        /// 下边那条线（左下 → 右下），左上原点的归一化坐标。
+        var bottomEdge: (CGPoint, CGPoint)? {
+            guard let bottomLeft, let bottomRight else { return nil }
+            return (Self.flip(bottomLeft), Self.flip(bottomRight))
+        }
+
+        /// Vision 的 y 向上为正，翻成左上原点。
+        static func flip(_ point: CGPoint) -> CGPoint {
+            CGPoint(x: point.x, y: 1 - point.y)
+        }
     }
 
     /// 票面还歪着多少 —— 用文字行自己的走向量出来。
@@ -568,7 +591,9 @@ enum TicketVisionScanner {
             let text = candidate.string.trimmingCharacters(in: .whitespaces)
             guard !text.isEmpty else { return nil }
             return TextFragment(text: text, box: observation.boundingBox,
-                                topLeft: observation.topLeft, topRight: observation.topRight)
+                                topLeft: observation.topLeft, topRight: observation.topRight,
+                                bottomLeft: observation.bottomLeft,
+                                bottomRight: observation.bottomRight)
         }
         guard !fragments.isEmpty else { throw ScanError.recognitionFailed }
         return fragments
