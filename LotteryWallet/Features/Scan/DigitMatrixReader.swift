@@ -58,7 +58,10 @@ enum DigitMatrixReader {
 
     // MARK: - 入口
 
-    static func read(image: UIImage, columns: Int, labelBoundary: CGFloat?) async -> Matrix? {
+    static func read(image: UIImage,
+                     columns: Int,
+                     labelBoundary: CGFloat?,
+                     trailingMaximum: Int) async -> Matrix? {
         guard columns > 0 else { return nil }
         var chars = await allDigits(in: image)
         // 票面左边那一竖排注序号（`①②③④⑤` / `A. B. C.`）**和号码列同一个间距**
@@ -116,11 +119,14 @@ enum DigitMatrixReader {
                 values[index] = await readCell(image: image,
                                                column: grid[index],
                                                band: candidate.band,
-                                               width: glyphWidth)
+                                               width: glyphWidth,
+                                               maximum: index == columns - 1 ? trailingMaximum : 9)
             }
             rows.append(Row(band: candidate.band, values: values))
         }
         guard !rows.isEmpty else { return nil }
+        rows = await recoveringTens(rows, grid: grid, image: image,
+                                    glyphWidth: glyphWidth, maximum: trailingMaximum)
         // 一多半都是问号就别拿出来了，那多半根本没找对地方
         let known = rows.reduce(0) { $0 + $1.values.compactMap { $0 }.count }
         guard known * 2 >= rows.count * columns else { return nil }
@@ -348,14 +354,18 @@ enum DigitMatrixReader {
 
     // MARK: - 补空格
 
-    /// 把某一个空着的格子单独裁出来再认一遍。
+    /// 把某一个格子单独裁出来认一遍，返回一到两位的号码。
     ///
     /// 位置是**行带 × 列位**交出来的，不是猜的。裁得比格子宽一点，
     /// Vision 按"词"工作，给它一点上下文它才肯认。
+    ///
+    /// 允许两位是为了七星彩的特别号（0-14 会印成 `13` `10`）。
+    /// 两个字符必须挨得够近 —— 隔开的那是旁边一列的东西，不能拼进来。
     private static func readCell(image: UIImage,
                                  column: ClosedRange<CGFloat>,
                                  band: ClosedRange<CGFloat>,
-                                 width glyphWidth: CGFloat) async -> Int? {
+                                 width glyphWidth: CGFloat,
+                                 maximum: Int) async -> Int? {
         guard let cgImage = image.cgImage else { return nil }
         let imageWidth = CGFloat(cgImage.width)
         let imageHeight = CGFloat(cgImage.height)
@@ -370,15 +380,60 @@ enum DigitMatrixReader {
             .intersection(CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight))
         guard rect.width > 6, rect.height > 6, let cell = cgImage.cropping(to: rect) else { return nil }
 
+        // 裁出来这一小块在整张图里占多宽 —— 把块内坐标换算回去要用
+        let cellWidth = (right - left) / imageWidth
         let slice = UIImage(cgImage: cell, scale: 1, orientation: .up)
         for boosted in [false, true] {
             let source = boosted ? (TicketVisionScanner.contrastBoosted(slice) ?? slice) : slice
             guard let big = TicketVisionScanner.upscaled(source, factor: 10) else { continue }
             let chars = await TicketVisionScanner.recognizeDigits(in: big, fast: true)
-            guard chars.count == 1, let only = chars.first else { continue }
-            return only.value
+                .filter { (0.15...0.85).contains($0.box.midY) }
+                .sorted { $0.box.minX < $1.box.minX }
+            guard (1...2).contains(chars.count) else { continue }
+            if chars.count == 2 {
+                let gap = (chars[1].box.minX - chars[0].box.maxX) * cellWidth
+                guard gap <= glyphWidth * 0.9 else { continue }
+            }
+            let value = chars.reduce(0) { $0 * 10 + $1.value }
+            // 超过这一列的上限说明认进来了别的东西。排列3/5、福彩3D 的每一格
+            // 都是一位数，上限 9，两位的结果一律不收。
+            guard value <= maximum else { continue }
+            return value
         }
         return nil
+    }
+
+    /// 最后一列印成两位数时，把丢掉的十位找回来。
+    ///
+    /// 七星彩的特别号是 0-14，票面上 `13` `10` 占两个字符，而 `4` `9` `2`
+    /// 只占一个，整列**右对齐**。十位那个 `1` 又窄又靠左，是整张票上
+    /// 最容易被丢的一个字符 —— 实测就是这样：`13` 读成 `3`、`10` 读成 `0`。
+    ///
+    /// 这是最坏的一种错：读出来的还是个合法号码，用户核对时根本不会起疑。
+    /// 所以这一列的每个一位数都要往左边多看一眼。
+    ///
+    /// 两道闸保证只会补对不会补错：
+    /// - 重认的结果**个位必须和已经读出来的那一位一样**，对不上就当没看见。
+    /// - 结果不能超过这一列的上限（七星彩是 14）。
+    private static func recoveringTens(_ rows: [Row],
+                                       grid: [ClosedRange<CGFloat>],
+                                       image: UIImage,
+                                       glyphWidth: CGFloat,
+                                       maximum: Int) async -> [Row] {
+        guard maximum > 9, let column = grid.last else { return rows }
+        var rows = rows
+        let index = grid.count - 1
+        // 往左让出一位的宽度 —— 列的范围是照个位对齐的，十位在它左边
+        let widened = Swift.max(column.lowerBound - glyphWidth * 1.4, 0)...column.upperBound
+        for row in rows.indices {
+            guard let current = rows[row].values[index], (0...9).contains(current) else { continue }
+            guard let reread = await readCell(image: image, column: widened,
+                                              band: rows[row].band,
+                                              width: glyphWidth, maximum: maximum),
+                  reread > 9, reread % 10 == current else { continue }
+            rows[row].values[index] = reread
+        }
+        return rows
     }
 
     // MARK: - 小工具

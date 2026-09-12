@@ -97,7 +97,8 @@ enum TicketVisionScanner {
         // Vision 的分行结果本身就是错的（它按竖列读），基于它再修修补补没有意义。
         if let game, let width = positionalDigitCount(game),
            let matrix = await DigitMatrixReader.read(image: image, columns: width,
-                                                     labelBoundary: rowLabelBoundary(base)) {
+                                                     labelBoundary: rowLabelBoundary(base),
+                                                     trailingMaximum: trailingColumnMaximum(game)) {
             return compose(rows: baseRows, originals: originals, matrix: matrix)
         }
 
@@ -118,6 +119,16 @@ enum TicketVisionScanner {
             result.append(graft(prefix: original, digits: better))
         }
         return result.joined(separator: "\n")
+    }
+
+    /// 最后一列的上限。
+    ///
+    /// 七星彩的特别号是 0-14，票面上会印成两位数，而且整列**右对齐** ——
+    /// 十位那个字符又窄又靠左，最容易被丢。知道这一列可能有两位，
+    /// 才谈得上专门回去把它找回来（见 `DigitMatrixReader.recoverTens`）。
+    /// 排列3/5、福彩3D 每一位都是 0-9，不存在这回事。
+    static func trailingColumnMaximum(_ game: GameKey) -> Int {
+        game.sections.last?.range.upperBound ?? 9
     }
 
     /// 票面左边那一竖排注序号的右边界 —— `①②③④⑤`、`A. B. C.`、3D 的 `组六:`。

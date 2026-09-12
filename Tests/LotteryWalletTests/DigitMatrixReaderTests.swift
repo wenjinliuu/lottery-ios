@@ -399,6 +399,28 @@ final class UnknownDigitPlumbingTests: XCTestCase {
         XCTAssertEqual(TicketVisionScanner.slotText([nil, nil]), "? ?")
     }
 
+    /// 只有最后一列可能印成两位数的彩种，才需要回头去找丢掉的十位。
+    ///
+    /// 七星彩的特别号是 0-14，`13` `10` 在票面上占两个字符、整列右对齐，
+    /// 十位那个又窄又靠左，实测就是被丢掉的那一个。
+    /// 排列3/5、福彩3D 每一位都是 0-9，不存在这回事 ——
+    /// 给它们开这一步只会平白多出误判的机会。
+    func testTrailingColumnMaximum() {
+        XCTAssertEqual(TicketVisionScanner.trailingColumnMaximum(.qxc), 14)
+        XCTAssertEqual(TicketVisionScanner.trailingColumnMaximum(.pl5), 9)
+        XCTAssertEqual(TicketVisionScanner.trailingColumnMaximum(.pl3), 9)
+        XCTAssertEqual(TicketVisionScanner.trailingColumnMaximum(.fc3d), 9)
+    }
+
+    /// 十位补回来之后，整行要能照常解析成一注。
+    func testRecoveredTensParsesBack() {
+        let line = TicketVisionScanner.slotText([3, 9, 5, 4, 7, 7, 13])
+        XCTAssertEqual(line, "3 9 5 4 7 7 13")
+        let numbers = TicketTextParser.singleLineForTesting(line, game: .qxc)
+        XCTAssertEqual(numbers?[.nums6], [3, 9, 5, 4, 7, 7])
+        XCTAssertEqual(numbers?[.tail], [13])
+    }
+
     /// 只有**每一位印一个号码**的彩种才走矩阵重建。
     /// 七乐彩、快乐8 印的是两位数且号码之间间距正常，双色球、大乐透还带分隔符 ——
     /// 它们的行本来就横着读得好好的，不该去动。
