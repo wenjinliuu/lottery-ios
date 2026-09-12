@@ -10,7 +10,10 @@ import UIKit
 struct TicketScanView: View {
     /// 「手动录入」的出口。扫描抽屉是添加彩票的**唯一**入口，
     /// 手动录入是它里面的一个分支。
-    var onManualEntry: (() -> Void)?
+    ///
+    /// 带着 `EntryReference` 出去，录入页就能把票面照片摆在手边 ——
+    /// 认不出的票靠这条路才不至于走进死胡同。
+    var onManualEntry: ((EntryReference?) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -220,7 +223,7 @@ struct TicketScanView: View {
                 // 「扫描」是主路径，「手动」是它的退路 —— 退路就该摆在
                 // 主路径旁边，而不是和主路径平起平坐地占一层菜单。
                 Button {
-                    onManualEntry?()
+                    onManualEntry?(nil)
                     dismiss()
                 } label: {
                     Label("手动录入号码", systemImage: "square.and.pencil")
@@ -316,12 +319,30 @@ struct TicketScanView: View {
                 .padding(.bottom, 24)
             }
             .safeAreaInset(edge: .bottom) {
-                HStack(spacing: 12) {
-                    Button("重新裁切") { stage = .crop }
-                        .buttonStyle(SecondaryGlassButton(tint: .accentColor))
-                        .fixedSize()
-                    Button("重新拍摄") { reset() }
-                        .buttonStyle(ProminentGlassButton(tint: .accentColor))
+                VStack(spacing: 10) {
+                    HStack(spacing: 12) {
+                        Button("重新裁切") { stage = .crop }
+                            .buttonStyle(SecondaryGlassButton(tint: .accentColor))
+                            .fixedSize()
+                        Button("重新拍摄") { reset() }
+                            .buttonStyle(ProminentGlassButton(tint: .accentColor))
+                    }
+                    // **认不出也得有路走。**
+                    //
+                    // 没有这一颗的话，机器认不出的票就是死路一条：用户手里明明
+                    // 有票，重拍几次还是认不出，最后只能退出去从头找手动录入，
+                    // 而且照片还带不过去。现在照片跟着一起过去，对着敲就行。
+                    Button {
+                        onManualEntry?(manualReference)
+                        dismiss()
+                    } label: {
+                        Label("对照票面手动录入", systemImage: "square.and.pencil")
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .glassPill(interactive: true)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
@@ -465,6 +486,15 @@ struct TicketScanView: View {
             RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 14, height: 3)
             Text(text)
         }
+    }
+
+    /// 转到手动录入时带过去的东西：矫正后的票面照片 + 认出来的彩种。
+    ///
+    /// 彩种往往是认得出来的（票头那几个大字），认不出的只是号码 ——
+    /// 先替用户把彩种选上，能省掉一步。
+    private var manualReference: EntryReference? {
+        guard let image = croppedPreview ?? preview else { return nil }
+        return EntryReference(image: image, game: TicketTextParser.detectGame(rawText))
     }
 
     private func warningRow(_ text: String) -> some View {
@@ -1217,7 +1247,8 @@ private struct TicketReferenceImage: View {
 // MARK: - 原图放大
 
 /// 原图全屏查看，可捏合放大。核对小字全靠它。
-private struct PhotoZoomView: View {
+/// 放大看照片。扫描复核页和手动录入页共用 —— 两边都要「对着票面核一遍」。
+struct PhotoZoomView: View {
     let image: UIImage
     @Environment(\.dismiss) private var dismiss
     @State private var scale: CGFloat = 1

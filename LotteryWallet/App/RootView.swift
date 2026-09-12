@@ -23,6 +23,11 @@ struct RootView: View {
     /// 当前开着的抽屉，以及关掉它之后要接着开的那张。
     @State private var activeSheet: RootSheet?
     @State private var queuedSheet: RootSheet?
+    /// 从扫描页转到手动录入时带过去的票面照片。
+    ///
+    /// 不塞进 `RootSheet` 里是因为那是个 `String` 原始值的枚举，
+    /// 它同时充当 sheet 的 id —— 挂上一张图会把 id 搞脏。
+    @State private var entryReference: EntryReference?
     @State private var toast: ToastMessage?
     @State private var celebrationTrigger = 0
     /// 点开抽屉那一刻的屏幕快照，见 `ScreenBackdrop`。
@@ -114,8 +119,9 @@ struct RootView: View {
         .sheet(item: $activeSheet, onDismiss: {
             guard let next = queuedSheet else {
                 // 抽屉全关完了，快照没用了 —— 留着会在下次点开时
-                // 先闪一张上一回的旧画面。
+                // 先闪一张上一回的旧画面。照片同理，而且它还占着内存。
                 backdrop = nil
+                entryReference = nil
                 return
             }
             queuedSheet = nil
@@ -123,9 +129,12 @@ struct RootView: View {
         }) { sheet in
             switch sheet {
             case .scan:
-                TicketScanView(onManualEntry: { queuedSheet = .entry })
+                TicketScanView(onManualEntry: { reference in
+                    entryReference = reference
+                    queuedSheet = .entry
+                })
             case .entry:
-                EntryFlowView()
+                EntryFlowView(reference: entryReference)
             }
         }
         // 这里**不能**用 withAnimation 包住状态变更。

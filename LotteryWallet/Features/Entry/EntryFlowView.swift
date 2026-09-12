@@ -7,7 +7,22 @@ import SwiftData
 /// 早期版本选完一组号只能直接存成一张一注的票，用户看不到"我这张票长什么样"，
 /// 也没法像在彩票站那样把好几注打在同一张票上。现在手选可以攒候选注，
 /// 复式和胆拖则按真实票面的排版（红单/红复、前区胆/前区拖…）画出来。
+/// 扫描认不出来的时候，带着票面照片转到手动录入。
+///
+/// 没有这条路的话，机器认不出的票就是**死路一条** —— 用户手里明明有票，
+/// 却既不能扫进来也不能对着照片敲进去。照片跟着一起过来，
+/// 用户不用在两个页面之间来回切。
+struct EntryReference {
+    var image: UIImage
+    /// 认出了彩种就先替用户选上。彩种往往认得出来（票头那几个大字），
+    /// 认不出的只是号码。
+    var game: GameKey?
+}
+
 struct EntryFlowView: View {
+    /// 从扫描页转过来时带的票面照片。手动从标签栏进来就是 nil。
+    var reference: EntryReference?
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Environment(DrawStore.self) private var drawStore
@@ -38,6 +53,8 @@ struct EntryFlowView: View {
     /// `onAppear` 会在每次视图重新出现时触发（比如退到后台再回来）。
     /// 早期版本无条件调 `resetForGame`，用户选了一半的号码会被清空。
     @State private var hasPrepared = false
+    /// 票面照片放大看。对着照片敲号码时要能看清那几位小字。
+    @State private var isReferenceZoomed = false
 
     private var target: DrawTarget {
         pickedIssue?.target(source: "manual_pick") ?? drawStore.nextDrawTarget(for: game)
@@ -95,6 +112,38 @@ struct EntryFlowView: View {
     private var isOverLimit: Bool { combinationCount > TicketBuilder.maxCombinations }
     private var canSave: Bool { combinationCount > 0 && !isOverLimit && target.isAvailable }
 
+    /// 票面照片。只在从扫描页转过来时才有。
+    ///
+    /// 压得很扁（110pt）—— 它是**对照用**的，不是主角；真要看清小字有「放大」。
+    /// 给太高的话选号盘会被挤出屏幕，而那才是这一页要干的事。
+    @ViewBuilder
+    private var referenceCard: some View {
+        if let image = reference?.image {
+            Button {
+                isReferenceZoomed = true
+            } label: {
+                ZStack(alignment: .bottomTrailing) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                        .frame(maxHeight: 110)
+                    Label("放大", systemImage: "arrow.up.left.and.arrow.down.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.black.opacity(0.45), in: Capsule())
+                        .padding(8)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Palette.separator))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     private var preview: TicketPreview {
         mode == .manual
             ? TicketPreviewBuilder.make(game: game, lines: lines)
@@ -105,6 +154,7 @@ struct EntryFlowView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    referenceCard
                     gamePicker
                     if !game.playModes.isEmpty { playModePicker }
                     if EntryMode.modes(for: game).count > 1 { modePicker }
@@ -132,6 +182,9 @@ struct EntryFlowView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) { saveBar }
+            .fullScreenCover(isPresented: $isReferenceZoomed) {
+                if let image = reference?.image { PhotoZoomView(image: image) }
+            }
             .sheet(isPresented: $isIssuePickerPresented) {
                 IssuePickerSheet(game: game, current: target.expect) { issue in
                     pickedIssue = issue
@@ -151,6 +204,9 @@ struct EntryFlowView: View {
             .task {
                 guard !hasPrepared else { return }
                 hasPrepared = true
+                // 扫描页认出了彩种就先替用户选上 —— 认不出的往往只是号码，
+                // 票头那几个大字一般都认得出来。
+                if let detected = reference?.game { game = detected }
                 resetForGame(game)
                 await drawStore.loadYearCalendars()
             }
