@@ -95,8 +95,9 @@ final class DigitMatrixReaderTests: XCTestCase {
     func testBandsFollowRows() {
         let bands = DigitMatrixReader.groupIntoBands(layout(), glyphHeight: normalizedGlyphHeight)
         XCTAssertEqual(bands.count, 5)
-        // 第一注的特别号 13 是两个字符，所以这一带有 8 个字符
-        XCTAssertEqual(bands.map(\.count), [8, 7, 7, 7, 8])
+        // 两位数的特别号占两个字符：第 ① 注是 13、第 ④ 注是 10，
+        // 这两带各有 8 个字符，其余三带 7 个。
+        XCTAssertEqual(bands.map(\.count), [8, 7, 7, 8, 7])
     }
 
     /// 特别号 `13` `10` 必须当成**一个号码**。
