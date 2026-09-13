@@ -109,12 +109,16 @@ enum RegisteredDigitReader {
         }
 
         // 空格子单独补认。只剩几个，慢一点无所谓。
+        var blanks = 0
+        var filled = 0
         for row in values.indices {
             for column in values[row].indices where values[row][column] == nil {
                 guard let rect = grid.cell(row: row, column: column),
                       maximums.indices.contains(column) else { continue }
+                blanks += 1
                 values[row][column] = await reread(zone: zone, rect: rect,
                                                    maximum: maximums[column])
+                if values[row][column] != nil { filled += 1 }
             }
         }
 
@@ -123,12 +127,13 @@ enum RegisteredDigitReader {
         // 七星彩的特别号 `13` `10` 真机上还是读成 `3` `0`：格子画得好好的
         // （调试图上那一列明明白白框住了两位），整块认那一遍却只交回一个 `3` ——
         // 十位那一竖又细又淡，在整块图里 Vision 直接漏掉了。
-        // 而 `reread` 会把这一格单独裁出来放大 10/16 倍、再加一遍对比度，
+        // 而 `reread` 会把这一格单独裁出来放大好几倍、再加一遍对比度，
         // 十位就出来了。上一版只给**空格子**补认，这一格有值（`3`），
         // 于是永远轮不到它 —— 错得看起来还挺对，正是硬约束要防的那种。
         //
         // 只查"这一列印得下两位、却只读出一位"的格子：七星彩每张票最多 5 格，
         // 大乐透的 `05` 本来就读出两位，不会进来。
+        var widened = 0
         for row in values.indices {
             for column in values[row].indices {
                 guard maximums.indices.contains(column), maximums[column] > 9,
@@ -139,6 +144,7 @@ enum RegisteredDigitReader {
                       better >= 10 else { continue }
                 // 只在补认真的读出两位时才换 —— 读回同一个一位数就别动
                 values[row][column] = better
+                widened += 1
             }
         }
 
@@ -165,7 +171,9 @@ enum RegisteredDigitReader {
         return Outcome(
             reading: Reading(matrix: .init(rows: rows, span: low...high), grid: grid),
             note: "号码按配准后的格子读：\(rows.count) 注 × \(layout.columns) 位，"
-                + "\(total) 格里认出 \(known) 格")
+                + "\(total) 格里认出 \(known) 格"
+                + "（整块认一遍剩 \(blanks) 格空的，补认补上 \(filled) 格"
+                + (widened > 0 ? "，\(widened) 格补成两位" : "") + "）")
     }
 
     // MARK: - 把数字分进格子
@@ -201,21 +209,35 @@ enum RegisteredDigitReader {
     ///
     /// 裁得比格子宽一点：Vision 按「词」工作，贴着字边裁它经常什么都不给。
     /// 允许两位是为了七星彩的特别号（0–14 印成 `13` `10`）。
+    ///
+    /// **认出来的字符要按格子自己的范围再筛一道。** 裁的时候左右各让了
+    /// 0.8 个格宽，邻居的一位数很容易跟着进来；上一版是「认出超过两位就整个丢掉」，
+    /// 于是本来认对了的那一格反而变成问号 —— 真机上七星彩五注里三注的特别号
+    /// 就是这么丢的。格子在哪儿是墨迹量出来的、可信；认出几个字符是 OCR 说的、
+    /// 不可信。所以拿可信的那个去筛不可信的那个，而不是一票作废。
     static func reread(zone: UIImage, rect: CGRect, maximum: Int) async -> Int? {
         guard let cgImage = zone.cgImage else { return nil }
         let width = CGFloat(cgImage.width)
         let height = CGFloat(cgImage.height)
         let padX = rect.width * 0.8
         let padY = rect.height * 0.3
-        let left = Swift.max(rect.minX - padX, 0) * width
-        let right = Swift.min(rect.maxX + padX, 1) * width
+        let cropLeft = Swift.max(rect.minX - padX, 0)
+        let cropRight = Swift.min(rect.maxX + padX, 1)
+        let left = cropLeft * width
+        let right = cropRight * width
         let top = Swift.max(rect.minY - padY, 0) * height
         let bottom = Swift.min(rect.maxY + padY, 1) * height
         let box = CGRect(x: left, y: top, width: right - left, height: bottom - top)
             .intersection(CGRect(x: 0, y: 0, width: width, height: height))
-        guard box.width > 6, box.height > 6, let cropped = cgImage.cropping(to: box) else {
+        guard box.width > 6, box.height > 6, cropRight > cropLeft,
+              let cropped = cgImage.cropping(to: box) else {
             return nil
         }
+        // 格子本身在这张裁图里占的横向范围（0–1）。认出来的字符落在这以外的
+        // 就是邻居，不是这一格的。两边各松 5%，让贴着格边的笔画还算数。
+        let span = cropRight - cropLeft
+        let cellLow = (rect.minX - cropLeft) / span - 0.05
+        let cellHigh = (rect.maxX - cropLeft) / span + 0.05
         let slice = UIImage(cgImage: cropped, scale: 1, orientation: .up)
 
         // **取认得最全的那一遍，不是第一遍成功的那一遍。**
@@ -224,12 +246,13 @@ enum RegisteredDigitReader {
         // 就是这么来的。
         var best: Int?
         var bestCount = 0
-        for factor in [10.0, 16.0] as [CGFloat] {
+        for factor in [8.0, 12.0, 18.0] as [CGFloat] {
             for boosted in [false, true] {
                 let source = boosted ? (TicketVisionScanner.contrastBoosted(slice) ?? slice) : slice
                 guard let big = TicketVisionScanner.upscaled(source, factor: factor) else { continue }
                 let chars = await TicketVisionScanner.recognizeDigits(in: big, fast: true)
                     .filter { (0.15...0.85).contains($0.box.midY) }
+                    .filter { cellLow <= $0.box.midX && $0.box.midX <= cellHigh }
                 guard (1...2).contains(chars.count) else { continue }
                 let value = chars.reduce(0) { $0 * 10 + $1.value }
                 guard value <= maximum, chars.count > bestCount else { continue }
