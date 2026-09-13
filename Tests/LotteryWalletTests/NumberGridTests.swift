@@ -33,24 +33,20 @@ final class NumberGridTests: XCTestCase {
     }
 
     /// 五注 × 七位。列距 76、字宽 21、行距 41、字高 29，全是实测值。
-    private func ticket(dropping missing: Set<[Int]> = [],
-                        wideTail: Bool = false) -> Zone {
+    private func ticket(dropping missing: Set<[Int]> = []) -> Zone {
         let zone = Zone(width: width, height: height)
         for row in 0..<5 {
             let top = 20 + row * 41
             for column in 0..<7 {
                 guard !missing.contains([row, column]) else { continue }
                 let left = 60 + column * 76
-                // 最后一列是两位数时往左探出去一点（七星彩的特别号 0–14）
-                let start = (wideTail && column == 6) ? left - 20 : left
-                zone.fill(x: start..<(left + 21), y: top..<(top + 29))
+                zone.fill(x: left..<(left + 21), y: top..<(top + 29))
             }
         }
         return zone
     }
 
-    private let layout = DigitTicketLayout(groups: [.init(count: 6, maximum: 9, gap: 0),
-                                                   .init(count: 1, maximum: 14, gap: 1)])
+    private let layout = DigitTicketLayout(groups: [.init(count: 7, maximum: 9, gap: 0)])
 
     /// 一张干净的票：五行七列，行列都切得出来。
     func testGridFromCleanMatrix() {
@@ -146,41 +142,6 @@ final class NumberGridTests: XCTestCase {
 
     // MARK: - 真机上栽过的三个跟头
 
-    /// **七星彩的特别号那一列是右对齐的：两位数的十位往左探出去。**
-    ///
-    /// 五注里三注是一位数、两注是两位数，列位取中位数的话就落在个位那一段上，
-    /// 十位的 `1` 落在列外面被丢掉 —— `13` 读成 `3`、`10` 读成 `0`。
-    /// build 32/33/34 和阶段 2 第一版都栽在这儿。这一列只能取并集。
-    func testTrailingColumnCoversTheTensDigit() {
-        let zone = Zone(width: width, height: height)
-        var centers: [Double] = []
-        let tails = [13, 4, 9, 10, 2]
-        for row in 0..<5 {
-            let top = 20 + row * 41
-            for column in 0..<6 {
-                let left = 60 + column * 76
-                zone.fill(x: left..<(left + 21), y: top..<(top + 29))
-                centers.append(Double(left) + 10.5)
-            }
-            if tails[row] >= 10 {
-                // 十位的 `1` 又窄又靠左
-                zone.fill(x: 496..<503, y: top..<(top + 29))
-                centers.append(499.5)
-            }
-            zone.fill(x: 516..<537, y: top..<(top + 29))
-            centers.append(526.5)
-        }
-        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...(width - 1),
-                                          layout: layout, digitCenters: centers) else {
-            return XCTFail("格子应该划得出来")
-        }
-        XCTAssertEqual(grid.rows.count, 5)
-        XCTAssertEqual(grid.columns.count, 7)
-        let last = grid.columns[6]
-        XCTAssertLessThanOrEqual(last.lowerBound * CGFloat(width), 497, "末列要容得下十位")
-        XCTAssertGreaterThanOrEqual(last.upperBound * CGFloat(width), 536, "也要容得下个位")
-    }
-
     /// **注序号那一列不是号码列。**
     ///
     /// 实测它和第一位号码的列距（62.5）和号码之间的列距（65）几乎一样 ——
@@ -252,7 +213,7 @@ final class NumberGridTests: XCTestCase {
 
     /// **七星彩真机上卡死的那一步。**
     ///
-    /// 五行各切出 8 段（`①` + 6 位 + 特别号），格子划得好好的，却裁不到 7 列。
+    /// 五行各切出 8 段（`①` + 6 位 + 特别号），格子划得好好的，却挑不出中间那 6 列。
     /// 原因是老判据「这一列里没有数字字符就是注序号列」撞上了文档第七节记的
     /// 那个坑：`.fast` 会把 `①` 读成 `0` —— 注序号列里"有数字"，判据失效。
     ///
@@ -262,8 +223,8 @@ final class NumberGridTests: XCTestCase {
     /// 版式按实测摆：注序号列距 ÷ 号码列距 = 62.5 ÷ 65 = 0.96，
     /// 特别号偏移 1.58 个列距。
     func testSerialColumnIsTrimmedEvenWhenMisreadAsDigit() {
-        let seven = DigitTicketLayout(groups: [.init(count: 6, maximum: 9, gap: 0),
-                                          .init(count: 1, maximum: 14, gap: 1.58)])
+        // 分区之后主矩阵只有六位 —— 特别号不在里面（见 `DigitTicketLayout.Trailing`）
+        let six = DigitTicketLayout(groups: [.init(count: 6, maximum: 9, gap: 0)])
         let zone = Zone(width: width, height: height)
         let pitch = 76
         var centers: [Double] = []
@@ -282,19 +243,17 @@ final class NumberGridTests: XCTestCase {
             centers.append(630.5)
         }
         guard let grid = NumberGrid.build(mask: zone.mask, within: 0...(width - 1),
-                                          layout: seven, digitCenters: centers) else {
+                                          layout: six, digitCenters: centers) else {
             return XCTFail("格子应该划得出来")
         }
         XCTAssertEqual(grid.rows.count, 5)
-        XCTAssertEqual(grid.columns.count, 7)
+        XCTAssertEqual(grid.columns.count, 6, "主矩阵就是六位，不多不少")
+        // 左边的注序号和右边的特别号**都**要排除掉：一个靠字宽（`①` 带圈比数字宽），
+        // 一个靠列距（特别号在 1.58 个列距开外，接不上等距的规律）
         XCTAssertGreaterThan(grid.columns[0].lowerBound * CGFloat(width), 100,
-                             "注序号那一列应该裁掉了")
-        // 末列是个**大格**：左边界落在第 6 位和特别号的正中间，
-        // 既碰不到第 6 位（它到 520 为止），又把两位数的十位（约 600）整个圈进来
-        XCTAssertEqual(grid.columns[6].lowerBound * CGFloat(width), 570, accuracy: 4,
-                       "末列左边界在第 6 位和特别号的正中间")
-        XCTAssertGreaterThan(grid.columns[6].upperBound * CGFloat(width), 641,
-                             "右边再让半个列距，认出什么都算特别号的")
+                             "注序号那一列裁掉了")
+        XCTAssertLessThan(grid.columns[5].upperBound * CGFloat(width), 620,
+                          "特别号不在主矩阵里")
     }
 
     /// **福彩 3D 真机上"候选行 0 条"的那一步。**
@@ -426,9 +385,7 @@ final class NumberGridTests: XCTestCase {
         XCTAssertEqual(qxc.columns, 7)
         XCTAssertEqual(qxc.pitches, [1, 1, 1, 1, 1, 1.58])
         XCTAssertEqual(qxc.maximums, [9, 9, 9, 9, 9, 9, 14])
-        XCTAssertEqual(qxc.trailingPitch, 1.58)
         XCTAssertFalse(qxc.separated)
-        XCTAssertTrue(qxc.singleDigit, "前六位都是 0–9，配准失败还能退回老路")
 
         let dlt = DigitTicketLayout(groups: [.init(count: 5, maximum: 35, gap: 0),
                                              .init(count: 2, maximum: 12, gap: 2.34)],
@@ -436,9 +393,7 @@ final class NumberGridTests: XCTestCase {
         XCTAssertEqual(dlt.columns, 7)
         XCTAssertEqual(dlt.pitches, [1, 1, 1, 1, 2.34, 1])
         XCTAssertEqual(dlt.maximums, [35, 35, 35, 35, 35, 12, 12])
-        XCTAssertEqual(dlt.trailingPitch, 1, "末列是后区组内的，和前一位等距")
         XCTAssertTrue(dlt.separated)
-        XCTAssertFalse(dlt.singleDigit, "印的是两位数，不能退回按一格一位写的老路")
     }
 
     /// 挑法枚举：组内连续，组与组之间可以跳过几段（那就是分隔符）。
@@ -500,7 +455,8 @@ final class NumberGridTests: XCTestCase {
                        "① 在第 0 段、`+` 在第 6 段，一个数字字符都不给也该挑对")
 
         // 七星彩：`①` 离第一位 0.96 个列距，只能靠字宽分开
-        let qxc = DigitTicketLayout.of(.qxc)!
+        let qxc = DigitTicketLayout(groups: [.init(count: 6, maximum: 9, gap: 0),
+                                             .init(count: 1, maximum: 14, gap: 1.58)])
         let stars: [ClosedRange<Int>] = [44...70, 120...140, 196...216, 272...292,
                                          348...368, 424...444, 500...520, 620...640]
         XCTAssertEqual(NumberGrid.select(stars, layout: qxc, digitCenters: []),
@@ -512,6 +468,41 @@ final class NumberGridTests: XCTestCase {
                                            295...329]
         XCTAssertEqual(NumberGrid.select(welfare, layout: three, digitCenters: []),
                        [1, 2, 3], "标签列和倍数列都该裁掉")
+    }
+
+    /// **特别号那一块的分界线**（26042 真票实测，照片摆正 0.5°、605 宽裁图）。
+    ///
+    /// | | 像素 |
+    /// |---|---|
+    /// | 六位的列位 | 150–167 / 214–231 / 279–295 / 343–359 / 407–423 / 470–486 |
+    /// | 列距 | 64 |
+    /// | 第6位右沿 | 487 |
+    /// | 特别号十位左沿 | 556（十位永远是 `1`，因为特别号取值 0–14）|
+    ///
+    /// 分界线要落在 `[487, 556]` 这条空白带的正中间 —— **521.5**，两边各留约
+    /// 2 个字宽。线右边一直到号码区右沿全算特别号的，认出什么就拼什么，
+    /// 不用去赌那一竖有没有进二值化。
+    func testTrailingStripLandsInTheGap() {
+        let zoneWidth: CGFloat = 605
+        func column(_ low: CGFloat, _ high: CGFloat) -> ClosedRange<CGFloat> {
+            (low / zoneWidth)...((high + 1) / zoneWidth)
+        }
+        let grid = NumberGrid(
+            rows: [0.1...0.2],
+            columns: [column(150, 167), column(214, 231), column(279, 295),
+                      column(343, 359), column(407, 423), column(470, 486)])
+        guard let strip = grid.trailingStrip(.init(maximum: 14, divider: 0.67)) else {
+            return XCTFail("分界线该算得出来")
+        }
+        let line = strip.lowerBound * zoneWidth
+        XCTAssertEqual(line, 521.5, accuracy: 3, "落在空白带正中间")
+        XCTAssertGreaterThan(line, 487 + 25, "离第 6 位留着两个字宽")
+        XCTAssertLessThan(line, 556 - 25, "离特别号的十位也留着两个字宽")
+        XCTAssertEqual(strip.upperBound, 1, "线右边一直到号码区右沿都算它的")
+
+        // 只有一列时算不出列距，老老实实返回 nil
+        XCTAssertNil(NumberGrid(rows: [0.1...0.2], columns: [column(150, 167)])
+            .trailingStrip(.init(maximum: 14, divider: 0.67)))
     }
 
     /// 划不出格子的时候，调试图要说得出**每一条墨迹带切了几段** ——

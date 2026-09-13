@@ -43,9 +43,48 @@ struct DigitTicketLayout {
     /// 落在号码区里面而不算数。七星彩的特别号前面什么都不印，只是空得远。
     let separated: Bool
 
-    init(groups: [Group], separated: Bool = false) {
+    /// 号码区右边**单独分出去的那一块**。没有就是 nil。
+    ///
+    /// 只有七星彩有：它的特别号离前六位远得多，而且是 0–14、印一位或两位。
+    /// 前后试过三种把它塞进矩阵的办法（取并集、按字宽往左让、单格补认），
+    /// 真机上五注里始终有三注读不出来 —— 而且每加一层特例都动了收行的前提，
+    /// build 46 就是这么把整个格子路搞崩的。
+    ///
+    /// 分出去之后主矩阵回到规规矩矩的 6 列，**一个特例都没有**；
+    /// 特别号那一块按界线切一条宽带，认出什么就拼什么。
+    let trailing: Trailing?
+
+    /// 那一块的描述。
+    struct Trailing {
+        /// 这一块里那个号码的上限。七星彩的特别号是 0–14。
+        let maximum: Int
+        /// 分界线落在主矩阵**最后一列中心**右边几个列距。
+        ///
+        /// 0.67 是拿 26042 那张真票量出来的（照片摆正 0.5°，605 宽裁图）：
+        ///
+        /// | | 像素 |
+        /// |---|---|
+        /// | 列距 | 64（5 个间隔量下来 64.5/64.5/64/64/63.5）|
+        /// | 字宽 | 17.5（列距 ÷ 字宽 = 3.66，和文档 3.2 节的 3.62 对得上）|
+        /// | 第6位右沿 | 487 |
+        /// | 特别号十位左沿 | 556 |
+        ///
+        /// 中间那条空白带是 `[487, 556]`，宽 69px，**中点 521.5**，
+        /// 相对第6位中心（478.5）是 43px = 0.67 个列距，
+        /// 两边各留 34.5px ≈ **2 个字宽**的余量，对称。
+        ///
+        /// 还有一条帮忙的事实：特别号取值 0–14，所以**十位只可能是 `1`** ——
+        /// 它的宽度是确定的（实测 9px 的细笔画），空白带的右界因此很稳。
+        ///
+        /// 列距是**这张票自己量出来的**（主矩阵 6 列一算就有），
+        /// 所以拍远拍近、裁松裁紧都跟着变，只有 0.67 这个比值是版式常数。
+        let divider: CGFloat
+    }
+
+    init(groups: [Group], separated: Bool = false, trailing: Trailing? = nil) {
         self.groups = groups
         self.separated = separated
+        self.trailing = trailing
     }
 
     /// 一注一共几个号码，也就是号码矩阵有几列。
@@ -68,25 +107,6 @@ struct DigitTicketLayout {
         return out
     }
 
-    /// 最后一列离前一列几个列距。
-    ///
-    /// 只有「最后一组只有一个号码」时它才不是 1 —— 七星彩的特别号、
-    /// 双色球的蓝球都是这样。大乐透后区有两个号码，末列是组内的，所以是 1。
-    var trailingPitch: CGFloat {
-        guard let last = groups.last, groups.count > 1, last.count == 1 else { return 1 }
-        return last.gap
-    }
-
-    /// 最后一列的上限。
-    var trailingMaximum: Int { groups.last?.maximum ?? 9 }
-
-    /// 一格里只印一位数字。
-    ///
-    /// 排列3/5、福彩3D、七星彩都是这样（七星彩的特别号到 14 是例外，
-    /// 单独按 `trailingMaximum` 处理）。双色球和大乐透印的是两位数，
-    /// **老那条「从识别结果里估几何」的路按一格一位写的，喂给它只会读出垃圾** ——
-    /// 所以它只服务于这一类票，两位数的票配准失败就直接退到逐行二次识别。
-    var singleDigit: Bool { groups.dropLast().allSatisfy { $0.maximum <= 9 } }
 
     /// 这个彩种的号码矩阵版式。不是矩阵排版的彩种就没有。
     ///
@@ -99,9 +119,10 @@ struct DigitTicketLayout {
         case .pl5:
             DigitTicketLayout(groups: [Group(count: 5, maximum: 9, gap: 0)])
         case .qxc:
-            // 前六位 0–9，特别号 0–14，离前一位 1.58 个列距（实测 103px 对 65px）
-            DigitTicketLayout(groups: [Group(count: 6, maximum: 9, gap: 0),
-                                       Group(count: 1, maximum: 14, gap: 1.58)])
+            // 前六位 0–9 是规规矩矩的矩阵；特别号 0–14 **不在矩阵里**，
+            // 它单独分出去一块（见 `Trailing`）。
+            DigitTicketLayout(groups: [Group(count: 6, maximum: 9, gap: 0)],
+                              trailing: Trailing(maximum: 14, divider: 0.67))
         default:
             // 双色球、大乐透、七乐彩、快乐8 **不走矩阵路**，这是一条按
             // 「号码自不自带校验」划的界（文档第十六节）：
@@ -123,21 +144,5 @@ struct DigitTicketLayout {
             // 合并后一行 7 段正好等于 7 个号码 —— 段数对得上、内容全错。
             nil
         }
-    }
-
-    /// 最后一列整列没认出来时，它该在哪儿。
-    ///
-    /// 已知前面那些列的位置和列距，这一列的位置是**算出来的**，不是找出来的。
-    /// 之前是在最后一列右边扫一大片区域碰运气，既容易扫到票号，
-    /// 也容易什么都扫不着。
-    func trailingColumn(after last: ClosedRange<CGFloat>,
-                        pitch: CGFloat) -> ClosedRange<CGFloat>? {
-        guard pitch > 0 else { return nil }
-        let width = last.upperBound - last.lowerBound
-        let center = (last.lowerBound + last.upperBound) / 2 + trailingPitch * pitch
-        let column = (center - width / 2)...(center + width / 2)
-        // 算到票外面去了就是算错了
-        guard column.lowerBound >= 0, column.upperBound <= 1 else { return nil }
-        return column
     }
 }

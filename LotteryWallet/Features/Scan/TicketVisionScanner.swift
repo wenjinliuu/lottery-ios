@@ -66,7 +66,9 @@ enum TicketVisionScanner {
         // 划出来的格子画到调试图上，盖掉阶段 1 那版"墨迹自己切出来的段" ——
         // 现在画的是真正拿去认号码的那些格子，位置对不对一眼就看得出来。
         if let grid = merged.grid, let frame = registration.frame {
-            registration.debug.cells = grid.debugCells(frame: frame)
+            let trailing = TicketTextParser.detectGame(merged.text)
+                .flatMap(DigitTicketLayout.of)?.trailing
+            registration.debug.cells = grid.debugCells(frame: frame, trailing: trailing)
         }
         // **号码走了哪条路，永远写一句。**
         //
@@ -113,7 +115,7 @@ enum TicketVisionScanner {
     /// 一位一个数字的那几个彩种（排列3/5、福彩3D、七星彩）走的是另一条路：
     /// 它们的号码印成一个紧密的矩阵，上下的空隙比左右的窄好几倍，
     /// Vision 干脆**按竖列**读 —— 分行结果本身就是错的，基于它修修补补没有意义。
-    /// 所以整段交给 `DigitMatrixReader` 按坐标重建。
+    /// 所以整段交给 `RegisteredDigitReader` 在配准后的矩形里按格子重建。
     /// 号码那一段的产物：文本 + 格子 + 走了哪条路。
     struct DigitPass {
         var text: String
@@ -145,26 +147,17 @@ enum TicketVisionScanner {
                         grid: reading.grid, note: note)
                 }
             }
-            // 配准没成功（基准没找到、格子划不齐）就退回老路。
-            // 老路会从识别结果里估几何，没有配准那么稳，但总比什么都不给强。
+            // 配准没成功（基准没找到、格子划不齐）就退回逐行二次识别。
             //
-            // 只有一格一位的那几种票能退到这儿：老路是按「一列一个个位数」写的，
-            // 双色球和大乐透印的是两位数，喂给它读出来的是垃圾，
-            // 还不如直接退到逐行二次识别 —— 那条路本来就是它们一直在走的。
-            if layout.singleDigit,
-               let matrix = await DigitMatrixReader.read(image: image, layout: layout,
-                                                        labelBoundary: rowLabelBoundary(base)) {
-                return DigitPass(
-                    text: compose(rows: baseRows, originals: originals, matrix: matrix),
-                    grid: nil, note: note + "；退回老路（按字符坐标估几何）")
-            }
-            // 说清楚是"老路也没读出来"还是"这种票根本不走老路" ——
-            // 上一轮大乐透报的是前者，其实是后者，白猜了一圈
-            let why = layout.singleDigit ? "老路也没读出来" : "两位数的票不走老路"
+            // 中间那条「从识别结果里估几何」的老路**已经删掉了**。它的方向是反的
+            // （认得越差几何估得越偏），更要命的是它会**盖住格子路的失败** ——
+            // 格子划不出来时它给出一个看起来差不多的答案，于是真正的问题在真机上
+            // 连着几轮都看不出来，用户只会觉得"改了没用"。
+            // 现在失败是刺眼的，而票面合计那道校验会把少认一注的票挡在导入之前。
             return DigitPass(text: await secondPass(image: image, rows: baseRows,
                                                     originals: originals, game: game),
                              grid: nil,
-                             note: note + "；\(why)，退回逐行二次识别")
+                             note: note + "；退回逐行二次识别")
         }
 
         return DigitPass(text: await secondPass(image: image, rows: baseRows,
@@ -232,7 +225,7 @@ enum TicketVisionScanner {
     /// Vision 读得好好的。
     private static func compose(rows: [[TextFragment]],
                                 originals: [String],
-                                matrix: DigitMatrixReader.Matrix) -> String {
+                                matrix: DigitMatrix) -> String {
         var result: [String] = []
         var inserted = false
         for (index, row) in rows.enumerated() {
@@ -259,7 +252,7 @@ enum TicketVisionScanner {
     /// 福彩 3D 每一注前面印着「组六:」「组三:」，那是核奖要用的；
     /// 而 `①②③④⑤` 那一竖排常常被 Vision 当成一个碎片整条读出来，
     /// 它横跨所有行，认作谁的标签都不对。
-    private static func line(for row: DigitMatrixReader.Row, rows: [[TextFragment]]) -> String {
+    private static func line(for row: DigitMatrix.Row, rows: [[TextFragment]]) -> String {
         let digits = slotText(row.values)
         let height = row.band.upperBound - row.band.lowerBound
         for fragment in rows.flatMap({ $0 }) {
@@ -424,6 +417,24 @@ enum TicketVisionScanner {
             return chars
         }.value
         return results.sorted { $0.box.midX < $1.box.midX }
+    }
+
+    /// 整张票上所有的数字字符。
+    ///
+    /// 跑两遍：原图一遍、**加了对比度**的一遍，按位置取并集。
+    /// 热敏票印在银灰纸上，票面反光、纸还是弯的，原图上有些笔画淡到模型看不见；
+    /// 拉一把对比度就出来了。反过来对比度拉过头又会糊掉另一些，所以两遍都要。
+    static func allDigits(in image: UIImage) async -> [TicketVisionScanner.DigitChar] {
+        var kept: [TicketVisionScanner.DigitChar] = []
+        var sources = [image]
+        if let boosted = TicketVisionScanner.contrastBoosted(image) { sources.append(boosted) }
+        for source in sources {
+            for char in await TicketVisionScanner.recognizeDigits(in: source) {
+                guard !kept.contains(where: { $0.box.intersects(char.box) }) else { continue }
+                kept.append(char)
+            }
+        }
+        return kept
     }
 
     /// 裁条里认出来的一小块数字。

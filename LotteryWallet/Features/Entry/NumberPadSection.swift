@@ -57,9 +57,15 @@ struct NumberPadSection: View {
     }
 
     /// 数字型玩法按「补齐了几位」报，其余按「选了几个」报。
+    ///
+    /// 号码盘那一路也要报问号：识别出来的票可能有一位是问号，而问号不在
+    /// 号码盘上（−1 不在值域里），光报「已选 1」用户看不出还差一个。
     private var countText: String {
-        guard isDigitSection else { return "已选 \(selection.selected.count)" }
         let unknown = selection.selected.filter { $0 < 0 }.count
+        guard isDigitSection else {
+            let picked = selection.selected.count - unknown
+            return unknown > 0 ? "已选 \(picked)，还差 \(unknown) 个" : "已选 \(picked)"
+        }
         return unknown > 0 ? "还差 \(unknown) 位" : "已填 \(selection.selected.count)"
     }
 
@@ -150,6 +156,19 @@ struct NumberPadSection: View {
         } else {
             // 普通单式选满就不再加
             if mode == .manual {
+                // **问号占的位置不算"选满"。** 它是"这一位还没补上"，不是一个号码。
+                //
+                // 不这么判的话，七星彩的特别号（`required == 1`，值域 0–14，
+                // 走的是号码盘不是滚轮）一旦识别成问号就**再也改不回来**：
+                // 问号占掉了唯一的名额，点任何一个号都被"已经选满 1 个"挡回去；
+                // 而问号自己不在号码盘上（−1 不在 0–14 里），也点不掉。
+                // 双色球的蓝球、大乐透的后区带问号时是同一个死结。
+                if let hole = next.selected.firstIndex(where: { $0 < 0 }) {
+                    next.selected[hole] = value
+                    next.selected.sort()
+                    selection = next
+                    return
+                }
                 guard next.selected.count < required else {
                     onReject?("\(section.label)已经选满 \(required) 个，先取消一个再选")
                     return

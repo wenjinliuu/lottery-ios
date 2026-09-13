@@ -21,7 +21,7 @@ enum RegisteredDigitReader {
 
     /// 一次读数的产物。
     struct Reading {
-        var matrix: DigitMatrixReader.Matrix
+        var matrix: DigitMatrix
         /// 划出来的格子，画在调试图上。
         var grid: NumberGrid
     }
@@ -57,7 +57,7 @@ enum RegisteredDigitReader {
         //    否则是整段压在中文标签上了。注意只是否决 —— 注序号列靠它
         //    分不出来（`.fast` 会把 `①` 读成 `0`），那件事交给 `window` 的几何判据
         // 2. 划完之后按位置落进各自的格子
-        let chars = await DigitMatrixReader.allDigits(in: zone)
+        let chars = await allDigits(in: zone)
         let centers = chars.map { Double($0.box.midX) * Double(mask.width) }
         guard let grid = NumberGrid.build(mask: mask, within: span,
                                           layout: layout, digitCenters: centers) else {
@@ -122,32 +122,6 @@ enum RegisteredDigitReader {
             }
         }
 
-        // **印得下两位、却只读出一位的格子，也要再认一遍。**
-        //
-        // 七星彩的特别号 `13` `10` 真机上还是读成 `3` `0`：格子画得好好的
-        // （调试图上那一列明明白白框住了两位），整块认那一遍却只交回一个 `3` ——
-        // 十位那一竖又细又淡，在整块图里 Vision 直接漏掉了。
-        // 而 `reread` 会把这一格单独裁出来放大好几倍、再加一遍对比度，
-        // 十位就出来了。上一版只给**空格子**补认，这一格有值（`3`），
-        // 于是永远轮不到它 —— 错得看起来还挺对，正是硬约束要防的那种。
-        //
-        // 只查"这一列印得下两位、却只读出一位"的格子：七星彩每张票最多 5 格，
-        // 大乐透的 `05` 本来就读出两位，不会进来。
-        var widened = 0
-        for row in values.indices {
-            for column in values[row].indices {
-                guard maximums.indices.contains(column), maximums[column] > 9,
-                      let value = values[row][column], value < 10,
-                      let rect = grid.cell(row: row, column: column) else { continue }
-                guard let better = await reread(zone: zone, rect: rect,
-                                                maximum: maximums[column]),
-                      better >= 10 else { continue }
-                // 只在补认真的读出两位时才换 —— 读回同一个一位数就别动
-                values[row][column] = better
-                widened += 1
-            }
-        }
-
         // 一多半都是问号就别拿出来了，那多半根本没划对地方
         let known = values.reduce(0) { $0 + $1.compactMap { $0 }.count }
         let total = values.count * layout.columns
@@ -156,12 +130,37 @@ enum RegisteredDigitReader {
                            note: "格子路：\(total) 格里只认出 \(known) 格，一多半是问号，不敢用")
         }
 
-        var rows: [DigitMatrixReader.Row] = []
+        // 号码区右边单独分出去的那一块（七星彩的特别号）。
+        //
+        // 它**不是矩阵的第 7 列**。分界线按版式算（见 `DigitTicketLayout.Trailing`），
+        // 线右边整片都算它的，认出什么就拼什么 —— 那一片里不可能有别的号码。
+        // 这样就不用去赌「十位那一竖有没有进二值化」：格子划得刚刚好，
+        // 等于要求 OCR 也刚刚好，而那一竖又细又淡，赌不赢。
+        var tailValues = [Int?](repeating: nil, count: grid.rows.count)
+        var tailNote = ""
+        if let trailing = layout.trailing, let strip = grid.trailingStrip(trailing) {
+            var read = 0
+            for row in grid.rows.indices {
+                let rect = CGRect(x: strip.lowerBound, y: grid.rows[row].lowerBound,
+                                  width: strip.upperBound - strip.lowerBound,
+                                  height: grid.rows[row].upperBound - grid.rows[row].lowerBound)
+                tailValues[row] = await reread(zone: zone, rect: rect,
+                                               maximum: trailing.maximum)
+                if tailValues[row] != nil { read += 1 }
+            }
+            tailNote = "，特别号那一块读出 \(read)/\(grid.rows.count)"
+        } else if layout.trailing != nil {
+            tailNote = "，特别号那一块划不出来"
+        }
+
+        var rows: [DigitMatrix.Row] = []
         for (index, line) in values.enumerated() {
             guard let band = visionBand(of: grid.rows[index], frame: frame) else {
                 return Outcome(reading: nil, note: "格子路：格子映射不回票面")
             }
-            rows.append(DigitMatrixReader.Row(band: band, values: line))
+            // 特别号接在六位后面，拼成票面上那一注的完整顺序
+            let full = layout.trailing == nil ? line : line + [tailValues[index]]
+            rows.append(DigitMatrix.Row(band: band, values: full))
         }
         guard !rows.isEmpty else {
             return Outcome(reading: nil, note: "格子路：一注都没切出来")
@@ -170,10 +169,9 @@ enum RegisteredDigitReader {
         let high = rows.map(\.band.upperBound).max() ?? 1
         return Outcome(
             reading: Reading(matrix: .init(rows: rows, span: low...high), grid: grid),
-            note: "号码按配准后的格子读：\(rows.count) 注 × \(layout.columns) 位，"
+            note: "号码按配准后的格子读：\(rows.count) 注 × \(layout.columns + (layout.trailing == nil ? 0 : 1)) 位，"
                 + "\(total) 格里认出 \(known) 格"
-                + "（整块认一遍剩 \(blanks) 格空的，补认补上 \(filled) 格"
-                + (widened > 0 ? "，\(widened) 格补成两位" : "") + "）")
+                + "（整块认一遍剩 \(blanks) 格空的，补认补上 \(filled) 格\(tailNote)）")
     }
 
     // MARK: - 把数字分进格子
@@ -220,8 +218,8 @@ enum RegisteredDigitReader {
         let width = CGFloat(cgImage.width)
         let height = CGFloat(cgImage.height)
         // 左右留白：Vision 贴着字边裁经常什么都不给，所以要让一点。
-        // 但**格子本身很宽时不能按宽度让** —— 七星彩的末列现在是个大格
-        // （见 `NumberGrid.catchAllTail`），按 0.8 倍宽让出去会一直让到
+        // 但**格子本身很宽时不能按宽度让** —— 七星彩的特别号那一块是一条宽带
+        // （见 `NumberGrid.trailingStrip`），按 0.8 倍宽让出去会一直让到
         // 前一个号码上，邻居跟着进来。按字高让就和格子宽度无关了。
         let padX = Swift.min(rect.width * 0.8, rect.height * 0.6)
         let padY = rect.height * 0.3
@@ -285,17 +283,47 @@ enum RegisteredDigitReader {
 }
 
 extension NumberGrid {
+    /// 号码区右边**单独分出去的那一块**在标准矩形里的横向范围。
+    ///
+    /// 分界线 = 最后一列中心 + `divider` × 列距，列距是这张票自己的
+    /// （六列一算就有）。线右边一直到号码区右沿，全算这一块的。
+    ///
+    /// 右边没边界时（七星彩的行尾不印倍数）就取到 1.0 —— 特别号右边什么都没有，
+    /// 多圈一点进来不会圈到别的号码，反而能接住印得靠右、被裁到边上的那种票。
+    func trailingStrip(_ trailing: DigitTicketLayout.Trailing) -> ClosedRange<CGFloat>? {
+        guard let last = columns.last, columns.count >= 2 else { return nil }
+        let centers = columns.map { ($0.lowerBound + $0.upperBound) / 2 }
+        let gaps = zip(centers, centers.dropFirst()).map { $1 - $0 }
+        guard !gaps.isEmpty else { return nil }
+        let pitch = gaps.sorted()[gaps.count / 2]
+        guard pitch > 0 else { return nil }
+        let low = (last.lowerBound + last.upperBound) / 2 + trailing.divider * pitch
+        guard low < 1 else { return nil }
+        return low...1
+    }
+
+
     /// 把格子映射回票面，画到调试图上。
     ///
     /// 画得出来就等于「这个号码来自票面哪个像素格子」答得上来 ——
     /// 硬约束一在界面上的样子就是这些框。
-    func debugCells(frame: TicketFrame) -> [ScanDebugReport.Cell] {
+    func debugCells(frame: TicketFrame,
+                    trailing: DigitTicketLayout.Trailing? = nil) -> [ScanDebugReport.Cell] {
         var out: [ScanDebugReport.Cell] = []
         for row in rows.indices {
             for column in columns.indices {
                 guard let rect = cell(row: row, column: column),
                       let corners = frame.restore(rect) else { continue }
                 out.append(.init(corners: corners, row: row, column: column))
+            }
+            // 分出去的那一块也画出来 —— 它是一条宽带，正没正、有没有咬到
+            // 前一位，一眼就能判。硬约束一要的"说得出来自哪块像素"就是这个框。
+            guard let trailing, let strip = trailingStrip(trailing) else { continue }
+            let rect = CGRect(x: strip.lowerBound, y: rows[row].lowerBound,
+                              width: strip.upperBound - strip.lowerBound,
+                              height: rows[row].upperBound - rows[row].lowerBound)
+            if let corners = frame.restore(rect) {
+                out.append(.init(corners: corners, row: row, column: columns.count))
             }
         }
         return out
