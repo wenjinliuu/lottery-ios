@@ -66,9 +66,7 @@ enum TicketVisionScanner {
         // 划出来的格子画到调试图上，盖掉阶段 1 那版"墨迹自己切出来的段" ——
         // 现在画的是真正拿去认号码的那些格子，位置对不对一眼就看得出来。
         if let grid = merged.grid, let frame = registration.frame {
-            let trailing = TicketTextParser.detectGame(merged.text)
-                .flatMap(DigitTicketLayout.of)?.trailing
-            registration.debug.cells = grid.debugCells(frame: frame, trailing: trailing)
+            registration.debug.cells = grid.debugCells(frame: frame, trailing: merged.trailing)
         }
         // **号码走了哪条路，永远写一句。**
         //
@@ -120,6 +118,8 @@ enum TicketVisionScanner {
     struct DigitPass {
         var text: String
         var grid: NumberGrid?
+        /// 特别号那一块切出来的字形，画到调试图上。
+        var trailing: NumberGrid.TrailingGlyphs? = nil
         /// 调试图上写出来的那句话。号码路没跑（不是数字型彩种）时为 nil。
         var note: String?
     }
@@ -144,7 +144,7 @@ enum TicketVisionScanner {
                     return DigitPass(
                         text: compose(rows: baseRows, originals: originals,
                                       matrix: reading.matrix),
-                        grid: reading.grid, note: note)
+                        grid: reading.grid, trailing: reading.trailing, note: note)
                 }
             }
             // 配准没成功（基准没找到、格子划不齐）就退回逐行二次识别。

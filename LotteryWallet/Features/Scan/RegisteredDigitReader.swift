@@ -24,6 +24,8 @@ enum RegisteredDigitReader {
         var matrix: DigitMatrix
         /// 划出来的格子，画在调试图上。
         var grid: NumberGrid
+        /// 特别号那一块切出来的字形，也要画出来 —— 切对没切对一眼就看得见。
+        var trailing: NumberGrid.TrailingGlyphs? = nil
     }
 
     /// 读数的结果 + **一句说明**。
@@ -136,24 +138,28 @@ enum RegisteredDigitReader {
                            note: "格子路：\(total) 格里只认出 \(known) 格，一多半是问号，不敢用")
         }
 
-        // 号码区右边单独分出去的那一块（七星彩的特别号）：**整条喂一次**。
+        // 号码区右边单独分出去的那一块（七星彩的特别号）。
         //
-        // 上一版是一注裁一块、每块试 6 遍 —— 五注就是 30 次 Vision 调用，
-        // 一张票光这一项就要好几秒。而这五个号码在票面上本来就是一竖排、
-        // 左右什么都没有，裁成一条窄带一次喂过去，Vision 返回的字符带着坐标，
-        // 按行带对号入座就行了。**30 次变 1 次，而且认得更准** ——
-        // 窄带里只有这五个数，没有别的字符来抢坐标。
+        // 先按墨迹切成字形，再决定拿什么去认 —— 见 `NumberGrid.trailingGlyphs`。
+        // 两个字形就是 1X（特别号 0–14，十位只能是 1），一个字形就是它自己。
+        // 交给 Vision 的永远只有一件它最擅长的事：认一个孤零零的 0–9。
         var tailValues = [Int?](repeating: nil, count: grid.rows.count)
+        var tailGlyphs: NumberGrid.TrailingGlyphs?
         var tailNote = ""
-        if let trailing = layout.trailing, let strip = grid.trailingStrip(trailing) {
-            let outcome = await readTrailingStrip(zone: zone, grid: grid,
-                                                  strip: strip, maximum: trailing.maximum)
-            tailValues = outcome.values
-            let read = outcome.values.compactMap { $0 }.count
-            tailNote = "，特别号读出 \(read)/\(grid.rows.count)"
-            if !outcome.raw.isEmpty { tailNote += "，Vision 给的是「\(outcome.raw)」" }
-        } else if layout.trailing != nil {
-            tailNote = "，特别号那一块划不出来"
+        if let trailing = layout.trailing {
+            if let glyphs = grid.trailingGlyphs(mask: mask, within: span,
+                                                divider: trailing.divider) {
+                tailGlyphs = glyphs
+                let outcome = await readTrailing(zone: zone, grid: grid, glyphs: glyphs,
+                                                 maximum: trailing.maximum)
+                tailValues = outcome.values
+                let read = outcome.values.compactMap { $0 }.count
+                tailNote = "，特别号读出 \(read)/\(grid.rows.count)"
+                tailNote += "（每注切出 \(glyphs.shape) 个字形"
+                tailNote += "，个位 Vision 给的是「\(outcome.raw)」）"
+            } else {
+                tailNote = "，特别号那一块切不出字形"
+            }
         }
 
         var rows: [DigitMatrix.Row] = []
@@ -177,7 +183,8 @@ enum RegisteredDigitReader {
         note += "\(total) 格里认出 \(known) 格"
         note += "（整块认一遍剩 \(blanks) 格空的，补认补上 \(filled) 格\(tailNote)）"
         return Outcome(
-            reading: Reading(matrix: .init(rows: rows, span: low...high), grid: grid),
+            reading: Reading(matrix: .init(rows: rows, span: low...high),
+                             grid: grid, trailing: tailGlyphs),
             note: note)
     }
 
@@ -208,39 +215,45 @@ enum RegisteredDigitReader {
         }
     }
 
-    // MARK: - 特别号那一条
+    // MARK: - 特别号
 
-    /// 特别号：**一注裁一块**，每块认两遍（原图 + 加对比度）。
+    /// 特别号：**字形数说了算，只有个位去认**。
     ///
-    /// 这里绕过一次弯，记下来免得再走：上一版想着"五个号码本来就是一竖排，
-    /// 裁成一整条窄带喂一次不就完了"，结果 Vision 对那条 840×1980 的竖条
-    /// **返回零个字符** —— 五注全是问号。
+    /// 七星彩的特别号是 0–14，两位数只有 10…14，十位必然是 1，而 0 不打头。
+    /// 所以切出两个字形 = 10 + 个位，切出一个 = 个位本身。
+    /// 十位是从取值范围**推**出来的，不是认出来的，也不是猜出来的 ——
+    /// 每一注依然答得出"它来自票面哪几块像素"（硬约束一）。
     ///
-    /// 原因是 `VNRecognizeTextRequest` 找的是**横向文本行**。一块又窄又高、
-    /// 里面五个孤零零的短数字竖着排的图，它根本不认为那是文本行。
-    /// 而上一版逐注裁出来的"宽而扁、里面就一个数"的图，它读得好好的。
+    /// 切不成一段或两段（噪点、并进了别的东西）就是问号，不拿其中一位顶上。
     ///
-    /// 所以形状退回去，但**省调用那部分保住**：每注 2 遍而不是原来的 6 遍
-    /// （3 种放大 × 2 种对比度打淘汰赛），五注 10 次而不是 30 次。
-    /// 加对比度那一遍不能省 —— 热敏票印在银灰纸上，有些笔画淡到原图上看不见。
-    static func readTrailingStrip(zone: UIImage,
-                                  grid: NumberGrid,
-                                  strip: ClosedRange<CGFloat>,
-                                  maximum: Int) async -> (values: [Int?], raw: String) {
+    /// **这里没有宽度判据。** 一度想加一条"十位那一竖必须比个位窄一半"，
+    /// 但特别号是 11 的时候两段一样窄，那条判据会把一注对的号判成问号 ——
+    /// 又是"认全了反而被丢"。字形数本身已经够了。
+    static func readTrailing(zone: UIImage,
+                             grid: NumberGrid,
+                             glyphs: NumberGrid.TrailingGlyphs,
+                             maximum: Int) async -> (values: [Int?], raw: String) {
         var values = [Int?](repeating: nil, count: grid.rows.count)
         var raws: [String] = []
         for row in grid.rows.indices {
+            guard glyphs.rows.indices.contains(row) else { raws.append("—"); continue }
+            let cells = glyphs.rows[row]
+            guard (1...2).contains(cells.count), let units = cells.last else {
+                raws.append("切出\(cells.count)形")
+                continue
+            }
+            let tens = cells.count == 2 ? 10 : 0
             let band = grid.rows[row]
-            let rect = CGRect(x: strip.lowerBound, y: band.lowerBound,
-                              width: strip.upperBound - strip.lowerBound,
+            let rect = CGRect(x: units.lowerBound, y: band.lowerBound,
+                              width: units.upperBound - units.lowerBound,
                               height: band.upperBound - band.lowerBound)
-            let outcome = await digits(in: zone, rect: rect)
-            raws.append(outcome.isEmpty ? "—" : outcome.map(String.init).joined())
-            guard (1...2).contains(outcome.count) else { continue }
-            let value = outcome.reduce(0) { $0 * 10 + $1 }
-            // **超上限不降级成个位数。** 上一版在这儿把 `13` 读成 `73` 之后
-            // 整个扔掉、拿只认出个位的那一遍顶上，屏幕显示 `3` 而票面是 `13` ——
-            // 认错了还看起来对，正是硬约束要挡的那种。读不成就是问号。
+            // 两位数时左边那一竖就贴在旁边，裁图往左让的时候不许越过中线，
+            // 否则半个 `1` 进了画面，Vision 会连个位一起读歪。
+            let stop = cells.count == 2 ? (cells[0].upperBound + units.lowerBound) / 2 : 0
+            let read = await digits(in: zone, rect: rect, notLeftOf: stop)
+            raws.append(read.isEmpty ? "—" : read.map(String.init).joined())
+            guard read.count == 1, let digit = read.first else { continue }
+            let value = tens + digit
             guard value <= maximum else { continue }
             values[row] = value
         }
@@ -268,7 +281,10 @@ enum RegisteredDigitReader {
     ///
     /// 跑两遍：原图一遍、加对比度一遍（热敏票印在银灰纸上，有些笔画淡到
     /// 原图上看不见，这一条实测有用），**按位置取并集**，不比谁认得多。
-    static func digits(in zone: UIImage, rect: CGRect) async -> [Int] {
+    /// `notLeftOf` 是裁图左沿的下限（标准矩形里的 0–1，0 = 不限）。
+    /// 旁边紧挨着另一个字形时用它挡住，别把半个邻居裁进来。
+    static func digits(in zone: UIImage, rect: CGRect,
+                       notLeftOf stop: CGFloat = 0) async -> [Int] {
         guard let cgImage = zone.cgImage else { return [] }
         let width = CGFloat(cgImage.width)
         let height = CGFloat(cgImage.height)
@@ -276,7 +292,7 @@ enum RegisteredDigitReader {
         // 按 0.8 倍宽让出去会一直让到前一个号码上，邻居跟着进来。
         let padX = Swift.min(rect.width * 0.8, rect.height * 0.6)
         let padY = rect.height * 0.3
-        let cropLeft = Swift.max(rect.minX - padX, 0)
+        let cropLeft = Swift.max(rect.minX - padX, stop, 0)
         let cropRight = Swift.min(rect.maxX + padX, 1)
         let top = Swift.max(rect.minY - padY, 0) * height
         let bottom = Swift.min(rect.maxY + padY, 1) * height
@@ -324,32 +340,12 @@ enum RegisteredDigitReader {
 }
 
 extension NumberGrid {
-    /// 号码区右边**单独分出去的那一块**在标准矩形里的横向范围。
-    ///
-    /// 分界线 = 最后一列中心 + `divider` × 列距，列距是这张票自己的
-    /// （六列一算就有）。线右边一直到号码区右沿，全算这一块的。
-    ///
-    /// 右边没边界时（七星彩的行尾不印倍数）就取到 1.0 —— 特别号右边什么都没有，
-    /// 多圈一点进来不会圈到别的号码，反而能接住印得靠右、被裁到边上的那种票。
-    func trailingStrip(_ trailing: DigitTicketLayout.Trailing) -> ClosedRange<CGFloat>? {
-        guard let last = columns.last, columns.count >= 2 else { return nil }
-        let centers = columns.map { ($0.lowerBound + $0.upperBound) / 2 }
-        let gaps = zip(centers, centers.dropFirst()).map { $1 - $0 }
-        guard !gaps.isEmpty else { return nil }
-        let pitch = gaps.sorted()[gaps.count / 2]
-        guard pitch > 0 else { return nil }
-        let low = (last.lowerBound + last.upperBound) / 2 + trailing.divider * pitch
-        guard low < 1 else { return nil }
-        return low...1
-    }
-
-
     /// 把格子映射回票面，画到调试图上。
     ///
     /// 画得出来就等于「这个号码来自票面哪个像素格子」答得上来 ——
     /// 硬约束一在界面上的样子就是这些框。
     func debugCells(frame: TicketFrame,
-                    trailing: DigitTicketLayout.Trailing? = nil) -> [ScanDebugReport.Cell] {
+                    trailing: TrailingGlyphs? = nil) -> [ScanDebugReport.Cell] {
         var out: [ScanDebugReport.Cell] = []
         for row in rows.indices {
             for column in columns.indices {
@@ -357,14 +353,15 @@ extension NumberGrid {
                       let corners = frame.restore(rect) else { continue }
                 out.append(.init(corners: corners, row: row, column: column))
             }
-            // 分出去的那一块也画出来 —— 它是一条宽带，正没正、有没有咬到
-            // 前一位，一眼就能判。硬约束一要的"说得出来自哪块像素"就是这个框。
-            guard let trailing, let strip = trailingStrip(trailing) else { continue }
-            let rect = CGRect(x: strip.lowerBound, y: rows[row].lowerBound,
-                              width: strip.upperBound - strip.lowerBound,
-                              height: rows[row].upperBound - rows[row].lowerBound)
-            if let corners = frame.restore(rect) {
-                out.append(.init(corners: corners, row: row, column: columns.count))
+            // 特别号切出来的每一个字形也画一个框。切成一段还是两段，
+            // 就是这一注读 4 还是读 14 的全部依据 —— 框画对了结论就对了。
+            guard let trailing, trailing.rows.indices.contains(row) else { continue }
+            for (index, cell) in trailing.rows[row].enumerated() {
+                let rect = CGRect(x: cell.lowerBound, y: rows[row].lowerBound,
+                                  width: cell.upperBound - cell.lowerBound,
+                                  height: rows[row].upperBound - rows[row].lowerBound)
+                guard let corners = frame.restore(rect) else { continue }
+                out.append(.init(corners: corners, row: row, column: columns.count + index))
             }
         }
         return out

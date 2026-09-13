@@ -96,6 +96,73 @@ struct ScannedTicket: Identifiable, Hashable {
 
     var hasUnknown: Bool { unknownCount > 0 }
 
+    // MARK: - 改票种
+
+    /// 这张票现在能改成哪几种票种。
+    ///
+    /// 单式和复式/胆拖在模型里是**两套号码**：单式读 `lines`（一行一注），
+    /// 复式/胆拖读 `selections`（一个区一堆号，展开才是很多注）。
+    /// 改票种就是把手上这套号码翻译成另一套 —— 翻译不过去的那一种不给选，
+    /// 免得点一下之后整张票变成 0 注。
+    ///
+    /// 还有问号的时候只剩单式：问号在 `selections` 里没有地方落脚，
+    /// 摊过去就等于把"这一位没认出来"悄悄抹掉（硬约束一挡的正是这个）。
+    var availableShapes: [ScanPlay] {
+        var out: [ScanPlay] = []
+        if !lines.isEmpty || collapsedLine != nil { out.append(.single) }
+        if !hasUnknown, !selections.isEmpty || !lines.isEmpty {
+            out.append(.system)
+            out.append(.dantuo)
+        }
+        // 当前这一种永远留着，否则菜单上连自己都点不了
+        if !out.contains(play) { out.append(play) }
+        return out
+    }
+
+    /// 改票种，顺手把号码翻译到另一套表示上。
+    mutating func changeShape(to shape: ScanPlay) {
+        guard shape != play, availableShapes.contains(shape) else { return }
+        switch shape {
+        case .single:
+            if lines.isEmpty, let one = collapsedLine { lines = one }
+            selections = [:]
+        case .system, .dantuo:
+            if selections.isEmpty { selections = pooledSelections }
+            lines = []
+            // 逐注玩法是跟着 `lines` 走的，行没了它就没有意义
+            lineModes = []
+        }
+        play = shape
+    }
+
+    /// 单式的号码摊成「一个区一堆号」——复式/胆拖就是这么存的。
+    private var pooledSelections: [SectionKey: SectionSelection] {
+        var out: [SectionKey: SectionSelection] = [:]
+        for section in game.sections {
+            var values: [Int] = []
+            for line in lines {
+                for value in line[section.key] where value >= 0 && !values.contains(value) {
+                    values.append(value)
+                }
+            }
+            guard !values.isEmpty else { continue }
+            out[section.key] = SectionSelection(selected: values.sorted())
+        }
+        return out
+    }
+
+    /// 复式的选号刚好每个区都选满时，它其实就是一注单式。
+    private var collapsedLine: [NumberSet]? {
+        guard !selections.isEmpty else { return nil }
+        var numbers = NumberSet()
+        for section in game.sections {
+            let values = (selections[section.key]?.selected ?? []).sorted()
+            guard values.count == section.count else { return nil }
+            numbers[section.key] = values
+        }
+        return numbers.isEmpty ? nil : [numbers]
+    }
+
     /// 单期金额。票面合计是 `periods` 期的总和。
     var costPerPeriod: Double { Double(count) * unitPrice * Double(multiple) }
     var totalCost: Double { costPerPeriod * Double(periods) }

@@ -470,39 +470,109 @@ final class NumberGridTests: XCTestCase {
                        [1, 2, 3], "标签列和倍数列都该裁掉")
     }
 
-    /// **特别号那一块的分界线**（26042 真票实测，照片摆正 0.5°、605 宽裁图）。
+    // MARK: - 特别号那一块
+
+    /// 26042 那张七星彩，量出来的真实版式（票面缩到 1000 宽之后）。
     ///
     /// | | 像素 |
     /// |---|---|
-    /// | 六位的列位 | 150–167 / 214–231 / 279–295 / 343–359 / 407–423 / 470–486 |
-    /// | 列距 | 64 |
-    /// | 第6位右沿 | 487 |
-    /// | 特别号十位左沿 | 556（十位永远是 `1`，因为特别号取值 0–14）|
+    /// | 五注的行带 | 416–449 / 463–496 / 510–544 / 557–591 / 610–643 |
+    /// | 六位的列位 | 242–269 / 331–357 / 420–445 / 509–533 / 597–621 / 685–709 |
+    /// | 字宽 / 列距 | 25 / 88 |
+    /// | 特别号十位（只有第 1、4 注有）| 805–816，**宽 12，正好是别的数字一半** |
+    /// | 特别号个位（每注都有）| 831–856 |
     ///
-    /// 分界线要落在 `[487, 556]` 这条空白带的正中间 —— **521.5**，两边各留约
-    /// 2 个字宽。线右边一直到号码区右沿全算特别号的，认出什么就拼什么，
-    /// 不用去赌那一竖有没有进二值化。
-    func testTrailingStripLandsInTheGap() {
-        let zoneWidth: CGFloat = 605
-        func column(_ low: CGFloat, _ high: CGFloat) -> ClosedRange<CGFloat> {
-            (low / zoneWidth)...((high + 1) / zoneWidth)
+    /// 票面特别号是 13 / 4 / 9 / 10 / 2 —— 第 1、4 注两段墨，其余一段。
+    private func qixingcaiZone(tailJunk: Bool = false) -> Zone {
+        let zone = Zone(width: 1000, height: 700)
+        let tens: Set<Int> = [0, 3]
+        for row in 0..<5 {
+            let top = 416 + row * 47
+            for column in 0..<6 {
+                let left = 242 + column * 88
+                zone.fill(x: left..<(left + 25), y: top..<(top + 32))
+            }
+            if tens.contains(row) { zone.fill(x: 805..<817, y: top..<(top + 32)) }
+            zone.fill(x: 831..<857, y: top..<(top + 32))
+            // 26051 那张票的右沿还印着别的东西，隔着一整个列距
+            if tailJunk { zone.fill(x: 947..<996, y: top..<(top + 32)) }
         }
-        let grid = NumberGrid(
-            rows: [0.1...0.2],
-            columns: [column(150, 167), column(214, 231), column(279, 295),
-                      column(343, 359), column(407, 423), column(470, 486)])
-        guard let strip = grid.trailingStrip(.init(maximum: 14, divider: 0.67)) else {
-            return XCTFail("分界线该算得出来")
-        }
-        let line = strip.lowerBound * zoneWidth
-        XCTAssertEqual(line, 521.5, accuracy: 3, "落在空白带正中间")
-        XCTAssertGreaterThan(line, 487 + 25, "离第 6 位留着两个字宽")
-        XCTAssertLessThan(line, 556 - 25, "离特别号的十位也留着两个字宽")
-        XCTAssertEqual(strip.upperBound, 1, "线右边一直到号码区右沿都算它的")
+        return zone
+    }
 
-        // 只有一列时算不出列距，老老实实返回 nil
-        XCTAssertNil(NumberGrid(rows: [0.1...0.2], columns: [column(150, 167)])
-            .trailingStrip(.init(maximum: 14, divider: 0.67)))
+    private let qixingcaiLayout = DigitTicketLayout(
+        groups: [.init(count: 6, maximum: 9, gap: 0)],
+        trailing: .init(maximum: 14, divider: 0.67))
+
+    /// **一段墨还是两段墨，就是这一注读 4 还是读 14 的全部依据。**
+    ///
+    /// 特别号取值 0–14：两位数只有 10…14，十位必然是 1，而 0 不打头。
+    /// 所以十位根本不用去认 —— 数出几段墨就够了。前三轮都栽在反过来做：
+    /// 把那根没有衬线的竖道连同个位一起交给 Vision 读两位数，
+    /// 结果要么只返回个位，要么整条返回零个字符。
+    func testTrailingGlyphsCountTellsTensFromUnits() {
+        let zone = qixingcaiZone()
+        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...999,
+                                          layout: qixingcaiLayout) else {
+            return XCTFail("六位的格子该划得出来")
+        }
+        XCTAssertEqual(grid.columns.count, 6, "特别号不占主格子")
+        guard let glyphs = grid.trailingGlyphs(mask: zone.mask, within: 0...999,
+                                               divider: 0.67) else {
+            return XCTFail("特别号那一块该切得出字形")
+        }
+        XCTAssertEqual(glyphs.rows.map(\.count), [2, 1, 1, 2, 1],
+                       "13 和 10 是两段墨，4 / 9 / 2 是一段")
+        XCTAssertEqual(glyphs.shape, "2/1/1/2/1")
+
+        // 要认的永远是**最右**那一段，也就是个位
+        guard let units = glyphs.rows[0].last, let tens = glyphs.rows[0].first else {
+            return XCTFail("第一注该切出两段")
+        }
+        XCTAssertEqual(units.lowerBound * 1000, 831, accuracy: 2)
+        XCTAssertEqual(tens.lowerBound * 1000, 805, accuracy: 2)
+    }
+
+    /// 特别号右边还印着别的东西时不许并进来 —— 26051 那张真票的右沿就有。
+    /// 它隔着一整个列距，合不进同一段。
+    func testTrailingGlyphsIgnoreInkFurtherRight() {
+        let zone = qixingcaiZone(tailJunk: true)
+        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...999,
+                                          layout: qixingcaiLayout),
+              let glyphs = grid.trailingGlyphs(mask: zone.mask, within: 0...999,
+                                               divider: 0.67) else {
+            return XCTFail("该切得出来")
+        }
+        XCTAssertEqual(glyphs.rows.map(\.count), [2, 1, 1, 2, 1], "右沿那一块不算特别号")
+        for row in glyphs.rows {
+            for cell in row {
+                XCTAssertLessThan(cell.upperBound * 1000, 900, "没有一段越过 900")
+            }
+        }
+    }
+
+    /// 特别号最多两位。合出来比两位还宽就是并进了不该并的东西 ——
+    /// 整块作废、退回上一层，绝不允许猜（硬约束二）。
+    func testTrailingBlockWiderThanTwoDigitsIsRejected() {
+        let zone = qixingcaiZone()
+        // 在个位右边紧挨着再糊一段墨，合并之后这一块有三位宽
+        for row in 0..<5 {
+            let top = 416 + row * 47
+            zone.fill(x: 862..<900, y: top..<(top + 32))
+        }
+        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...999,
+                                          layout: qixingcaiLayout) else {
+            return XCTFail("六位的格子还是划得出来")
+        }
+        XCTAssertNil(grid.trailingGlyphs(mask: zone.mask, within: 0...999, divider: 0.67),
+                     "宽过两位就不敢用")
+    }
+
+    /// 只有一列时算不出列距，老老实实返回 nil。
+    func testTrailingGlyphsNeedTwoColumnsForThePitch() {
+        let zone = qixingcaiZone()
+        let single = NumberGrid(rows: [0.6...0.65], columns: [0.242...0.267])
+        XCTAssertNil(single.trailingGlyphs(mask: zone.mask, within: 0...999, divider: 0.67))
     }
 
     /// 划不出格子的时候，调试图要说得出**每一条墨迹带切了几段** ——

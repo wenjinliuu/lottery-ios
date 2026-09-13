@@ -517,6 +517,43 @@ struct TicketScanView: View {
         ticket.game.ticketLabel(modes: playModes(ticket), shape: ticket.play.label)
     }
 
+    /// 票头那枚标签**可以点**。
+    ///
+    /// 单式 / 复式 / 胆拖认错的时候，以前是死路：标签只是显示，
+    /// 用户只能整张删了重扫，而重扫大概率还是认成同一个。
+    ///
+    /// 翻译不过去的那一种是**灰的**，不是藏起来的 —— 用户点得到、
+    /// 也看得出为什么点不动（比如还有问号没补，摊到复式上就把它抹掉了）。
+    @ViewBuilder
+    private func shapeTag(_ ticket: Binding<ScannedTicket>) -> some View {
+        let value = ticket.wrappedValue
+        let options = value.availableShapes
+        Menu {
+            ForEach([ScanPlay.single, .system, .dantuo], id: \.self) { shape in
+                Button {
+                    ticket.wrappedValue.changeShape(to: shape)
+                } label: {
+                    if shape == value.play {
+                        Label(shape.label, systemImage: "checkmark")
+                    } else {
+                        Text(shape.label)
+                    }
+                }
+                .disabled(!options.contains(shape))
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(headLabel(value))
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+            }
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(value.game.onTint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(value.game.tint, in: Capsule())
+        }
+    }
+
     /// 这张票上出现过的玩法。
     ///
     /// 大乐透的玩法不在 `playMode` 里，而是「追不追加」那个开关，
@@ -560,12 +597,7 @@ struct TicketScanView: View {
                 Text(game.label)
                     .font(.headline)
                     .foregroundStyle(game.accent.accentColor)
-                Text(headLabel(value))
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(game.onTint)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(game.tint, in: Capsule())
+                shapeTag(ticket)
                 Spacer(minLength: 8)
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) {
@@ -895,16 +927,18 @@ struct TicketScanView: View {
     /// 识别出来的玩法要是错了，以前是**死路** —— 票头那个胶囊只是显示，点不动，
     /// 用户只能整张删了重扫，而重扫大概率还是认成同一个。
     ///
-    /// 三种彩种有得选：福彩3D / 排列3 的直选·组三·组六，快乐8 的选一…选十。
-    /// 快乐8 这一项尤其要紧 —— 玩法决定一注选几个号，也决定奖级表，
+    /// **只给快乐8。** 它的玩法决定一注选几个号，也决定整张奖级表，
     /// 认错了整张票的核对都是错的。
-    /// 大乐透的玩法就是「追不追加」，上面那个开关已经管了，不再重复一行。
-    /// 双色球、七乐彩、排列5、七星彩本来就只有一种玩法，没什么可选的。
+    ///
+    /// 3D 和排列3 的直选·组三·组六不在这儿改 —— 那是**逐注**的东西
+    /// （实体票每注各印各的），票头改一下就把每一注都盖成同一种，
+    /// 反而比认错更糟。大乐透的玩法就是「追不追加」，上面那个开关管着。
+    /// 双色球、七乐彩、排列5、七星彩本来就只有一种玩法。
     @ViewBuilder
     private func playModeRow(_ ticket: Binding<ScannedTicket>) -> some View {
         let value = ticket.wrappedValue
         let modes = value.game.playModes
-        if modes.count > 1, value.game != .dlt {
+        if value.game == .k8, modes.count > 1 {
             let current = value.playMode.isEmpty ? value.game.defaultPlayMode : value.playMode
             HStack(spacing: 8) {
                 Text("玩法").font(.subheadline)

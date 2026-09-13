@@ -431,6 +431,103 @@ struct NumberGrid: Equatable {
             })
     }
 
+    // MARK: - 特别号那一块
+
+    /// 特别号那一块每一注切出来的字形。
+    struct TrailingGlyphs: Equatable {
+        /// 一注一组，组里是从左到右的字形（标准矩形里的 0–1）。
+        /// 一位数一段，两位数两段，切不出来就是空的。
+        let rows: [[ClosedRange<CGFloat>]]
+
+        /// 调试图上写「每注切出几个字形」。
+        var shape: String {
+            var parts: [String] = []
+            for row in rows { parts.append(String(row.count)) }
+            return parts.joined(separator: "/")
+        }
+    }
+
+    /// 把号码区右边单独分出去的那一块，按墨迹切成一个个字形。
+    ///
+    /// **为什么要切字形，而不是把那一块整条交给 Vision。**
+    ///
+    /// 七星彩的特别号取值 0–14。两位数只有 10…14，十位**必然是 1**；
+    /// 而 0 不打头（票面上 04 就印成 4）。也就是说：
+    /// 切出两个字形 → 这一注是 1X；切出一个 → 就是个位数本身。
+    /// **十位根本不需要被认出来**，它是从取值范围推出来的，不是猜的。
+    ///
+    /// 前三轮都栽在反过来做：把那一竖道连同个位一起交给 Vision 去读两位数。
+    /// 那个 `1` 在热敏票的字体里是一根没有衬线的竖道、只有别的数字一半宽，
+    /// 孤零零摆在一大片空白里 —— Vision 要么只返回个位（build 47、49），
+    /// 要么整条返回零个字符（build 48）。而它本来就不必被认。
+    ///
+    /// 切法和主号码的列位是同一套：**整块投影定位置，每一注再看落了几段墨**。
+    /// 两张真票十行特别号（13/4/9/10/2 和 9/8/12/5/1）按这个切法结构全对，
+    /// 连「个位本身就是 1」那一行（只有一段、而且很窄）都没切错。
+    func trailingGlyphs(mask: InkMask,
+                        within span: ClosedRange<Int>,
+                        divider: CGFloat) -> TrailingGlyphs? {
+        guard columns.count >= 2, let last = columns.last,
+              let top = rows.first, let bottom = rows.last else { return nil }
+        let width = CGFloat(mask.width)
+        let height = CGFloat(mask.height)
+        guard width > 0, height > 0 else { return nil }
+
+        // 列距用这张票自己的（六列一算就有）
+        let centers = columns.map { ($0.lowerBound + $0.upperBound) / 2 }
+        var gaps: [CGFloat] = []
+        for (a, b) in zip(centers, centers.dropFirst()) { gaps.append(b - a) }
+        guard !gaps.isEmpty else { return nil }
+        let pitch = gaps.sorted()[gaps.count / 2]
+        guard pitch > 0 else { return nil }
+
+        // 分界线：最后一列中心 + divider × 列距。线右边到号码区右沿都算这一块的。
+        let line = ((last.lowerBound + last.upperBound) / 2 + divider * pitch) * width
+        let left = Swift.max(0, Int(line.rounded()))
+        let right = Swift.min(span.upperBound, mask.width - 1)
+        guard left < right else { return nil }
+
+        let blockTop = Swift.max(0, Int((top.lowerBound * height).rounded()))
+        let blockBottom = Swift.min(mask.height - 1, Int((bottom.upperBound * height).rounded()))
+        guard blockTop <= blockBottom else { return nil }
+
+        let profile = mask.columnProfile(rows: blockTop...blockBottom, columns: left...right)
+        var segments: [ClosedRange<Int>] = []
+        for run in InkMask.runs(profile, above: 0.5) {
+            segments.append((run.lowerBound + left)...(run.upperBound + left))
+        }
+        guard !segments.isEmpty else { return nil }
+        // 同一个号码的两位合成一段（和主号码用同一条"不到 0.75 个字宽就是一个号"的界），
+        // 取**最左**那一段 —— 特别号右边可能还有别的东西（26051 那张票的右沿就有），
+        // 它们隔着一整个列距，合不进来。
+        let merged = NumberGrid.merging(segments)
+        guard let block = merged.first else { return nil }
+
+        var widths: [Int] = []
+        for segment in segments { widths.append(segment.count) }
+        widths.sort()
+        let glyph = widths[widths.count / 2]
+        // 特别号最多两位。合出来比两位还宽，说明并进了不该并的东西 ——
+        // 整块作废，退回上一层（硬约束二）。
+        guard glyph > 0, CGFloat(block.count) <= CGFloat(glyph) * 2.6 else { return nil }
+
+        var out: [[ClosedRange<CGFloat>]] = []
+        for band in rows {
+            let bandTop = Swift.max(0, Int((band.lowerBound * height).rounded()))
+            let bandBottom = Swift.min(mask.height - 1, Int((band.upperBound * height).rounded()))
+            guard bandTop <= bandBottom else { out.append([]); continue }
+            let rowProfile = mask.columnProfile(rows: bandTop...bandBottom, columns: block)
+            var cells: [ClosedRange<CGFloat>] = []
+            for run in InkMask.runs(rowProfile, above: 0.5) {
+                let lower = CGFloat(run.lowerBound + block.lowerBound) / width
+                let upper = CGFloat(run.upperBound + block.lowerBound + 1) / width
+                cells.append(lower...upper)
+            }
+            out.append(cells)
+        }
+        return TrailingGlyphs(rows: out)
+    }
+
     private static func median(_ values: [Double]) -> Double {
         guard !values.isEmpty else { return 0 }
         return values.sorted()[values.count / 2]
