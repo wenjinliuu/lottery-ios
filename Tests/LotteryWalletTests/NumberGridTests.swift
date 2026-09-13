@@ -289,8 +289,12 @@ final class NumberGridTests: XCTestCase {
         XCTAssertEqual(grid.columns.count, 7)
         XCTAssertGreaterThan(grid.columns[0].lowerBound * CGFloat(width), 100,
                              "注序号那一列应该裁掉了")
-        XCTAssertGreaterThan(grid.columns[6].lowerBound * CGFloat(width), 560,
-                             "末列应该是特别号那一列")
+        // 末列是个**大格**：左边界落在第 6 位和特别号的正中间，
+        // 既碰不到第 6 位（它到 520 为止），又把两位数的十位（约 600）整个圈进来
+        XCTAssertEqual(grid.columns[6].lowerBound * CGFloat(width), 570, accuracy: 4,
+                       "末列左边界在第 6 位和特别号的正中间")
+        XCTAssertGreaterThan(grid.columns[6].upperBound * CGFloat(width), 641,
+                             "右边再让半个列距，认出什么都算特别号的")
     }
 
     /// **福彩 3D 真机上"候选行 0 条"的那一步。**
@@ -426,13 +430,15 @@ final class NumberGridTests: XCTestCase {
         XCTAssertFalse(qxc.separated)
         XCTAssertTrue(qxc.singleDigit, "前六位都是 0–9，配准失败还能退回老路")
 
-        let dlt = DigitTicketLayout.of(.dlt)
-        XCTAssertEqual(dlt?.columns, 7)
-        XCTAssertEqual(dlt?.pitches, [1, 1, 1, 1, 2.34, 1])
-        XCTAssertEqual(dlt?.maximums, [35, 35, 35, 35, 35, 12, 12])
-        XCTAssertEqual(dlt?.trailingPitch, 1, "末列是后区组内的，和前一位等距")
-        XCTAssertEqual(dlt?.separated, true)
-        XCTAssertEqual(dlt?.singleDigit, false, "印的是两位数，不能退回按一格一位写的老路")
+        let dlt = DigitTicketLayout(groups: [.init(count: 5, maximum: 35, gap: 0),
+                                             .init(count: 2, maximum: 12, gap: 2.34)],
+                                    separated: true)
+        XCTAssertEqual(dlt.columns, 7)
+        XCTAssertEqual(dlt.pitches, [1, 1, 1, 1, 2.34, 1])
+        XCTAssertEqual(dlt.maximums, [35, 35, 35, 35, 35, 12, 12])
+        XCTAssertEqual(dlt.trailingPitch, 1, "末列是后区组内的，和前一位等距")
+        XCTAssertTrue(dlt.separated)
+        XCTAssertFalse(dlt.singleDigit, "印的是两位数，不能退回按一格一位写的老路")
     }
 
     /// 挑法枚举：组内连续，组与组之间可以跳过几段（那就是分隔符）。
@@ -479,8 +485,13 @@ final class NumberGridTests: XCTestCase {
     ///
     /// 现在把 `digitCenters` **整个清空**——三种版式照样挑对。
     func testGeometryAlonePicksTheMatrix() {
-        // 大乐透 26102：从真机调试图里抠出来的配准后列位（1000px 宽）
-        let dlt = DigitTicketLayout.of(.dlt)!
+        // 大乐透 26102：从真机调试图里抠出来的配准后列位（1000px 宽）。
+        // 大乐透本身已经退回文本路（`DigitTicketLayout.of(.dlt)` 是 nil），
+        // 但这组实测值是**分组挑列**最硬的一个用例 —— 号码矩阵中间夹着
+        // 一段不是号码的墨（`+`），留着当回归。
+        let dlt = DigitTicketLayout(groups: [.init(count: 5, maximum: 35, gap: 0),
+                                             .init(count: 2, maximum: 12, gap: 2.34)],
+                                    separated: true)
         let measured: [ClosedRange<Int>] = [11...58, 88...156, 204...268, 312...380,
                                             423...480, 535...601, 684...709,
                                             794...861, 906...973]

@@ -493,16 +493,14 @@ final class UnknownDigitPlumbingTests: XCTestCase {
         XCTAssertEqual(DigitTicketLayout.of(.fc3d)?.columns, 3)
         XCTAssertEqual(DigitTicketLayout.of(.pl5)?.columns, 5)
         XCTAssertEqual(DigitTicketLayout.of(.qxc)?.columns, 7)
-        // 大乐透也是矩阵排版（阶段 4）：前区 5 + 后区 2，中间印一个 `+`
-        XCTAssertEqual(DigitTicketLayout.of(.dlt)?.columns, 7)
-
-        // 七乐彩、快乐8 印的是一长排两位数，Vision 横着读得好好的，
-        // 不该按矩阵去拆。
+        // 两位数的那四种**都不走矩阵路**，界线是「号码自不自带校验」：
+        // 它们的一注号码必须升序、不重复、落在值域内，号码集合本身就是校验和，
+        // 解析器一卡就能发现读错；而上面那四种数字型是 0–9 任意数字、
+        // 可重复、无顺序，读错了没有任何办法发现，格子是唯一的护栏。
         XCTAssertNil(DigitTicketLayout.of(.qlc))
         XCTAssertNil(DigitTicketLayout.of(.k8))
-        // 双色球红蓝之间隔几个列距**还没量过**。按项目约定，
-        // 没拿真票量过就不写它的版式 —— 猜出来的比值比没有更危险。
         XCTAssertNil(DigitTicketLayout.of(.ssq))
+        XCTAssertNil(DigitTicketLayout.of(.dlt))
     }
 
     /// 只有七星彩的最后一列印成两位数。

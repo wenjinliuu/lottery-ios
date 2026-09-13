@@ -616,6 +616,25 @@ struct TicketScanView: View {
                     .padding(.top, 8)
             }
 
+            costRow(value)
+        }
+        .contentCard()
+    }
+
+    /// 算出来的金额，旁边永远摆着**票面上印的那个合计**。
+    ///
+    /// 这是整张复核页最便宜也最有用的一道校验：注数是识别出来的，
+    /// 而合计是票面上白纸黑字印的。多认一注、少认一注、倍数看错，
+    /// 三样都会让这两个数对不上 —— 用户一眼就能发现，不用逐注去数。
+    /// 对得上的时候也要显示，让人知道这道校验确实跑过了。
+    ///
+    /// **金额本身不给改**（用户明确要的）：它是票面事实，不是可编辑字段。
+    /// 对不上就去改号码、改倍数，改到两个数一致为止。
+    private func costRow(_ value: ScannedTicket) -> some View {
+        let game = value.game
+        let printed = value.totalAmount
+        let matches = printed.map { abs($0 - value.totalCost) < 0.5 }
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("\(value.count) 注 × \(value.multiple) 倍\(value.periods > 1 ? " × \(value.periods) 期" : "")")
                     .font(.caption)
@@ -627,9 +646,30 @@ struct TicketScanView: View {
                     .monospacedDigit()
                     .foregroundStyle(game.accent.accentColor)
             }
-            .padding(.top, 10)
+            if let printed {
+                HStack(spacing: 6) {
+                    Image(systemName: matches == true
+                          ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                    Text(matches == true
+                         ? "票面合计 \(MoneyText.format(printed))，和上面一致"
+                         : "票面合计 \(MoneyText.format(printed))，和上面对不上 —— 多半是多认或少认了一注，请核对")
+                        .font(.caption2)
+                        .monospacedDigit()
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(matches == true ? Color.secondary : Palette.warning)
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "questionmark.circle").font(.caption2)
+                    Text("没认出票面合计金额，这张票少了一道校验，请逐注核对")
+                        .font(.caption2)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.tertiary)
+            }
         }
-        .contentCard()
+        .padding(.top, 10)
     }
 
     /// 号码。**每一颗球都可以点** —— 点开就是录入页那套选号盘，
@@ -639,29 +679,48 @@ struct TicketScanView: View {
             switch ticket.play {
             case .single:
                 ForEach(Array(ticket.lines.enumerated()), id: \.offset) { index, numbers in
-                    Button {
-                        zoneEditorTarget = ZoneEditorTarget(ticketID: ticket.id, lineIndex: index)
-                    } label: {
-                        HStack(alignment: .top, spacing: 8) {
-                            // 序号，和票面一致。玩法一般标在这张票的头部，
-                            // 3D 那种逐注印玩法的票则每一注各标各的。
-                            Text("\(index + 1).")
-                                .font(.caption.weight(.bold))
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                                .frame(width: 24, alignment: .leading)
-                                .padding(.top, 3)
-                            lineModeBadge(ticket, index: index)
-                            TicketNumbersSnapshotView(game: ticket.game, numbers: numbers.values, size: 26)
-                            Spacer(minLength: 0)
-                            Image(systemName: "square.and.pencil")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                                .padding(.top, 4)
+                    HStack(alignment: .top, spacing: 8) {
+                        Button {
+                            zoneEditorTarget = ZoneEditorTarget(ticketID: ticket.id,
+                                                                lineIndex: index)
+                        } label: {
+                            HStack(alignment: .top, spacing: 8) {
+                                // 序号，和票面一致。玩法一般标在这张票的头部，
+                                // 3D 那种逐注印玩法的票则每一注各标各的。
+                                Text("\(index + 1).")
+                                    .font(.caption.weight(.bold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 24, alignment: .leading)
+                                    .padding(.top, 3)
+                                lineModeBadge(ticket, index: index)
+                                TicketNumbersSnapshotView(game: ticket.game,
+                                                          numbers: numbers.values, size: 26)
+                                Spacer(minLength: 0)
+                                Image(systemName: "square.and.pencil")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.top, 4)
+                            }
+                            .contentShape(Rectangle())
                         }
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+
+                        // **多认出一注也得能删掉。** 折痕、票底的流水号、
+                        // 合计那一行都可能被当成一注；以前只能整张票删了重扫，
+                        // 而重扫大概率还是多认出来。和「补一注」是一对。
+                        Button {
+                            removeLine(from: ticket.id, at: index)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("删掉第 \(index + 1) 注")
                     }
-                    .buttonStyle(.plain)
                 }
             case .system, .dantuo:
                 ForEach(zoneRows(ticket), id: \.label) { row in
@@ -699,6 +758,23 @@ struct TicketScanView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(ticket.game.accent.accentColor)
                 }
+            }
+        }
+    }
+
+    /// 删掉多认出来的那一注。
+    ///
+    /// 号码路偶尔会把票底的流水号、合计那一行当成一注收进来。
+    /// 票面金额那一行现在就摆在卡片下面（见 `costRow`），
+    /// 多一注就会对不上，用户照着删一注就好。
+    private func removeLine(from id: ScannedTicket.ID, at index: Int) {
+        guard let ticket = tickets.firstIndex(where: { $0.id == id }),
+              tickets[ticket].lines.indices.contains(index) else { return }
+        withAnimation(.easeOut(duration: 0.18)) {
+            tickets[ticket].lines.remove(at: index)
+            // 逐注玩法和号码一一对应，删了号码就得跟着删，否则整列错位
+            if tickets[ticket].lineModes.indices.contains(index) {
+                tickets[ticket].lineModes.remove(at: index)
             }
         }
     }

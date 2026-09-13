@@ -316,19 +316,35 @@ struct NumberGrid: Equatable {
         return low...high
     }
 
-    /// 末列再往左让出一个字宽 —— **哪怕墨迹里根本没切出十位来**。
+    /// 末列不划成一个"刚好框住墨迹"的格子，而是划成**一个大格**：
+    /// 从它和前一位的正中间，一直到号码区右边。
     ///
-    /// 并集只在"十位那一笔进了墨迹图"时才管用。`13` 的十位是一竖，
-    /// 又细又淡，配准+缩放之后很可能整笔掉出二值化；而 Vision 在原图上
-    /// 照样认得出它。这时候并集没变宽，Vision 认出来的 `1` 落在列外面，
-    /// 又被丢了 —— 和修之前一模一样。
+    /// 七星彩的特别号是这条路上最后一个硬骨头。前后试过三种收窄的办法 ——
+    /// 取并集、按字宽往左让、单格补认 —— 真机上五注里始终有三注读不出来。
+    /// 根子在于：**把格子划得刚刚好，等于要求 OCR 也刚刚好**。
+    /// `13` 的十位是一竖，又细又淡，配准+缩放之后经常整笔掉出二值化，
+    /// 墨迹划出来的格子就只框住个位；而 Vision 在灰度图上照样看得见那一竖，
+    /// 认出来的 `1` 落在格子外面，又被丢掉。
     ///
-    /// 所以这一列的宽度不能只靠墨迹说了算，按版式硬让出一个字宽：
-    /// 特别号离前一位 1.58 个列距（实测 103px，字宽 21px），
-    /// 中间空着 80 多像素，让出 25px 碰不到邻居。
-    static func wideningTail(_ range: ClosedRange<Int>, by width: Double) -> ClosedRange<Int> {
-        let low = Swift.max(0, range.lowerBound - Int((width * 1.2).rounded()))
-        return low...range.upperBound
+    /// 大格的思路（用户提的）是反过来：**特别号右边什么都没有**，
+    /// 那就把右边整片都算给它，认出什么就拼什么。这一片里不可能有别的号码 ——
+    /// 左边界取和前一位的正中间，实测那里离前一位 2.35 个字宽、
+    /// 离十位还有 0.68 个字宽的余量，两头都碰不着。
+    ///
+    /// 这不违反硬约束一：大格照样是票面上一块说得清的像素区域，
+    /// 调试图上画出来就是那个框。说不清的是"这个数字到底属于哪一位"，
+    /// 而这一组本来就只有一位。
+    static func catchAllTail(_ ranges: [ClosedRange<Int>],
+                             within span: ClosedRange<Int>) -> ClosedRange<Int>? {
+        guard ranges.count >= 2, let tail = ranges.last else { return nil }
+        let previous = ranges[ranges.count - 2]
+        let centers = ranges.map { Double($0.lowerBound + $0.upperBound) / 2 }
+        let pitch = median(zip(centers, centers.dropFirst()).map { $1 - $0 })
+        guard pitch > 0, tail.lowerBound > previous.upperBound else { return nil }
+        let low = (previous.upperBound + tail.lowerBound) / 2
+        let high = Swift.min(span.upperBound, tail.upperBound + Int((pitch / 2).rounded()))
+        guard high > low else { return nil }
+        return low...high
     }
 
     /// 缺的那一列按版式**算**出来，不去找。
@@ -430,24 +446,26 @@ struct NumberGrid: Equatable {
         if ranges.count > layout.columns {
             guard let kept = select(ranges, layout: layout, digitCenters: digitCenters),
                   let last = kept.last else { return nil }
-            // 末列印两位数时要取并集（见 `unionRange`）。挑完才知道哪一列是
+            // 末列印两位数时先取并集（见 `unionRange`）。挑完才知道哪一列是
             // 真正的末列 —— 倍数列在它右边，不挑掉的话会 union 错人。
             //
             // 只有「最后一组就一个号码」时才做：七星彩的特别号是右对齐印的，
             // 一位数两位数混着来。大乐透后区两个号码都是两位，列宽本来就够。
             if layout.trailingMaximum > 9, layout.groups.last?.count == 1 {
-                let glyph = median(kept.map {
-                    Double(ranges[$0].upperBound - ranges[$0].lowerBound + 1)
-                })
-                let base = unionRange(consensus, at: last) ?? ranges[last]
-                ranges[last] = wideningTail(base, by: glyph)
+                ranges[last] = unionRange(consensus, at: last) ?? ranges[last]
             }
             ranges = kept.map { ranges[$0] }
         } else if layout.trailingMaximum > 9, layout.groups.last?.count == 1,
                   ranges.count == layout.columns {
-            let glyph = median(ranges.map { Double($0.upperBound - $0.lowerBound + 1) })
-            let base = unionRange(consensus, at: ranges.count - 1) ?? ranges[ranges.count - 1]
-            ranges[ranges.count - 1] = wideningTail(base, by: glyph)
+            let last = ranges.count - 1
+            ranges[last] = unionRange(consensus, at: last) ?? ranges[last]
+        }
+
+        // 再把末列摊成一个大格（见 `catchAllTail`）。并集只在"十位那一笔
+        // 进了墨迹图"时才管用，而那一笔经常整笔掉出二值化 —— 大格不靠墨迹。
+        if layout.trailingMaximum > 9, layout.groups.last?.count == 1,
+           ranges.count == layout.columns, let wide = catchAllTail(ranges, within: span) {
+            ranges[ranges.count - 1] = wide
         }
 
         if ranges.count == layout.columns - 1 {

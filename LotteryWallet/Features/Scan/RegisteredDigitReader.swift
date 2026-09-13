@@ -219,7 +219,11 @@ enum RegisteredDigitReader {
         guard let cgImage = zone.cgImage else { return nil }
         let width = CGFloat(cgImage.width)
         let height = CGFloat(cgImage.height)
-        let padX = rect.width * 0.8
+        // 左右留白：Vision 贴着字边裁经常什么都不给，所以要让一点。
+        // 但**格子本身很宽时不能按宽度让** —— 七星彩的末列现在是个大格
+        // （见 `NumberGrid.catchAllTail`），按 0.8 倍宽让出去会一直让到
+        // 前一个号码上，邻居跟着进来。按字高让就和格子宽度无关了。
+        let padX = Swift.min(rect.width * 0.8, rect.height * 0.6)
         let padY = rect.height * 0.3
         let cropLeft = Swift.max(rect.minX - padX, 0)
         let cropRight = Swift.min(rect.maxX + padX, 1)
