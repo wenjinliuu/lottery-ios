@@ -328,6 +328,26 @@ enum TicketVisionScanner {
     /// 十有八九是竖着读出来的，留着只会让解析器多读出几注不存在的号码。
     /// 区间外的行（彩种名、期号、玩法、合计）原样保留，它们是横排文本，
     /// Vision 读得好好的。
+    ///
+    /// **判据是「过半」，不是「沾一点」。** 上一版只要纵向沾上一点点就整行丢，
+    /// 而七星彩的 `单式票　1倍　合计10元` 就印在第一注**正上方 11px**
+    /// （票面缩到 1000 宽量的，行高 35）。矩阵的纵向范围是把格子整行
+    /// 配准回票面后取四角的 y 上下界，票面有一点倾角就会被撑开
+    /// （实测 −0.21° 撑开 3px、+0.40° 撑开 6px），再加上 Vision 文字框
+    /// 本身的上下留白，11px 的空隙**必然**被吃掉 —— 于是那一整行没了。
+    ///
+    /// 丢的不只是金额。倍数和票种也印在同一行上，而它们读不到时全是默认值
+    /// （`?? 1` 倍、`.single` 单式）：一张 2 倍的票会安安静静显示 1 倍，
+    /// 唯一能发现这件事的金额校验恰好也在同一行、一起没了。
+    /// 这正是「认错了还看起来对」。
+    ///
+    /// 换成过半之后余量极大：合计那一行落进号码块的比例是 **0–6%**，
+    /// 第一注是 **100%**。顺带也堵住另一头 —— 注数打满时号码块往下长，
+    /// 下面那行「理性购买彩票」同样只有过半才会被丢。
+    ///
+    /// 按横向切是**不行**的（想过，量完作废）：号码块横跨 x 140–856，
+    /// 而那一行的三簇是 `单式票` 86–200、`1倍` 445–497、`合计10元` 758–909
+    /// —— 倍数整个在里面，合计也有大半在里面，切完三样全废。
     private static func compose(rows: [[TextFragment]],
                                 originals: [String],
                                 matrix: DigitMatrix) -> String {
@@ -335,9 +355,7 @@ enum TicketVisionScanner {
         var inserted = false
         for (index, row) in rows.enumerated() {
             let band = LayoutSegmenter.band(row)
-            let overlaps = band.lowerBound <= matrix.span.upperBound
-                && band.upperBound >= matrix.span.lowerBound
-            guard overlaps else {
+            guard isNumberRow(band, in: matrix.span) else {
                 result.append(originals[index])
                 continue
             }
@@ -349,6 +367,22 @@ enum TicketVisionScanner {
             result.append(contentsOf: matrix.rows.map { line(for: $0, rows: rows) })
         }
         return result.joined(separator: "\n")
+    }
+
+    /// 这一行是不是号码行：它自己**过半**落在矩阵那一段里才算。
+    ///
+    /// 用行**自己的高度**当分母，不是用矩阵那一段当分母 —— 矩阵横跨好几行，
+    /// 拿它当分母的话每一行的占比都很小，判据就永远不成立了。
+    static func isNumberRow(_ band: ClosedRange<CGFloat>,
+                            in span: ClosedRange<CGFloat>) -> Bool {
+        let height = band.upperBound - band.lowerBound
+        // 高度为 0 的行（Vision 偶尔给出退化的框）退回沾一点就算
+        guard height > 0 else {
+            return band.lowerBound <= span.upperBound && band.upperBound >= span.lowerBound
+        }
+        let low = Swift.max(band.lowerBound, span.lowerBound)
+        let high = Swift.min(band.upperBound, span.upperBound)
+        return (high - low) > height / 2
     }
 
     /// 一注拼成一行文本，前面带上票面印的玩法标签。
@@ -529,17 +563,31 @@ enum TicketVisionScanner {
     /// 跑两遍：原图一遍、**加了对比度**的一遍，按位置取并集。
     /// 热敏票印在银灰纸上，票面反光、纸还是弯的，原图上有些笔画淡到模型看不见；
     /// 拉一把对比度就出来了。反过来对比度拉过头又会糊掉另一些，所以两遍都要。
-    static func allDigits(in image: UIImage) async -> [DigitChar] {
+    /// 两遍识别在**同一个位置**给出不同数字的次数。
+    ///
+    /// 合并两遍结果时是「第一遍赢，第二遍在同一位置的直接丢」——
+    /// 原图那遍读 `8`、加对比度那遍读 `3`，落在同一个框里，`3` 被无声丢弃。
+    /// 双色球那几个彩种有升序/不重复/值域兜着，而排列3/5、七星彩、福彩3D
+    /// **任何数字都合法**，什么都兜不住：这是最后一块"认错了还看起来对"。
+    ///
+    /// 这一版**只数不改**。先看真机上到底多久打一次架 ——
+    /// 如果基本不打，把打架的格子标成问号就是白送的；如果常打，
+    /// 问号会变多，那是另一笔账，得有数据再决定。
+    static func allDigits(in image: UIImage) async -> (chars: [DigitChar], conflicts: Int) {
         var kept: [DigitChar] = []
+        var conflicts = 0
         var sources = [image]
         if let boosted = contrastBoosted(image) { sources.append(boosted) }
         for source in sources {
             for char in await recognizeDigits(in: source) {
-                guard !kept.contains(where: { $0.box.intersects(char.box) }) else { continue }
+                if let seen = kept.first(where: { $0.box.intersects(char.box) }) {
+                    if seen.value != char.value { conflicts += 1 }
+                    continue
+                }
                 kept.append(char)
             }
         }
-        return kept
+        return (kept, conflicts)
     }
 
     /// 裁条里认出来的一小块数字。

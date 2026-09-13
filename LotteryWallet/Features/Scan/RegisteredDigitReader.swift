@@ -59,7 +59,9 @@ enum RegisteredDigitReader {
         //    否则是整段压在中文标签上了。注意只是否决 —— 注序号列靠它
         //    分不出来（`.fast` 会把 `①` 读成 `0`），那件事交给 `window` 的几何判据
         // 2. 划完之后按位置落进各自的格子
-        let chars = await TicketVisionScanner.allDigits(in: zone)
+        let pass = await TicketVisionScanner.allDigits(in: zone)
+        let chars = pass.chars
+        var conflicts = pass.conflicts
         let centers = chars.map { Double($0.box.midX) * Double(mask.width) }
         guard let grid = NumberGrid.build(mask: mask, within: span,
                                           layout: layout, digitCenters: centers) else {
@@ -124,9 +126,10 @@ enum RegisteredDigitReader {
                       maximums.indices.contains(column) else { continue }
                 blanks += 1
                 guard filled < budget, blanks <= budget else { continue }
-                values[row][column] = await reread(zone: zone, rect: rect,
-                                                   maximum: maximums[column])
-                if values[row][column] != nil { filled += 1 }
+                let outcome = await reread(zone: zone, rect: rect, maximum: maximums[column])
+                conflicts += outcome.conflicts
+                values[row][column] = outcome.value
+                if outcome.value != nil { filled += 1 }
             }
         }
 
@@ -153,6 +156,7 @@ enum RegisteredDigitReader {
                 let outcome = await readTrailing(zone: zone, grid: grid, tail: tail,
                                                  maximum: trailing.maximum)
                 tailValues = outcome.values
+                conflicts += outcome.conflicts
                 let read = outcome.values.compactMap { $0 }.count
                 tailNote = "，特别号读出 \(read)/\(grid.rows.count)"
                 tailNote += "（每注 \(tail.shape) 位，读出「\(outcome.raw)」"
@@ -182,6 +186,9 @@ enum RegisteredDigitReader {
         var note = "号码按配准后的格子读：\(rows.count) 注 × \(digits) 位，"
         note += "\(total) 格里认出 \(known) 格"
         note += "（整块认一遍剩 \(blanks) 格空的，补认补上 \(filled) 格\(tailNote)）"
+        // 两遍识别在同一位置给出不同答案的次数。**这一版只数不改** ——
+        // 先看真机上到底多久打一次架，再决定要不要把打架的格子标成问号。
+        if conflicts > 0 { note += "；两遍识别有 \(conflicts) 处不一致（这一版只统计，不改结果）" }
         return Outcome(
             reading: Reading(matrix: .init(rows: rows, span: low...high),
                              grid: grid, trailing: tailColumns),
@@ -231,9 +238,10 @@ enum RegisteredDigitReader {
     static func readTrailing(zone: UIImage,
                              grid: NumberGrid,
                              tail: NumberGrid.TrailingColumns,
-                             maximum: Int) async -> (values: [Int?], raw: String) {
+                             maximum: Int) async -> (values: [Int?], raw: String, conflicts: Int) {
         var values = [Int?](repeating: nil, count: grid.rows.count)
         var raws: [String] = []
+        var clashes = 0
         for row in grid.rows.indices {
             guard tail.hasUnits.indices.contains(row), tail.hasUnits[row] else {
                 raws.append("没墨")
@@ -250,7 +258,9 @@ enum RegisteredDigitReader {
             if tens == 10, let tensColumn = tail.tens {
                 stop = (tensColumn.upperBound + tail.units.lowerBound) / 2
             }
-            let read = await digits(in: zone, rect: rect, notLeftOf: stop)
+            let outcome = await digits(in: zone, rect: rect, notLeftOf: stop)
+            let read = outcome.values
+            clashes += outcome.conflicts
             let prefix = tens == 10 ? "1" : ""
             raws.append(read.isEmpty ? prefix + "?" : prefix + read.map(String.init).joined())
             guard read.count == 1, let digit = read.first else { continue }
@@ -258,7 +268,7 @@ enum RegisteredDigitReader {
             guard value <= maximum else { continue }
             values[row] = value
         }
-        return (values, raws.joined(separator: "/"))
+        return (values, raws.joined(separator: "/"), clashes)
     }
 
     // MARK: - 补认
@@ -267,11 +277,12 @@ enum RegisteredDigitReader {
     /// 把一格单独裁出来再认一遍 —— 只给整块那一遍**漏掉的**格子用。
     ///
     /// 超上限说明认错了，报问号，不拿其中一位顶上。
-    static func reread(zone: UIImage, rect: CGRect, maximum: Int) async -> Int? {
+    static func reread(zone: UIImage, rect: CGRect,
+                       maximum: Int) async -> (value: Int?, conflicts: Int) {
         let found = await digits(in: zone, rect: rect)
-        guard (1...2).contains(found.count) else { return nil }
-        let value = found.reduce(0) { $0 * 10 + $1 }
-        return value <= maximum ? value : nil
+        guard (1...2).contains(found.values.count) else { return (nil, found.conflicts) }
+        let value = found.values.reduce(0) { $0 * 10 + $1 }
+        return (value <= maximum ? value : nil, found.conflicts)
     }
 
     /// 裁一块出来认，返回**认出的数字本身**（从左到右），不做任何取舍。
@@ -285,8 +296,8 @@ enum RegisteredDigitReader {
     /// `notLeftOf` 是裁图左沿的下限（标准矩形里的 0–1，0 = 不限）。
     /// 旁边紧挨着另一个字形时用它挡住，别把半个邻居裁进来。
     static func digits(in zone: UIImage, rect: CGRect,
-                       notLeftOf stop: CGFloat = 0) async -> [Int] {
-        guard let cgImage = zone.cgImage else { return [] }
+                       notLeftOf stop: CGFloat = 0) async -> (values: [Int], conflicts: Int) {
+        guard let cgImage = zone.cgImage else { return ([], 0) }
         let width = CGFloat(cgImage.width)
         let height = CGFloat(cgImage.height)
         // 左右留白按**字高**让，不按格宽 —— 特别号那一块是条宽带，
@@ -301,7 +312,7 @@ enum RegisteredDigitReader {
                          width: (cropRight - cropLeft) * width, height: bottom - top)
             .intersection(CGRect(x: 0, y: 0, width: width, height: height))
         guard box.width > 6, box.height > 6, cropRight > cropLeft,
-              let cropped = cgImage.cropping(to: box) else { return [] }
+              let cropped = cgImage.cropping(to: box) else { return ([], 0) }
         // 格子本身在这张裁图里占的横向范围（0–1）。两边各松 5%，
         // 让贴着格边的笔画还算数。
         let span = cropRight - cropLeft
@@ -310,17 +321,24 @@ enum RegisteredDigitReader {
         let slice = UIImage(cgImage: cropped, scale: 1, orientation: .up)
 
         var picked: [(x: CGFloat, value: Int)] = []
+        // 两遍在同一位置给出不同数字的次数。只数不改 —— 见
+        // `TicketVisionScanner.allDigits` 上那段说明。
+        var conflicts = 0
         for boosted in [false, true] {
             let source = boosted ? (TicketVisionScanner.contrastBoosted(slice) ?? slice) : slice
             guard let big = TicketVisionScanner.upscaled(source, factor: 12) else { continue }
             let chars = await TicketVisionScanner.recognizeDigits(in: big, fast: true)
                 .filter { (0.15...0.85).contains($0.box.midY) }
                 .filter { cellLow <= $0.box.midX && $0.box.midX <= cellHigh }
-            for char in chars where !picked.contains(where: { abs($0.x - char.box.midX) < 0.05 }) {
+            for char in chars {
+                if let seen = picked.first(where: { abs($0.x - char.box.midX) < 0.05 }) {
+                    if seen.value != char.value { conflicts += 1 }
+                    continue
+                }
                 picked.append((char.box.midX, char.value))
             }
         }
-        return picked.sorted { $0.x < $1.x }.map(\.value)
+        return (picked.sorted { $0.x < $1.x }.map(\.value), conflicts)
     }
 
     // MARK: - 换算回票面

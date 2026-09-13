@@ -349,9 +349,11 @@ enum TicketTextParser {
         "^\\s*(?:(?:[A-Ea-e]\\s*[.。·:、)]|[①-⑮⒈-⒛]|[(（]\\s*\\d{1,2}\\s*[)）]|\\d{1,2}\\s*[.。、)])\\s*){1,2}"
 
     /// `A.04 08 14 24 26 29-03 (3)` / `① 12 15 17 24 33 + 04 12` 这种一行一注的单式行。
-    private static func singleLine(_ line: String, game: GameKey) -> (numbers: NumberSet, multiple: Int?)? {
-        // 行尾括号里的倍数和行首的注序号都不是号码，先摘掉
-        let multiple = lineMultiple(line)
+    /// 摘掉行首的注序号/玩法标签和行尾的倍数括号，剩下的才是号码本身。
+    ///
+    /// 抽出来是为了让「这一行读成了一注」和「这一行看着像一注但没读成」
+    /// 用的是**同一套**摘除规则 —— 两边不一致的话，警告就会报在不该报的行上。
+    static func betBody(_ line: String) -> String? {
         // 行尾那个倍数括号 OCR 经常只认出半边 —— 真实结果里有
         // `... 63 72 1 )`（丢了左括号）和 `... 23 25(1`（丢了右括号）。
         // 括号必须写成可选，否则那个残缺的 `1` 会被当成一个号码，
@@ -370,6 +372,21 @@ enum TicketTextParser {
                                          with: "", options: .regularExpression)
         // 空注：`D.-- -- -- -- -- ----  (-)`
         guard body.contains(where: { $0.isNumber }) else { return nil }
+        return body
+    }
+
+    private static func singleLine(_ line: String, game: GameKey) -> (numbers: NumberSet, multiple: Int?)? {
+        // 行尾括号里的倍数和行首的注序号都不是号码，先摘掉
+        let multiple = lineMultiple(line)
+        // 行尾那个倍数括号 OCR 经常只认出半边 —— 真实结果里有
+        // `... 63 72 1 )`（丢了左括号）和 `... 23 25(1`（丢了右括号）。
+        // 括号必须写成可选，否则那个残缺的 `1` 会被当成一个号码，
+        // 号码个数多出一个，整注就被判掉了 —— 用户看到的是「少了一注」。
+        //
+        // **至少要有一边括号在**。两边都写成可选的话，
+        // `A.11 13 14 27 31 33-04` 结尾的 `-04` 会被当成倍数削掉 ——
+        // 每一张双色球单式票都要少一个蓝球。
+        guard let body = betBody(line) else { return nil }
 
         let sections = game.sections
         if sections.count == 1 {
@@ -429,12 +446,46 @@ enum TicketTextParser {
         first = trimStray(first, to: firstSection)
         second = trimStray(second, to: secondSection)
 
-        guard first.count == firstSection.count, second.count == secondSection.count,
-              first.allSatisfy(firstSection.range.contains),
-              second.allSatisfy(secondSection.range.contains),
-              isAscendingUnique(first), isAscendingUnique(second) else { return nil }
+        guard let filledFirst = fill(first, to: firstSection),
+              let filledSecond = fill(second, to: secondSection) else { return nil }
 
-        return (NumberSet([firstSection.key: first, secondSection.key: second]), multiple)
+        return (NumberSet([firstSection.key: filledFirst, secondSection.key: filledSecond]), multiple)
+    }
+
+    /// 这一行看着像一注号码，却没能读成一注。
+    ///
+    /// 只在 `singleLine` 已经返回 nil 之后问。用来把**静默丢弃**变成
+    /// 看得见的一句话 —— 上一版这种行一声不吭地消失，用户手里三注的票
+    /// 变成两注，而且看不出少在哪儿。
+    ///
+    /// 判据必须紧：得是**纯号码行**（除了数字什么都没有），而且读出来的号码
+    /// 已经够一注还有多。少认的那一类不走这儿 —— 它在 `fill` 里补成问号了。
+    static func looksLikeOverfullBet(_ line: String, game: GameKey) -> Bool {
+        guard let body = betBody(line) else { return false }
+        let sections = game.sections
+        // 数字型彩种（排列3/5、七星彩、3D）不走这儿：它们任何数字都合法，
+        // 「多出来」这个概念对它们不成立，位置由格子路负责。
+        guard sections.count >= 1, !sections.contains(where: { $0.range.lowerBound == 0 })
+        else { return false }
+
+        // 分隔符最多一个 —— 双色球的 `-`、大乐透的 `+` 各只有一个。
+        // 这一条是用来把**机号行**挡在外面的：`110310-251461-120958-368897`
+        // 去掉分隔符之后同样是"一排数字"，按两位拆开还有好几个落在红球值域里，
+        // 不挡的话每张票都会冒出一条假警告。
+        let parts = body.split(whereSeparator: { "-+*".contains($0) })
+        guard parts.count <= 2 else { return false }
+        let cleaned = parts.joined(separator: " ")
+        guard isBareNumberLine(cleaned) else { return false }
+
+        var want = 0
+        var upper = 1
+        for section in sections {
+            want += section.count
+            upper = Swift.max(upper, section.range.upperBound)
+        }
+        let count = numbers(in: cleaned, range: 1...upper).count
+        // 多得太离谱就不是"多认了一个号"，是这一行根本不是号码行
+        return count > want && count <= want + 4
     }
 
     /// 给测试用的入口。`singleLine` 本身是私有的，但"哪些行会被当成一注"
@@ -470,10 +521,15 @@ enum TicketTextParser {
         // 七乐彩固定 7 个；快乐8 的个数由玩法决定，这里先不卡死 ——
         // 调用方拿到玩法之后会再校一次，卡死了「选八」这种票一注都读不出来。
         let trimmed = trimStray(values, to: section)
-        guard isAscendingUnique(trimmed), trimmed.allSatisfy(section.range.contains) else { return nil }
-        let acceptable = game == .k8 ? (1...10).contains(trimmed.count) : trimmed.count == section.count
-        guard acceptable else { return nil }
-        return (NumberSet([section.key: trimmed]), multiple)
+        // 快乐8 一注选几个由玩法说了算（选一到选十），这里卡死的话
+        // 一张「选八」的票一注都读不出来 —— 调用方拿到玩法之后会再校一次。
+        if game == .k8 {
+            guard isAscendingUnique(trimmed), trimmed.allSatisfy(section.range.contains),
+                  (1...10).contains(trimmed.count) else { return nil }
+            return (NumberSet([section.key: trimmed]), multiple)
+        }
+        guard let filled = fill(trimmed, to: section) else { return nil }
+        return (NumberSet([section.key: filled]), multiple)
     }
 
     /// 七星彩：前六位各 0-9，第七位 0-14，整行一次读完再按位置分。
@@ -500,6 +556,34 @@ enum TicketTextParser {
         let tail = Array(all.suffix(second.count))
         guard head.allSatisfy(first.range.contains), tail.allSatisfy(second.range.contains) else { return nil }
         return (NumberSet([first.key: head, second.key: tail]), multiple)
+    }
+
+    /// 一个号码区读出来的这些号，能不能成一注。
+    ///
+    /// - 个数**刚好** → 照常校验（升序、不重复、在值域里）。
+    /// - 个数**少了** → 差几个补几个问号，而不是把整注丢掉。
+    /// - 个数**多了** → 返回 nil。`trimStray` 已经试过去重、掉头、掉尾，
+    ///   到这儿还多就**说不出是哪一个多余的**，补问号等于在编号码。
+    ///
+    /// 为什么"少了"可以补：红球、前区这些是**无序集合**，位置本身没有意义，
+    /// 所以"差一个"这件事说得完整 —— 用户看到 5 颗球 + 1 颗问号球，
+    /// 点一下就补上。这和格子路那边「第几位是问号」是同一件事的两种形态，
+    /// 而且两边共用同一套问号设施（`BallView` / `NumberPadSection` /
+    /// `hasUnknown` 导入闸门）。
+    ///
+    /// 上一版这里是「个数对不上就 `return nil`」，那一注**一声不吭地消失**：
+    /// 用户手里三注的票变成两注，而且看不出少在哪儿。
+    private static func fill(_ values: [Int], to section: GameSection) -> [Int]? {
+        guard values.allSatisfy(section.range.contains), isAscendingUnique(values) else { return nil }
+        if values.count == section.count { return values }
+        guard values.count < section.count else { return nil }
+        // 一个都没读出来、或者读出来还不到一半，那多半根本不是号码行，
+        // 补一排问号只会凭空多出一注（硬约束二：宁可少认，不可错认）。
+        guard !values.isEmpty, values.count * 2 >= section.count else { return nil }
+        var out = values
+        out.append(contentsOf: [Int](repeating: NumberSet.unknown,
+                                     count: section.count - values.count))
+        return out
     }
 
     /// 号码多出来时试着救一把：**先去重，再去头尾**。
@@ -620,6 +704,8 @@ enum TicketTextParser {
         var selections: [SectionKey: SectionSelection] = [:]
         var singleLines: [NumberSet] = []
         var lineMultiples: [Int] = []
+        /// 看着像一注、但号码个数多到救不回来的行数。
+        var overfull = 0
         /// 上一行的标签，用来接住没有标签的续行。
         var openLabel: (key: SectionKey, isDan: Bool)?
 
@@ -646,9 +732,15 @@ enum TicketTextParser {
             openLabel = nil
 
             // 没有标签的票是单式票，按一行一注读
-            if ticket.play == .single, let parsed = singleLine(line, game: game) {
-                singleLines.append(parsed.numbers)
-                if let multiple = parsed.multiple { lineMultiples.append(multiple) }
+            if ticket.play == .single {
+                if let parsed = singleLine(line, game: game) {
+                    singleLines.append(parsed.numbers)
+                    if let multiple = parsed.multiple { lineMultiples.append(multiple) }
+                } else if looksLikeOverfullBet(line, game: game) {
+                    // 读出来的号码比一注还多，而且 `trimStray` 没救回来。
+                    // 说不出哪个是多余的，只能整注丢 —— 但要让用户看见。
+                    overfull += 1
+                }
             }
         }
 
@@ -695,6 +787,10 @@ enum TicketTextParser {
         ticket.periods = extractPeriods(block)
         if ticket.hasUnknown {
             ticket.warnings.append("有 \(ticket.unknownCount) 位号码没认出来，点那颗问号球补一下")
+        }
+        if overfull > 0 {
+            ticket.warnings.append("有 \(overfull) 行号码读出来的个数比一注还多，"
+                                  + "没法确定哪个是多余的，已经丢掉 —— 请对照票面用「补一注」补回来")
         }
         return ticket.count > 0 || !selections.isEmpty ? ticket : nil
     }
@@ -897,12 +993,26 @@ enum TicketTextParser {
         return String(format: "%04d-%02d-%02d", year, month, day)
     }
 
+    /// 「合计」这两个字在热敏票上的替身。
+    ///
+    /// 真机实测：排列3 那张的识别原文是 `组选单式票 1倍 台计6元` ——
+    /// `合` 被认成 `台`（就差顶上那一横），整张票的金额校验就此没了。
+    /// 数字那边早有 `confusion` 表兜着（`O→0`、`I→1`…），汉字这边一个都没有。
+    ///
+    /// **范围严格限死在金额这一条正则里。** 前缀照旧是必须的 ——
+    /// 票底那行「感谢您为公益事业贡献 2.04元」没有这个前缀，
+    /// 不会被误当成票面合计。
+    private static let totalPrefix = "[合台亼仓共坏总怠]\\s*[计汁讣针]"
+    /// 「元」的替身。`兀` 少一横，`无` 多一横，都是实际见过的误读。
+    private static let yuanChar = "[元兀无π]"
+
     static func extractTotal(_ text: String) -> Double? {
+        let total = "(?:\(totalPrefix))\\D{0,4}(\\d{1,6})(?:\\.\\d{1,2})?\\s*\(yuanChar)"
         for line in normalize(text).split(separator: "\n").map(String.init) {
-            if let match = firstMatch(in: line, pattern: "(?:合\\s*计|共\\s*计|总\\s*计)\\D{0,4}(\\d{1,6})(?:\\.\\d{1,2})?\\s*元"),
+            if let match = firstMatch(in: line, pattern: total),
                let value = match.groups.first.flatMap(Double.init) { return value }
             // `￥:32.00元`
-            if let match = firstMatch(in: line, pattern: "[￥¥]\\s*[:：]?\\s*(\\d{1,6})(?:\\.\\d{1,2})?\\s*元?"),
+            if let match = firstMatch(in: line, pattern: "[￥¥]\\s*[:：]?\\s*(\\d{1,6})(?:\\.\\d{1,2})?\\s*\(yuanChar)?"),
                let value = match.groups.first.flatMap(Double.init) { return value }
         }
         return nil
