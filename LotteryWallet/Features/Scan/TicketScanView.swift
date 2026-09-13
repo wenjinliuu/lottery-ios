@@ -872,17 +872,59 @@ struct TicketScanView: View {
     private func optionRows(_ ticket: Binding<ScannedTicket>) -> some View {
         let game = ticket.wrappedValue.game
         VStack(spacing: 4) {
-            Stepper("倍数 \(ticket.wrappedValue.multiple)", value: ticket.multiple, in: 1...99)
-                .font(.subheadline)
+            // 玩法和「追不追加」排在最上面，两个加减号的 Stepper 挨在一起。
+            // 开关和 Stepper 交错着放，手指要在两种交互之间来回切，很别扭。
+            playModeRow(ticket)
             if game == .dlt {
                 Toggle("追加投注（3 元一注）", isOn: ticket.addOn)
                     .font(.subheadline)
+            }
+            Stepper("倍数 \(ticket.wrappedValue.multiple)", value: ticket.multiple, in: 1...99)
+                .font(.subheadline)
+            if game == .dlt {
                 Stepper("连打 \(ticket.wrappedValue.periods) 期", value: ticket.periods, in: 1...20)
                     .font(.subheadline)
             }
         }
         .padding(.top, 6)
         .tint(game.tint)
+    }
+
+    /// 玩法可以改。
+    ///
+    /// 识别出来的玩法要是错了，以前是**死路** —— 票头那个胶囊只是显示，点不动，
+    /// 用户只能整张删了重扫，而重扫大概率还是认成同一个。
+    ///
+    /// 三种彩种有得选：福彩3D / 排列3 的直选·组三·组六，快乐8 的选一…选十。
+    /// 快乐8 这一项尤其要紧 —— 玩法决定一注选几个号，也决定奖级表，
+    /// 认错了整张票的核对都是错的。
+    /// 大乐透的玩法就是「追不追加」，上面那个开关已经管了，不再重复一行。
+    /// 双色球、七乐彩、排列5、七星彩本来就只有一种玩法，没什么可选的。
+    @ViewBuilder
+    private func playModeRow(_ ticket: Binding<ScannedTicket>) -> some View {
+        let value = ticket.wrappedValue
+        let modes = value.game.playModes
+        if modes.count > 1, value.game != .dlt {
+            let current = value.playMode.isEmpty ? value.game.defaultPlayMode : value.playMode
+            HStack(spacing: 8) {
+                Text("玩法").font(.subheadline)
+                Spacer(minLength: 8)
+                Picker("玩法", selection: Binding(
+                    get: { current },
+                    set: { newValue in
+                        ticket.playMode.wrappedValue = newValue
+                        // 逐注玩法（3D 的实体票每注各印各的）和整票玩法冲突时，
+                        // 用户手动选的说了算 —— 否则改了票头、每一注还标着旧玩法。
+                        ticket.lineModes.wrappedValue = []
+                    })) {
+                    ForEach(modes) { mode in
+                        Text(mode.label).tag(mode.key)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+        }
     }
 
     private var rawTextCard: some View {

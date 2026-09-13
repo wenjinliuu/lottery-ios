@@ -502,10 +502,30 @@ enum TicketTextParser {
         return (NumberSet([first.key: head, second.key: tail]), multiple)
     }
 
-    /// 号码正好多出一个时，试着去掉头一个或最后一个，取能成立的那种。
+    /// 号码多出来时试着救一把：**先去重，再去头尾**。
+    ///
+    /// 两种多法，来源不同：
+    ///
+    /// 1. **同一个号被读了两遍** —— 真机上双色球那张：票面是
+    ///    `A.06 08 13 21 29 32`，识别原文是 `06 08 13 21 29 29 32`，
+    ///    红球变成 7 个。热敏票上相邻两位挨得近，Vision 偶尔把同一个号
+    ///    吐两次。去掉重复的那个，剩下的正好是一注合法号码。
+    ///    （旧的"去头尾"救不了它：去掉头或尾之后还剩 `29 29`，不升序。）
+    /// 2. **注序号被当成号码** —— 正则没摘干净时多出来的那个必然在最前面。
+    ///
+    /// 先去重再去头尾：去重是无损的（号码本来就不许重复），去头尾是有损的。
     private static func trimStray(_ values: [Int], to section: GameSection) -> [Int] {
-        guard values.count == section.count + 1 else { return values }
-        for candidate in [Array(values.dropFirst()), Array(values.dropLast())] {
+        guard values.count > section.count else { return values }
+        var candidates: [[Int]] = []
+        // 去重：保留第一次出现的顺序
+        var seen = Set<Int>()
+        let deduped = values.filter { seen.insert($0).inserted }
+        if deduped.count != values.count { candidates.append(deduped) }
+        if values.count == section.count + 1 {
+            candidates.append(Array(values.dropFirst()))
+            candidates.append(Array(values.dropLast()))
+        }
+        for candidate in candidates where candidate.count == section.count {
             if isAscendingUnique(candidate), candidate.allSatisfy(section.range.contains) {
                 return candidate
             }

@@ -29,6 +29,10 @@ struct HomeView: View {
     @State private var series = ProfitSeries()
     @State private var monthStats = ProfitStats.PeriodStats()
     @State private var carouselIndex = 0
+    /// TabView 的真实页码。首尾各多挂一张哨兵页（末卡的副本放在最前、
+    /// 首卡的副本放在最后），滑到哨兵页上再无动画地跳回对应的真页，
+    /// 这样最后一张往右滑就能接回第一张。
+    @State private var pageIndex = 1
     /// 自动轮播暂停到什么时候。用户一滑就往后推 12 秒。
     @State private var autoScrollResumeAt = Date.distantPast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -98,7 +102,10 @@ struct HomeView: View {
         carouselGames = order
         // 轮播顺序会随「今天开哪个彩种」变化，旧的下标可能越界，
         // 越界后 TabView 会白屏一页。
-        if carouselIndex >= order.count { carouselIndex = 0 }
+        if carouselIndex >= order.count || pageIndex > order.count + 1 || pageIndex < 0 {
+            carouselIndex = 0
+            pageIndex = 1
+        }
     }
 
     // MARK: - 累计盈亏
@@ -170,16 +177,28 @@ struct HomeView: View {
                 action: { isDrawSheetPresented = true }
             )
 
-            TabView(selection: $carouselIndex) {
-                ForEach(Array(carouselGames.enumerated()), id: \.element) { index, game in
+            // 首尾各挂一张**哨兵页**，转成一个环：最后一张再往左滑就到第一张。
+            //
+            // `TabView` 的分页样式自己不会绕回去 —— 滑到最后一页再往左推，
+            // 卡片只是弹一下，什么都不会发生。做法是在真页两头各放一张克隆页
+            // （页 0 是最后一张的克隆，页 n+1 是第一张的克隆），
+            // 用户滑到克隆页、翻页动画走完之后，**无动画地**跳到对应的真页。
+            // 视觉上是连续的，用户感觉不到这一下。
+            TabView(selection: $pageIndex) {
+                ForEach(carouselPages, id: \.self) { page in
+                    let game = carouselGames[realIndex(page)]
                     DrawCard(game: game,
                              draw: drawStore.latestDraw(for: game),
                              opensToday: todayGames.contains(game))
                         // 分页是整屏宽翻的，卡片自己不留边就会和下一张严丝合缝地
                         // 贴在一起，滑动时看起来像一整条在动，分不出是两张卡。
                         .padding(.horizontal, HomeLayout.carouselPagePadding)
-                        .tag(index)
+                        .tag(page)
                 }
+            }
+            .onChange(of: pageIndex) { _, page in
+                carouselIndex = realIndex(page)
+                wrapIfNeeded(page)
             }
             // 系统自带的分页圆点画在 TabView 的画布里，会压在卡片下沿上。
             // 关掉它自己画一排放到卡片外面，既不重叠也能控制配色。
@@ -221,9 +240,42 @@ struct HomeView: View {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled, Date() >= autoScrollResumeAt else { continue }
+            // 一直往后推就行 —— 推到尾部那张哨兵页之后，
+            // `wrapIfNeeded` 会无动画地接回第一张，转成一个环。
             withAnimation(.easeInOut(duration: 0.45)) {
-                carouselIndex = (carouselIndex + 1) % carouselGames.count
+                pageIndex += 1
             }
+        }
+    }
+
+    // MARK: - 轮播的环
+
+    /// 含哨兵的页码表：`[最后一张的克隆] + 真页 + [第一张的克隆]`。
+    private var carouselPages: [Int] {
+        guard carouselGames.count > 1 else { return carouselGames.isEmpty ? [] : [1] }
+        return Array(0...(carouselGames.count + 1))
+    }
+
+    /// 页码 → `carouselGames` 里的真实下标。
+    private func realIndex(_ page: Int) -> Int {
+        let count = carouselGames.count
+        guard count > 0 else { return 0 }
+        guard count > 1 else { return 0 }
+        return ((page - 1) % count + count) % count
+    }
+
+    /// 落在哨兵页上时，等翻页动画走完，**无动画**地跳到对应的真页。
+    private func wrapIfNeeded(_ page: Int) {
+        let count = carouselGames.count
+        guard count > 1, page == 0 || page == count + 1 else { return }
+        let target = page == 0 ? count : 1
+        Task { @MainActor in
+            // 0.45s 是上面翻页动画的时长，等它走完再跳，否则用户会看到闪一下
+            try? await Task.sleep(for: .milliseconds(480))
+            guard pageIndex == page else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { pageIndex = target }
         }
     }
 
@@ -793,14 +845,17 @@ enum DrawCardMetrics {
     /// 八张卡片共用的高度。
     ///
     /// 取两种极端里更高的那个：
-    /// - 快乐8：两行球 + 一行奖项（最高那一档中奖等级）
+    /// - 快乐8：两行球 + 两行奖项（金额最高的两档）
     /// - 其余彩种：一行球 + 两行奖项（一、二等奖）
+    ///
+    /// 快乐8 从一行奖项加到两行之后，这里跟着加，八张卡片的高度才还是一个值 ——
+    /// 高度只在这一处算，所以联动是自动的，不会出现只有快乐8 变高的情况。
     static func unifiedHeight(screenWidth: CGFloat) -> CGFloat {
         let inner = innerWidth(screenWidth: screenWidth)
         let chrome = headerHeight + verticalPadding * 2 + blockSpacing * 2
 
         let k8Ball = ballSize(perRow: k8PerRow, sections: 1, spansAllSections: false, width: inner)
-        let k8Height = chrome + (2 * k8Ball + k8Ball * lineGap) + prizeRowHeight
+        let k8Height = chrome + (2 * k8Ball + k8Ball * lineGap) + prizeRowHeight * 2
 
         // 其余彩种最多 8 颗球一行（七乐彩 7+1）
         let wideBall = ballSize(perRow: 8, sections: 2, spansAllSections: true, width: inner)
@@ -831,16 +886,12 @@ struct DrawCard: View {
     /// 卡片上要列的奖级。
     ///
     /// 快乐8 的奖级表是「选十中十、选十中九…选九中九…」几十行，一等奖这个
-    /// 概念在它身上不成立。所以只列**当期真正开出来的最高那一档**，
-    /// 一行就够 —— 「选十中9 · 15 注 · 8000 元」比堆十几行有用得多。
+    /// 概念在它身上不成立。排序的第一依据是**单注奖金**，不是表里的行序 ——
+    /// 官方那张表按「选几」从大到小排，而「选十中十 1000 万」和
+    /// 「选九中九 300 万」谁更值钱得按钱算。取金额最高的两档，
+    /// 奖级名本身就带着玩法（「选十中10」），一眼看得出是哪个玩法中的。
     private var prizes: [PrizeEntry] {
-        guard let list = draw?.prizeList else { return [] }
-        if game == .k8 {
-            return list.first { $0.winningCount > 0 && $0.amount > 0 }.map { [$0] } ?? []
-        }
-        return ["一等奖", "二等奖"].compactMap { name in
-            list.first { $0.prizeName.contains(name) && ($0.winningCount > 0 || $0.amount > 0) }
-        }
+        PrizeRanking.topTwo(of: draw?.prizeList ?? [], game: game)
     }
 
     var body: some View {
@@ -851,8 +902,8 @@ struct DrawCard: View {
             Spacer(minLength: 0)
             if !prizes.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(prizes.enumerated()), id: \.offset) { _, entry in
-                        prizeStrip(entry)
+                    ForEach(Array(prizes.enumerated()), id: \.offset) { rank, entry in
+                        prizeStrip(entry, rank: rank)
                     }
                 }
             }
@@ -920,9 +971,10 @@ struct DrawCard: View {
 
     /// 一个奖级一行。奖金后面不再跟「/注」—— 奖级本来就是按注计的，
     /// 那两个字每行都重复一遍，纯占地方。
-    private func prizeStrip(_ entry: PrizeEntry) -> some View {
+    private func prizeStrip(_ entry: PrizeEntry, rank: Int) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: entry.prizeName.contains("一等奖") || game == .k8 ? "trophy.fill" : "rosette")
+            // 快乐8 没有「一等奖」这个名字，用排名区分：金额最高的那行挂奖杯。
+            Image(systemName: isTopPrize(entry, rank: rank) ? "trophy.fill" : "rosette")
                 .font(.system(size: 10))
                 .foregroundStyle(game.tint)
             Text("\(prizeLabel(entry)) \(entry.winningCount) 注")
@@ -942,9 +994,48 @@ struct DrawCard: View {
         }
     }
 
+    private func isTopPrize(_ entry: PrizeEntry, rank: Int) -> Bool {
+        game == .k8 ? rank == 0 : entry.prizeName.contains("一等奖")
+    }
+
     /// 快乐8 的奖级名照抄票面（「选十中9」），其余彩种收成「一等奖 / 二等奖」。
     private func prizeLabel(_ entry: PrizeEntry) -> String {
         if game == .k8 { return entry.prizeName }
         return entry.prizeName.contains("一等奖") ? "一等奖" : "二等奖"
+    }
+}
+
+/// 卡片上那两行奖级挑谁。
+///
+/// 单独拎出来是为了能测 —— 这段逻辑错了，首页就会把一个小奖当头奖摆着，
+/// 而 View 里的 private 属性测不到。
+enum PrizeRanking {
+
+    /// 金额最高的两档。
+    ///
+    /// 快乐8 按**单注奖金**排，不按官方表的行序：那张表是按「选几」从大到小列的，
+    /// 而「选十中10」和「选九中9」谁更值钱只能按钱比。奖级名本身带着玩法
+    /// （「选十中10」），排完直接显示就说得清是哪个玩法中的。
+    ///
+    /// 其余彩种的一、二等奖是固定的两行，名字就是次序，不用比金额。
+    static func topTwo(of list: [PrizeEntry], game: GameKey) -> [PrizeEntry] {
+        guard game == .k8 else {
+            return ["一等奖", "二等奖"].compactMap { name in
+                list.first { $0.prizeName.contains(name) && ($0.winningCount > 0 || $0.amount > 0) }
+            }
+        }
+        var open: [(offset: Int, entry: PrizeEntry)] = []
+        for (offset, entry) in list.enumerated() where entry.winningCount > 0 && entry.amount > 0 {
+            open.append((offset, entry))
+        }
+        // 金额一样（比如两档都是 4 元）时按官方表的原序，结果才稳定。
+        let ranked = open.sorted { lhs, rhs in
+            lhs.entry.amount == rhs.entry.amount
+                ? lhs.offset < rhs.offset
+                : lhs.entry.amount > rhs.entry.amount
+        }
+        var picked: [PrizeEntry] = []
+        for item in ranked.prefix(2) { picked.append(item.entry) }
+        return picked
     }
 }

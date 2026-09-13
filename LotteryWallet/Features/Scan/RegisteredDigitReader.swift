@@ -150,7 +150,7 @@ enum RegisteredDigitReader {
                                                   strip: strip, maximum: trailing.maximum)
             tailValues = outcome.values
             let read = outcome.values.compactMap { $0 }.count
-            tailNote = "，特别号整条读出 \(read)/\(grid.rows.count)"
+            tailNote = "，特别号读出 \(read)/\(grid.rows.count)"
             if !outcome.raw.isEmpty { tailNote += "，Vision 给的是「\(outcome.raw)」" }
         } else if layout.trailing != nil {
             tailNote = "，特别号那一块划不出来"
@@ -210,63 +210,41 @@ enum RegisteredDigitReader {
 
     // MARK: - 特别号那一条
 
-    /// 整条特别号带**喂一次**，返回每一注的值 + Vision 给的原文。
+    /// 特别号：**一注裁一块**，每块认两遍（原图 + 加对比度）。
     ///
-    /// 原文一并带出来是这一版特意加的：前面五轮都在猜「Vision 到底认出了什么」，
-    /// 而调试图只报得出「认出几格」。有了原文，下一轮不管哪儿出问题都是一眼的事。
+    /// 这里绕过一次弯，记下来免得再走：上一版想着"五个号码本来就是一竖排，
+    /// 裁成一整条窄带喂一次不就完了"，结果 Vision 对那条 840×1980 的竖条
+    /// **返回零个字符** —— 五注全是问号。
+    ///
+    /// 原因是 `VNRecognizeTextRequest` 找的是**横向文本行**。一块又窄又高、
+    /// 里面五个孤零零的短数字竖着排的图，它根本不认为那是文本行。
+    /// 而上一版逐注裁出来的"宽而扁、里面就一个数"的图，它读得好好的。
+    ///
+    /// 所以形状退回去，但**省调用那部分保住**：每注 2 遍而不是原来的 6 遍
+    /// （3 种放大 × 2 种对比度打淘汰赛），五注 10 次而不是 30 次。
+    /// 加对比度那一遍不能省 —— 热敏票印在银灰纸上，有些笔画淡到原图上看不见。
     static func readTrailingStrip(zone: UIImage,
                                   grid: NumberGrid,
                                   strip: ClosedRange<CGFloat>,
                                   maximum: Int) async -> (values: [Int?], raw: String) {
         var values = [Int?](repeating: nil, count: grid.rows.count)
-        guard let cgImage = zone.cgImage,
-              let first = grid.rows.first, let last = grid.rows.last else {
-            return (values, "")
-        }
-        let width = CGFloat(cgImage.width)
-        let height = CGFloat(cgImage.height)
-        // 上下各让半行，免得第一注和最后一注贴着裁图边缘
-        let rowHeight = first.upperBound - first.lowerBound
-        let top = Swift.max(first.lowerBound - rowHeight / 2, 0)
-        let bottom = Swift.min(last.upperBound + rowHeight / 2, 1)
-        let box = CGRect(x: strip.lowerBound * width, y: top * height,
-                         width: (strip.upperBound - strip.lowerBound) * width,
-                         height: (bottom - top) * height)
-            .intersection(CGRect(x: 0, y: 0, width: width, height: height))
-        guard box.width > 6, box.height > 6, let cropped = cgImage.cropping(to: box) else {
-            return (values, "")
-        }
-        let slice = UIImage(cgImage: cropped, scale: 1, orientation: .up)
-        // 窄带很小，放大 6 倍也不贵；一次就够，不再搞多倍数淘汰赛
-        guard let big = TicketVisionScanner.upscaled(slice, factor: 6) else {
-            return (values, "")
-        }
-        let chars = await TicketVisionScanner.recognizeDigits(in: big, fast: true)
-        guard !chars.isEmpty else { return (values, "") }
-
-        // 每个字符按**纵坐标**归到它那一注：行带是墨迹投影切出来的，可信；
-        // Vision 自己的分行不可信（整个项目的奠基测量：上下空隙比左右窄 4.6 倍）。
-        var buckets = [[(x: CGFloat, value: Int)]](repeating: [], count: grid.rows.count)
-        for char in chars {
-            // Vision 的 y 向上为正，翻成左上原点，再换算回整张配准图
-            let y = top + (1 - char.box.midY) * (bottom - top)
-            guard let row = grid.rows.firstIndex(where: { $0.contains(y) }) else { continue }
-            buckets[row].append((char.box.midX, char.value))
-        }
-        for row in buckets.indices {
-            let digits = buckets[row].sorted { $0.x < $1.x }.map(\.value)
-            guard (1...2).contains(digits.count) else { continue }
-            let value = digits.reduce(0) { $0 * 10 + $1 }
+        var raws: [String] = []
+        for row in grid.rows.indices {
+            let band = grid.rows[row]
+            let rect = CGRect(x: strip.lowerBound, y: band.lowerBound,
+                              width: strip.upperBound - strip.lowerBound,
+                              height: band.upperBound - band.lowerBound)
+            let outcome = await digits(in: zone, rect: rect)
+            raws.append(outcome.isEmpty ? "—" : outcome.map(String.init).joined())
+            guard (1...2).contains(outcome.count) else { continue }
+            let value = outcome.reduce(0) { $0 * 10 + $1 }
             // **超上限不降级成个位数。** 上一版在这儿把 `13` 读成 `73` 之后
             // 整个扔掉、拿只认出个位的那一遍顶上，屏幕显示 `3` 而票面是 `13` ——
             // 认错了还看起来对，正是硬约束要挡的那种。读不成就是问号。
             guard value <= maximum else { continue }
             values[row] = value
         }
-        let raw = grid.rows.indices.map { row in
-            buckets[row].sorted { $0.x < $1.x }.map { String($0.value) }.joined()
-        }.joined(separator: "/")
-        return (values, raw)
+        return (values, raws.joined(separator: "/"))
     }
 
     // MARK: - 补认
@@ -274,48 +252,46 @@ enum RegisteredDigitReader {
 
     /// 把一格单独裁出来再认一遍 —— 只给整块那一遍**漏掉的**格子用。
     ///
+    /// 超上限说明认错了，报问号，不拿其中一位顶上。
+    static func reread(zone: UIImage, rect: CGRect, maximum: Int) async -> Int? {
+        let found = await digits(in: zone, rect: rect)
+        guard (1...2).contains(found.count) else { return nil }
+        let value = found.reduce(0) { $0 * 10 + $1 }
+        return value <= maximum ? value : nil
+    }
+
+    /// 裁一块出来认，返回**认出的数字本身**（从左到右），不做任何取舍。
+    ///
     /// 裁得比格子宽一点：Vision 按「词」工作，贴着字边裁它经常什么都不给。
     /// 认出来的字符再按格子自己的范围筛一道，邻居的数字不算数 ——
     /// 格子在哪儿是墨迹量出来的、可信；认出几个字符是 OCR 说的、不可信。
-    static func reread(zone: UIImage, rect: CGRect, maximum: Int) async -> Int? {
-        guard let cgImage = zone.cgImage else { return nil }
+    ///
+    /// 跑两遍：原图一遍、加对比度一遍（热敏票印在银灰纸上，有些笔画淡到
+    /// 原图上看不见，这一条实测有用），**按位置取并集**，不比谁认得多。
+    static func digits(in zone: UIImage, rect: CGRect) async -> [Int] {
+        guard let cgImage = zone.cgImage else { return [] }
         let width = CGFloat(cgImage.width)
         let height = CGFloat(cgImage.height)
-        // 左右留白：Vision 贴着字边裁经常什么都不给，所以要让一点。
-        // 但**格子本身很宽时不能按宽度让** —— 七星彩的特别号那一块是一条宽带
-        // （见 `NumberGrid.trailingStrip`），按 0.8 倍宽让出去会一直让到
-        // 前一个号码上，邻居跟着进来。按字高让就和格子宽度无关了。
+        // 左右留白按**字高**让，不按格宽 —— 特别号那一块是条宽带，
+        // 按 0.8 倍宽让出去会一直让到前一个号码上，邻居跟着进来。
         let padX = Swift.min(rect.width * 0.8, rect.height * 0.6)
         let padY = rect.height * 0.3
         let cropLeft = Swift.max(rect.minX - padX, 0)
         let cropRight = Swift.min(rect.maxX + padX, 1)
-        let left = cropLeft * width
-        let right = cropRight * width
         let top = Swift.max(rect.minY - padY, 0) * height
         let bottom = Swift.min(rect.maxY + padY, 1) * height
-        let box = CGRect(x: left, y: top, width: right - left, height: bottom - top)
+        let box = CGRect(x: cropLeft * width, y: top,
+                         width: (cropRight - cropLeft) * width, height: bottom - top)
             .intersection(CGRect(x: 0, y: 0, width: width, height: height))
         guard box.width > 6, box.height > 6, cropRight > cropLeft,
-              let cropped = cgImage.cropping(to: box) else {
-            return nil
-        }
-        // 格子本身在这张裁图里占的横向范围（0–1）。认出来的字符落在这以外的
-        // 就是邻居，不是这一格的。两边各松 5%，让贴着格边的笔画还算数。
+              let cropped = cgImage.cropping(to: box) else { return [] }
+        // 格子本身在这张裁图里占的横向范围（0–1）。两边各松 5%，
+        // 让贴着格边的笔画还算数。
         let span = cropRight - cropLeft
         let cellLow = (rect.minX - cropLeft) / span - 0.05
         let cellHigh = (rect.maxX - cropLeft) / span + 0.05
         let slice = UIImage(cgImage: cropped, scale: 1, orientation: .up)
 
-        // **认出什么就拼什么，拼不成就是问号。**
-        //
-        // 上一版这里是「3 种放大 × 2 种对比度 = 6 遍识别打淘汰赛」，还带两道闸：
-        // 认出 3 个字符整遍扔、拼出来超上限整遍扔。结果是**认全了反而被丢** ——
-        // 七星彩的 `13` 有一遍把细竖认成 `7`、拼出 `73` 超上限，整遍作废，
-        // 于是只认出个位的那一遍夺冠，屏幕显示 `3`。而一张票要为此跑上百次 Vision。
-        //
-        // 现在只跑两遍：原图一遍、加对比度一遍（热敏票印在银灰纸上，
-        // 有些笔画淡到原图上看不见，这一条是实测有用的）。
-        // 两遍的字符**按位置取并集**，不再比谁认得多。
         var picked: [(x: CGFloat, value: Int)] = []
         for boosted in [false, true] {
             let source = boosted ? (TicketVisionScanner.contrastBoosted(slice) ?? slice) : slice
@@ -327,11 +303,7 @@ enum RegisteredDigitReader {
                 picked.append((char.box.midX, char.value))
             }
         }
-        let digits = picked.sorted { $0.x < $1.x }.map(\.value)
-        guard (1...2).contains(digits.count) else { return nil }
-        let value = digits.reduce(0) { $0 * 10 + $1 }
-        // 超上限说明认错了 —— 报问号，不拿其中一位顶上
-        return value <= maximum ? value : nil
+        return picked.sorted { $0.x < $1.x }.map(\.value)
     }
 
     // MARK: - 换算回票面

@@ -392,4 +392,24 @@ final class WholeTicketDerivationTests: XCTestCase {
         XCTAssertEqual(zones.first { $0.key == .red }?.selected, reds)
         XCTAssertEqual(zones.first { $0.key == .blue }?.selected, [8, 9])
     }
+
+    /// 同一个号被 Vision 吐了两遍，这一注不能整个丢掉。
+    ///
+    /// 真机上那张双色球：票面 `A.06 08 13 21 29 32`，识别原文里 `29` 出现两次，
+    /// 红球变成 7 个，整注被判掉 —— 用户看到的是「少了一注」。
+    /// 旧的「去头尾」救不了它：去掉头或尾之后还剩 `29 29`，不升序。
+    func testDuplicateNumberIsDroppedInsteadOfLosingTheLine() {
+        let text = """
+        玩法: 双色球-单式   机号:31130622
+        A.06 08 13 21 29 29 32-04 (1)
+        B.03 07 11 19 26 30-12 (1)
+        开奖期:2026106 26-09-13   合计4元
+        """
+        guard let ticket = TicketTextParser.parseTickets(text).first else {
+            return XCTFail("整张票都没解析出来")
+        }
+        XCTAssertEqual(ticket.count, 2, "重号那一注被整个丢掉了")
+        XCTAssertEqual(ticket.lines.first?[.red], [6, 8, 13, 21, 29, 32])
+        XCTAssertEqual(ticket.lines.first?[.blue], [4])
+    }
 }
