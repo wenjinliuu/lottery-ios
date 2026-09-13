@@ -57,7 +57,7 @@ enum RegisteredDigitReader {
         //    否则是整段压在中文标签上了。注意只是否决 —— 注序号列靠它
         //    分不出来（`.fast` 会把 `①` 读成 `0`），那件事交给 `window` 的几何判据
         // 2. 划完之后按位置落进各自的格子
-        let chars = await allDigits(in: zone)
+        let chars = await TicketVisionScanner.allDigits(in: zone)
         let centers = chars.map { Double($0.box.midX) * Double(mask.width) }
         guard let grid = NumberGrid.build(mask: mask, within: span,
                                           layout: layout, digitCenters: centers) else {
@@ -78,14 +78,14 @@ enum RegisteredDigitReader {
                 NumberGrid.select($0, layout: layout, digitCenters: centers)
             }
             let choice = picked.map { "挑中 \($0.count) 列" } ?? "没成"
-            return Outcome(reading: nil,
-                           note: "格子路：划不齐（要 \(layout.columns) 位）。"
-                               + "号码区 \(mask.width)×\(mask.height)，"
-                               + "墨迹带 \(bands.isEmpty ? "—" : bands) 段，"
-                               + "候选行 \(rough.count) 条，对得齐 \(consensus.count) 条，"
-                               + "每行切出 \(shape.isEmpty ? "—" : shape) 段，"
-                               + "定出 \(cut) 列，挑列\(choice)，"
-                               + "Vision 认出 \(chars.count) 个数字")
+            var note = "格子路：划不齐（要 \(layout.columns) 位）。"
+            note += "号码区 \(mask.width)×\(mask.height)，"
+            note += "墨迹带 \(bands.isEmpty ? "—" : bands) 段，"
+            note += "候选行 \(rough.count) 条，对得齐 \(consensus.count) 条，"
+            note += "每行切出 \(shape.isEmpty ? "—" : shape) 段，"
+            note += "定出 \(cut) 列，挑列\(choice)，"
+            note += "Vision 认出 \(chars.count) 个数字"
+            return Outcome(reading: nil, note: note)
         }
 
         var values = [[Int?]](repeating: [Int?](repeating: nil, count: layout.columns),
@@ -167,11 +167,15 @@ enum RegisteredDigitReader {
         }
         let low = rows.map(\.band.lowerBound).min() ?? 0
         let high = rows.map(\.band.upperBound).max() ?? 1
+        // 一句一句拼。整句写成一长串 `+` 的话 Swift 的类型检查器会当场罢工
+        // （"unable to type-check this expression in reasonable time"）。
+        let digits = layout.columns + (layout.trailing == nil ? 0 : 1)
+        var note = "号码按配准后的格子读：\(rows.count) 注 × \(digits) 位，"
+        note += "\(total) 格里认出 \(known) 格"
+        note += "（整块认一遍剩 \(blanks) 格空的，补认补上 \(filled) 格\(tailNote)）"
         return Outcome(
             reading: Reading(matrix: .init(rows: rows, span: low...high), grid: grid),
-            note: "号码按配准后的格子读：\(rows.count) 注 × \(layout.columns + (layout.trailing == nil ? 0 : 1)) 位，"
-                + "\(total) 格里认出 \(known) 格"
-                + "（整块认一遍剩 \(blanks) 格空的，补认补上 \(filled) 格\(tailNote)）")
+            note: note)
     }
 
     // MARK: - 把数字分进格子
