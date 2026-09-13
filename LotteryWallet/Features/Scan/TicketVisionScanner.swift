@@ -160,9 +160,114 @@ enum TicketVisionScanner {
                              note: note + "；退回逐行二次识别")
         }
 
+        // 非格子型（双色球、大乐透、七乐彩、快乐8）：号码区喂一次，按行拼回去。
+        //
+        // 它们的一注号码自己就是一道校验（升序、不重复、有值域），不需要格子；
+        // 需要的只是别拿整张照片去喂。配准成功就走这条 —— **1 次调用覆盖所有注**，
+        // 上一版是一行裁一条各喂两遍，五注的票要 10 次。
+        if let frame {
+            let zone = await zoneRows(image: image, frame: frame)
+            if !zone.isEmpty {
+                let text = merging(rows: baseRows, originals: originals,
+                                   zoneRows: zone, game: game)
+                return DigitPass(text: text, grid: nil,
+                                 note: "号码区整块读了一遍：切出 \(zone.count) 行")
+            }
+        }
+        // 配准没成功才退回逐行裁条 —— 那条路贵得多，只当兜底
         return DigitPass(text: await secondPass(image: image, rows: baseRows,
                                                originals: originals, game: game),
-                         grid: nil, note: nil)
+                         grid: nil,
+                         note: frame == nil ? "没配准成功，号码按逐行裁条读"
+                                            : "号码区整块没读出东西，退回逐行裁条")
+    }
+
+    /// 非格子型彩种的号码路：**配准后的号码区喂一次**，按行拼回文本。
+    ///
+    /// 双色球、大乐透、七乐彩、快乐8 的一注号码是一团紧凑的两位数字符，
+    /// Vision 横着读得好好的 —— 它们从来没有「按竖列读」那个毛病，
+    /// 所以不需要格子。需要的只是**别拿整张照片去喂**：
+    ///
+    /// - 整张照片里中文和数字混在一起，中文模型会把间距宽的数字并掉或漏掉
+    /// - 配准后的号码区是摆正的、只有号码、可以整块放大
+    ///
+    /// 上一版是**一行裁一条、每条喂两遍**（`secondPass`）——
+    /// 一张五注的双色球就是 10 次 Vision 调用。现在整块喂一次，
+    /// 返回的碎片按纵坐标分行，一次覆盖所有注。
+    ///
+    /// 返回每一行的纵向区间（Vision 坐标，换算回整张票）和文本。
+    struct ZoneRow {
+        /// 这一行在**整张票**上占的纵向区间（Vision 坐标，y 向上）。
+        let band: ClosedRange<CGFloat>
+        let text: String
+    }
+
+    static func zoneRows(image: UIImage, frame: TicketFrame) async -> [ZoneRow] {
+        guard let cgImage = image.cgImage,
+              let zoneImage = TicketRegistration.rectified(cgImage, frame: frame) else {
+            return []
+        }
+        let zone = UIImage(cgImage: zoneImage, scale: 1, orientation: .up)
+        // 号码区本来就不大，放大两倍再认；**只挂英数模型**，中文模型会把
+        // 间距宽的单个数字当成排版空白并掉。
+        guard let big = upscaled(zone, factor: 2),
+              let fragments = try? await recognizeFragments(in: big, languages: ["en-US"]) else {
+            return []
+        }
+        // 一条条摊开写，不用链式 map/compactMap —— 元组 + 泛型链在
+        // Swift 的类型检查器那儿很容易超时（这一版已经为此挂过一次 CI）。
+        var out: [ZoneRow] = []
+        for row in LayoutSegmenter.rows(fragments) {
+            let text = LayoutSegmenter.join(row)
+            guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+            // 配准矩形里的纵向区间 → 整张票上的纵向区间
+            let band = LayoutSegmenter.band(row)
+            let height: CGFloat = band.upperBound - band.lowerBound
+            let rect = CGRect(x: 0, y: 1 - band.upperBound, width: 1, height: height)
+            guard let corners = frame.restore(rect) else { continue }
+            var top: CGFloat = 1
+            var bottom: CGFloat = 0
+            for point in corners {
+                top = Swift.min(top, point.y)
+                bottom = Swift.max(bottom, point.y)
+            }
+            guard bottom > top else { continue }
+            out.append(ZoneRow(band: (1 - bottom)...(1 - top), text: text))
+        }
+        return out
+    }
+
+    /// 拿号码区那一遍的结果去换掉整票那一遍里对应的行。
+    ///
+    /// 只换**读得更像一注**的行（`isImprovement`）：号码区那一遍只挂了英数模型，
+    /// 彩种名、玩法、金额那些中文行它读出来是乱的，不能拿去盖掉中文那一遍。
+    private static func merging(rows: [[TextFragment]],
+                                originals: [String],
+                                zoneRows: [ZoneRow],
+                                game: GameKey?) -> String {
+        var result: [String] = []
+        for (index, row) in rows.enumerated() {
+            let original = originals[index]
+            let band = LayoutSegmenter.band(row)
+            // 纵向重叠最多的那一条
+            var best: ZoneRow?
+            var bestOverlap: CGFloat = 0
+            for candidate in zoneRows {
+                let low = Swift.max(candidate.band.lowerBound, band.lowerBound)
+                let high = Swift.min(candidate.band.upperBound, band.upperBound)
+                let shared = high - low
+                if shared > bestOverlap {
+                    bestOverlap = shared
+                    best = candidate
+                }
+            }
+            guard let best, isImprovement(best.text, over: original, game: game) else {
+                result.append(original)
+                continue
+            }
+            result.append(graft(prefix: original, digits: best.text))
+        }
+        return result.joined(separator: "\n")
     }
 
     /// 最老的那条路：一行一行裁出来再认一遍。
