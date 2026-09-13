@@ -158,10 +158,13 @@ enum TicketVisionScanner {
                     text: compose(rows: baseRows, originals: originals, matrix: matrix),
                     grid: nil, note: note + "；退回老路（按字符坐标估几何）")
             }
+            // 说清楚是"老路也没读出来"还是"这种票根本不走老路" ——
+            // 上一轮大乐透报的是前者，其实是后者，白猜了一圈
+            let why = layout.singleDigit ? "老路也没读出来" : "两位数的票不走老路"
             return DigitPass(text: await secondPass(image: image, rows: baseRows,
                                                     originals: originals, game: game),
                              grid: nil,
-                             note: note + "；老路也没读出来，退回逐行二次识别")
+                             note: note + "；\(why)，退回逐行二次识别")
         }
 
         return DigitPass(text: await secondPass(image: image, rows: baseRows,

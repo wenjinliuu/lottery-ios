@@ -208,8 +208,14 @@ struct NumberGrid: Equatable {
     /// 62.5 对 65 这么点差别（注序号列距和号码列距几何上分不开，文档 3.2 节
     /// 就是这么记的），±3px 抖动下只有七成能挑对；加上字宽这一项之后全中。
     ///
-    /// 数字字符只留作一道**否决**：挑中的这些列里至少一半得有数字，
-    /// 否则是整段压在中文标签上了。
+    /// 数字字符只当一道**加分项**，不再是否决。
+    ///
+    /// 上一版是「挑中的列里不到一半有数字就整个作废」。真机上大乐透栽在这儿：
+    /// 几何分算得清清楚楚（对的那种挑法 0.082，第二名 0.318，差四倍），
+    /// 却因为这道否决整个矩阵作废、退回老路。
+    /// 拿实测列位复跑过：**把 `digitCenters` 清空，七星彩、福彩 3D、大乐透
+    /// 三种版式照样挑对** —— 组结构 + 列距 + 字宽三项已经足够，
+    /// OCR 这个弱信号不该有一票否决权（何况 `.fast` 还会把 `①` 读成 `0`）。
     ///
     /// 返回挑中的那些列在 `ranges` 里的下标，按票面从左到右。
     static func select(_ ranges: [ClosedRange<Int>],
@@ -272,14 +278,6 @@ struct NumberGrid: Equatable {
         let gaps = zip(centers, centers.dropFirst()).map { $1 - $0 }
         guard !gaps.isEmpty, gaps.allSatisfy({ $0 > 0 }) else { return nil }
 
-        // 挑中的这些列里至少一半得有数字，否则是压在中文标签上了
-        let withDigits = chosen.filter { range in
-            digitCenters.contains {
-                Double(range.lowerBound) <= $0 && $0 <= Double(range.upperBound)
-            }
-        }.count
-        guard withDigits * 2 >= layout.columns else { return nil }
-
         // 每一段列距折算成标准列距，之后每一段都该相等
         let expected = layout.pitches
         guard expected.count == gaps.count else { return nil }
@@ -293,7 +291,16 @@ struct NumberGrid: Equatable {
         let widthDeviation = widths.map { abs($0 - glyph) }.reduce(0, +)
             / Double(widths.count) / glyph
 
-        return pitchDeviation + 0.7 * widthDeviation
+        // 认出数字的列不到一半时扣分（可能整段压在中文标签上），但不作废
+        let withDigits = chosen.filter { range in
+            digitCenters.contains {
+                Double(range.lowerBound) <= $0 && $0 <= Double(range.upperBound)
+            }
+        }.count
+        let missing = Swift.max(0, layout.columns - withDigits * 2)
+        let digitPenalty = Double(missing) / Double(layout.columns)
+
+        return pitchDeviation + 0.7 * widthDeviation + digitPenalty
     }
 
     /// 某一列取**并集**，不取中位数。

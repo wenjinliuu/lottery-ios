@@ -69,12 +69,23 @@ enum RegisteredDigitReader {
             // 原始段数也报出来，下一轮不用再猜
             let bands = NumberGrid.bandShapes(in: mask, within: span)
                 .map(String.init).joined(separator: "/")
+            // `build` 里每一步都可能返回 nil，只报到"划不齐"分不出是哪一步。
+            // 大乐透那一轮就卡在这儿：段数、候选行、对齐全对，还是划不齐，
+            // 只能靠猜。把后面两步的结果也摊开。
+            let ranges = NumberGrid.columnRanges(consensus)
+            let cut = ranges.map { "\($0.count)" } ?? "—"
+            let picked = ranges.flatMap {
+                NumberGrid.select($0, layout: layout, digitCenters: centers)
+            }
+            let choice = picked.map { "挑中 \($0.count) 列" } ?? "没成"
             return Outcome(reading: nil,
                            note: "格子路：划不齐（要 \(layout.columns) 位）。"
                                + "号码区 \(mask.width)×\(mask.height)，"
                                + "墨迹带 \(bands.isEmpty ? "—" : bands) 段，"
                                + "候选行 \(rough.count) 条，对得齐 \(consensus.count) 条，"
-                               + "每行切出 \(shape.isEmpty ? "—" : shape) 段")
+                               + "每行切出 \(shape.isEmpty ? "—" : shape) 段，"
+                               + "定出 \(cut) 列，挑列\(choice)，"
+                               + "Vision 认出 \(chars.count) 个数字")
         }
 
         var values = [[Int?]](repeating: [Int?](repeating: nil, count: layout.columns),
@@ -104,6 +115,30 @@ enum RegisteredDigitReader {
                       maximums.indices.contains(column) else { continue }
                 values[row][column] = await reread(zone: zone, rect: rect,
                                                    maximum: maximums[column])
+            }
+        }
+
+        // **印得下两位、却只读出一位的格子，也要再认一遍。**
+        //
+        // 七星彩的特别号 `13` `10` 真机上还是读成 `3` `0`：格子画得好好的
+        // （调试图上那一列明明白白框住了两位），整块认那一遍却只交回一个 `3` ——
+        // 十位那一竖又细又淡，在整块图里 Vision 直接漏掉了。
+        // 而 `reread` 会把这一格单独裁出来放大 10/16 倍、再加一遍对比度，
+        // 十位就出来了。上一版只给**空格子**补认，这一格有值（`3`），
+        // 于是永远轮不到它 —— 错得看起来还挺对，正是硬约束要防的那种。
+        //
+        // 只查"这一列印得下两位、却只读出一位"的格子：七星彩每张票最多 5 格，
+        // 大乐透的 `05` 本来就读出两位，不会进来。
+        for row in values.indices {
+            for column in values[row].indices {
+                guard maximums.indices.contains(column), maximums[column] > 9,
+                      let value = values[row][column], value < 10,
+                      let rect = grid.cell(row: row, column: column) else { continue }
+                guard let better = await reread(zone: zone, rect: rect,
+                                                maximum: maximums[column]),
+                      better >= 10 else { continue }
+                // 只在补认真的读出两位时才换 —— 读回同一个一位数就别动
+                values[row][column] = better
             }
         }
 

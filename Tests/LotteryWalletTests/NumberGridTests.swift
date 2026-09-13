@@ -471,6 +471,38 @@ final class NumberGridTests: XCTestCase {
         XCTAssertNil(TicketTextParser.singleLineForTesting("15 12 19 31 33 05 09", game: .dlt))
     }
 
+    /// **几何说了算，OCR 只能加减分。**
+    ///
+    /// 上一版是「挑中的列里不到一半有数字就整个作废」。真机上大乐透栽在这儿：
+    /// 几何分算得清清楚楚（对的那种挑法 0.082，第二名 0.318），却被这道否决
+    /// 判掉、退回老路。而它依赖的 `.fast` 还会把 `①` 读成 `0`。
+    ///
+    /// 现在把 `digitCenters` **整个清空**——三种版式照样挑对。
+    func testGeometryAlonePicksTheMatrix() {
+        // 大乐透 26102：从真机调试图里抠出来的配准后列位（1000px 宽）
+        let dlt = DigitTicketLayout.of(.dlt)!
+        let measured: [ClosedRange<Int>] = [11...58, 88...156, 204...268, 312...380,
+                                            423...480, 535...601, 684...709,
+                                            794...861, 906...973]
+        XCTAssertEqual(NumberGrid.select(measured, layout: dlt, digitCenters: []),
+                       [1, 2, 3, 4, 5, 7, 8],
+                       "① 在第 0 段、`+` 在第 6 段，一个数字字符都不给也该挑对")
+
+        // 七星彩：`①` 离第一位 0.96 个列距，只能靠字宽分开
+        let qxc = DigitTicketLayout.of(.qxc)!
+        let stars: [ClosedRange<Int>] = [44...70, 120...140, 196...216, 272...292,
+                                         348...368, 424...444, 500...520, 620...640]
+        XCTAssertEqual(NumberGrid.select(stars, layout: qxc, digitCenters: []),
+                       [1, 2, 3, 4, 5, 6, 7], "注序号那一列该裁掉")
+
+        // 福彩 3D：玩法标签比数字宽三倍，倍数 `(1)` 在 2.7 个列距开外
+        let three = DigitTicketLayout.of(.fc3d)!
+        let welfare: [ClosedRange<Int>] = [29...78, 93...107, 133...147, 173...186,
+                                           295...329]
+        XCTAssertEqual(NumberGrid.select(welfare, layout: three, digitCenters: []),
+                       [1, 2, 3], "标签列和倍数列都该裁掉")
+    }
+
     /// 划不出格子的时候，调试图要说得出**每一条墨迹带切了几段** ——
     /// 否则"候选行 0 条"看不出是没切出带来、还是段数卡在上限外面。
     func testBandShapesReportsEveryBand() {
