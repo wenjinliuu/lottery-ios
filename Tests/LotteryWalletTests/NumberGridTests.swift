@@ -482,8 +482,8 @@ final class NumberGridTests: XCTestCase {
     /// | 特别号十位（只有第 1、4 注有）| 805–816，**宽 12，正好是别的数字一半** |
     /// | 特别号个位（每注都有）| 831–856 |
     ///
-    /// 票面特别号是 13 / 4 / 9 / 10 / 2 —— 第 1、4 注两段墨，其余一段。
-    private func qixingcaiZone(tailJunk: Bool = false) -> Zone {
+    /// 票面特别号是 13 / 4 / 9 / 10 / 2 —— 第 1、4 注两位，其余一位。
+    private func qixingcaiZone(rightEdgeInk: Bool = false, speck: Bool = false) -> Zone {
         let zone = Zone(width: 1000, height: 700)
         let tens: Set<Int> = [0, 3]
         for row in 0..<5 {
@@ -494,8 +494,10 @@ final class NumberGridTests: XCTestCase {
             }
             if tens.contains(row) { zone.fill(x: 805..<817, y: top..<(top + 32)) }
             zone.fill(x: 831..<857, y: top..<(top + 32))
-            // 26051 那张票的右沿还印着别的东西，隔着一整个列距
-            if tailJunk { zone.fill(x: 947..<996, y: top..<(top + 32)) }
+            // 26051 那张真票的号码区右沿还印着别的东西，隔着一整个列距
+            if rightEdgeInk { zone.fill(x: 947..<996, y: top..<(top + 32)) }
+            // 一小粒噪点 —— 见 `testOneSpeckUsedToCollapseTheWholeTail`
+            if speck { zone.fill(x: 920..<925, y: (top + 10)..<(top + 16)) }
         }
         return zone
     }
@@ -504,75 +506,95 @@ final class NumberGridTests: XCTestCase {
         groups: [.init(count: 6, maximum: 9, gap: 0)],
         trailing: .init(maximum: 14, divider: 0.67))
 
-    /// **一段墨还是两段墨，就是这一注读 4 还是读 14 的全部依据。**
+    private func qixingcaiGrid(_ zone: Zone) -> NumberGrid? {
+        NumberGrid.build(mask: zone.mask, within: 0...999, layout: qixingcaiLayout)
+    }
+
+    /// **十位上有没有墨，就是这一注读 4 还是读 14 的全部依据。**
     ///
     /// 特别号取值 0–14：两位数只有 10…14，十位必然是 1，而 0 不打头。
-    /// 所以十位根本不用去认 —— 数出几段墨就够了。前三轮都栽在反过来做：
-    /// 把那根没有衬线的竖道连同个位一起交给 Vision 读两位数，
-    /// 结果要么只返回个位，要么整条返回零个字符。
-    func testTrailingGlyphsCountTellsTensFromUnits() {
+    /// 所以十位根本不用去认 —— 热敏票的 `1` 是一根没有衬线的竖道，
+    /// Vision 连着三轮要么只返回个位、要么整条返回零个字符。
+    func testTrailingColumnsReadTensFromInkAlone() {
         let zone = qixingcaiZone()
-        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...999,
-                                          layout: qixingcaiLayout) else {
+        guard let grid = qixingcaiGrid(zone) else {
             return XCTFail("六位的格子该划得出来")
         }
         XCTAssertEqual(grid.columns.count, 6, "特别号不占主格子")
-        guard let glyphs = grid.trailingGlyphs(mask: zone.mask, within: 0...999,
-                                               divider: 0.67) else {
-            return XCTFail("特别号那一块该切得出字形")
+        guard let tail = grid.trailingColumns(mask: zone.mask, within: 0...999,
+                                              divider: 0.67) else {
+            return XCTFail("特别号那两列该定得出来")
         }
-        XCTAssertEqual(glyphs.rows.map(\.count), [2, 1, 1, 2, 1],
-                       "13 和 10 是两段墨，4 / 9 / 2 是一段")
-        XCTAssertEqual(glyphs.shape, "2/1/1/2/1")
-
-        // 要认的永远是**最右**那一段，也就是个位
-        guard let units = glyphs.rows[0].last, let tens = glyphs.rows[0].first else {
-            return XCTFail("第一注该切出两段")
-        }
-        XCTAssertEqual(units.lowerBound * 1000, 831, accuracy: 2)
+        XCTAssertEqual(tail.shape, "2/1/1/2/1", "13 和 10 是两位，4 / 9 / 2 是一位")
+        XCTAssertEqual(tail.hasUnits, [true, true, true, true, true], "每一注都有个位")
+        XCTAssertEqual(tail.hasTens, [true, false, false, true, false])
+        XCTAssertEqual(tail.units.lowerBound * 1000, 831, accuracy: 2)
+        guard let tens = tail.tens else { return XCTFail("十位那一列该定得出来") }
         XCTAssertEqual(tens.lowerBound * 1000, 805, accuracy: 2)
     }
 
-    /// 特别号右边还印着别的东西时不许并进来 —— 26051 那张真票的右沿就有。
-    /// 它隔着一整个列距，合不进同一段。
-    func testTrailingGlyphsIgnoreInkFurtherRight() {
-        let zone = qixingcaiZone(tailJunk: true)
-        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...999,
-                                          layout: qixingcaiLayout),
-              let glyphs = grid.trailingGlyphs(mask: zone.mask, within: 0...999,
-                                               divider: 0.67) else {
-            return XCTFail("该切得出来")
+    /// **build 50 死在这一粒噪点上。**
+    ///
+    /// 上一版是「把这一块里的墨段合并，取最左那一坨」，合并的界是
+    /// `merging` 拿到的那几段**自己的**中位字宽。主号码一行有九段真数字，
+    /// 中位数稳；特别号这一块只有两三段，混进一粒 5px 的噪点，
+    /// 中位字宽就从 26 塌到 12、界从 19.5 塌到 9，而十位和个位之间隔着 15 ——
+    /// 合不到一起了，「最左那一坨」于是只剩十位列。
+    ///
+    /// 真机上的样子：有 1 的那两注读出 `1`，其余三注全是问号
+    /// （调试图原文「每注切出 1/0/0/1/0 个字形」）。
+    ///
+    /// 现在字宽取**主号码那几列**的中位数，而且个位列是按「哪一段落墨的注数最多」
+    /// 挑的，噪点再多也动不了它。
+    func testOneSpeckUsedToCollapseTheWholeTail() {
+        let zone = qixingcaiZone(speck: true)
+        guard let grid = qixingcaiGrid(zone),
+              let tail = grid.trailingColumns(mask: zone.mask, within: 0...999,
+                                              divider: 0.67) else {
+            return XCTFail("一粒噪点不该让整块定不出来")
         }
-        XCTAssertEqual(glyphs.rows.map(\.count), [2, 1, 1, 2, 1], "右沿那一块不算特别号")
-        for row in glyphs.rows {
-            for cell in row {
-                XCTAssertLessThan(cell.upperBound * 1000, 900, "没有一段越过 900")
-            }
-        }
+        XCTAssertEqual(tail.shape, "2/1/1/2/1")
+        XCTAssertEqual(tail.units.lowerBound * 1000, 831, accuracy: 2)
     }
 
-    /// 特别号最多两位。合出来比两位还宽就是并进了不该并的东西 ——
-    /// 整块作废、退回上一层，绝不允许猜（硬约束二）。
-    func testTrailingBlockWiderThanTwoDigitsIsRejected() {
-        let zone = qixingcaiZone()
-        // 在个位右边紧挨着再糊一段墨，合并之后这一块有三位宽
+    /// 特别号右边还印着别的东西时不许挑中它 —— 26051 那张真票的右沿就有。
+    func testTrailingColumnsIgnoreInkFurtherRight() {
+        let zone = qixingcaiZone(rightEdgeInk: true)
+        guard let grid = qixingcaiGrid(zone),
+              let tail = grid.trailingColumns(mask: zone.mask, within: 0...999,
+                                              divider: 0.67) else {
+            return XCTFail("该定得出来")
+        }
+        XCTAssertEqual(tail.shape, "2/1/1/2/1", "右沿那一块不算特别号")
+        XCTAssertLessThan(tail.units.upperBound * 1000, 900)
+    }
+
+    /// **个位那一列必须过半数的注都有墨。**
+    ///
+    /// 挡的是最要命的那种错法：个位糊掉之后十位列顶上来冒充个位 ——
+    /// 五注里两注读出 `1`、三注问号，而屏幕上那个 `1` 看起来完全正常。
+    /// 定不出来就整块作废、全标问号，绝不拿十位凑一个数出来。
+    func testTailIsScrappedWhenNoColumnCoversMostBets() {
+        let zone = Zone(width: 1000, height: 700)
         for row in 0..<5 {
             let top = 416 + row * 47
-            zone.fill(x: 862..<900, y: top..<(top + 32))
+            for column in 0..<6 {
+                let left = 242 + column * 88
+                zone.fill(x: left..<(left + 25), y: top..<(top + 32))
+            }
+            // 只有两注在特别号那一块上有墨，而且只有十位那一竖
+            if row == 0 || row == 3 { zone.fill(x: 805..<817, y: top..<(top + 32)) }
         }
-        guard let grid = NumberGrid.build(mask: zone.mask, within: 0...999,
-                                          layout: qixingcaiLayout) else {
-            return XCTFail("六位的格子还是划得出来")
-        }
-        XCTAssertNil(grid.trailingGlyphs(mask: zone.mask, within: 0...999, divider: 0.67),
-                     "宽过两位就不敢用")
+        guard let grid = qixingcaiGrid(zone) else { return XCTFail("主格子还是划得出来") }
+        XCTAssertNil(grid.trailingColumns(mask: zone.mask, within: 0...999, divider: 0.67),
+                     "五注里只有两注有墨，这一列不是个位")
     }
 
     /// 只有一列时算不出列距，老老实实返回 nil。
-    func testTrailingGlyphsNeedTwoColumnsForThePitch() {
+    func testTrailingColumnsNeedTwoColumnsForThePitch() {
         let zone = qixingcaiZone()
         let single = NumberGrid(rows: [0.6...0.65], columns: [0.242...0.267])
-        XCTAssertNil(single.trailingGlyphs(mask: zone.mask, within: 0...999, divider: 0.67))
+        XCTAssertNil(single.trailingColumns(mask: zone.mask, within: 0...999, divider: 0.67))
     }
 
     /// 划不出格子的时候，调试图要说得出**每一条墨迹带切了几段** ——

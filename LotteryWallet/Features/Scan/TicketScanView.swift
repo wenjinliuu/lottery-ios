@@ -517,43 +517,6 @@ struct TicketScanView: View {
         ticket.game.ticketLabel(modes: playModes(ticket), shape: ticket.play.label)
     }
 
-    /// 票头那枚标签**可以点**。
-    ///
-    /// 单式 / 复式 / 胆拖认错的时候，以前是死路：标签只是显示，
-    /// 用户只能整张删了重扫，而重扫大概率还是认成同一个。
-    ///
-    /// 翻译不过去的那一种是**灰的**，不是藏起来的 —— 用户点得到、
-    /// 也看得出为什么点不动（比如还有问号没补，摊到复式上就把它抹掉了）。
-    @ViewBuilder
-    private func shapeTag(_ ticket: Binding<ScannedTicket>) -> some View {
-        let value = ticket.wrappedValue
-        let options = value.availableShapes
-        Menu {
-            ForEach([ScanPlay.single, .system, .dantuo], id: \.self) { shape in
-                Button {
-                    ticket.wrappedValue.changeShape(to: shape)
-                } label: {
-                    if shape == value.play {
-                        Label(shape.label, systemImage: "checkmark")
-                    } else {
-                        Text(shape.label)
-                    }
-                }
-                .disabled(!options.contains(shape))
-            }
-        } label: {
-            HStack(spacing: 3) {
-                Text(headLabel(value))
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
-            }
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(value.game.onTint)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(value.game.tint, in: Capsule())
-        }
-    }
-
     /// 这张票上出现过的玩法。
     ///
     /// 大乐透的玩法不在 `playMode` 里，而是「追不追加」那个开关，
@@ -597,7 +560,12 @@ struct TicketScanView: View {
                 Text(game.label)
                     .font(.headline)
                     .foregroundStyle(game.accent.accentColor)
-                shapeTag(ticket)
+                Text(headLabel(value))
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(game.onTint)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(game.tint, in: Capsule())
                 Spacer(minLength: 8)
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) {

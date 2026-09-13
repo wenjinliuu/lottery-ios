@@ -25,7 +25,7 @@ enum RegisteredDigitReader {
         /// 划出来的格子，画在调试图上。
         var grid: NumberGrid
         /// 特别号那一块切出来的字形，也要画出来 —— 切对没切对一眼就看得见。
-        var trailing: NumberGrid.TrailingGlyphs? = nil
+        var trailing: NumberGrid.TrailingColumns? = nil
     }
 
     /// 读数的结果 + **一句说明**。
@@ -144,21 +144,21 @@ enum RegisteredDigitReader {
         // 两个字形就是 1X（特别号 0–14，十位只能是 1），一个字形就是它自己。
         // 交给 Vision 的永远只有一件它最擅长的事：认一个孤零零的 0–9。
         var tailValues = [Int?](repeating: nil, count: grid.rows.count)
-        var tailGlyphs: NumberGrid.TrailingGlyphs?
+        var tailColumns: NumberGrid.TrailingColumns?
         var tailNote = ""
         if let trailing = layout.trailing {
-            if let glyphs = grid.trailingGlyphs(mask: mask, within: span,
-                                                divider: trailing.divider) {
-                tailGlyphs = glyphs
-                let outcome = await readTrailing(zone: zone, grid: grid, glyphs: glyphs,
+            if let tail = grid.trailingColumns(mask: mask, within: span,
+                                               divider: trailing.divider) {
+                tailColumns = tail
+                let outcome = await readTrailing(zone: zone, grid: grid, tail: tail,
                                                  maximum: trailing.maximum)
                 tailValues = outcome.values
                 let read = outcome.values.compactMap { $0 }.count
                 tailNote = "，特别号读出 \(read)/\(grid.rows.count)"
-                tailNote += "（每注切出 \(glyphs.shape) 个字形"
-                tailNote += "，个位 Vision 给的是「\(outcome.raw)」）"
+                tailNote += "（每注 \(tail.shape) 位，读出「\(outcome.raw)」"
+                tailNote += "；\(tail.note)）"
             } else {
-                tailNote = "，特别号那一块切不出字形"
+                tailNote = "，特别号那一块定不出列"
             }
         }
 
@@ -184,7 +184,7 @@ enum RegisteredDigitReader {
         note += "（整块认一遍剩 \(blanks) 格空的，补认补上 \(filled) 格\(tailNote)）"
         return Outcome(
             reading: Reading(matrix: .init(rows: rows, span: low...high),
-                             grid: grid, trailing: tailGlyphs),
+                             grid: grid, trailing: tailColumns),
             note: note)
     }
 
@@ -217,41 +217,42 @@ enum RegisteredDigitReader {
 
     // MARK: - 特别号
 
-    /// 特别号：**字形数说了算，只有个位去认**。
+    /// 特别号：**十位看有没有墨，只有个位交给 Vision**。
     ///
-    /// 七星彩的特别号是 0–14，两位数只有 10…14，十位必然是 1，而 0 不打头。
-    /// 所以切出两个字形 = 10 + 个位，切出一个 = 个位本身。
-    /// 十位是从取值范围**推**出来的，不是认出来的，也不是猜出来的 ——
-    /// 每一注依然答得出"它来自票面哪几块像素"（硬约束一）。
+    /// 取值 0–14 ⇒ 两位数的十位必然是 1，0 又不打头。所以十位列上落了墨
+    /// 就是 10+，没落就是个位数本身 —— 见 `NumberGrid.trailingColumns`。
     ///
-    /// 切不成一段或两段（噪点、并进了别的东西）就是问号，不拿其中一位顶上。
+    /// 个位那一格认不出来（Vision 给 0 个或 2 个字符）就是问号，
+    /// 不拿十位顶上凑一个数出来：`1` 比 `13` 更像对的，也就更危险。
     ///
     /// **这里没有宽度判据。** 一度想加一条"十位那一竖必须比个位窄一半"，
-    /// 但特别号是 11 的时候两段一样窄，那条判据会把一注对的号判成问号 ——
-    /// 又是"认全了反而被丢"。字形数本身已经够了。
+    /// 但特别号是 11 的时候两列一样窄，那条判据会把一注对的号判成问号 ——
+    /// 又是"认全了反而被丢"。有没有墨本身已经够了。
     static func readTrailing(zone: UIImage,
                              grid: NumberGrid,
-                             glyphs: NumberGrid.TrailingGlyphs,
+                             tail: NumberGrid.TrailingColumns,
                              maximum: Int) async -> (values: [Int?], raw: String) {
         var values = [Int?](repeating: nil, count: grid.rows.count)
         var raws: [String] = []
         for row in grid.rows.indices {
-            guard glyphs.rows.indices.contains(row) else { raws.append("—"); continue }
-            let cells = glyphs.rows[row]
-            guard (1...2).contains(cells.count), let units = cells.last else {
-                raws.append("切出\(cells.count)形")
+            guard tail.hasUnits.indices.contains(row), tail.hasUnits[row] else {
+                raws.append("没墨")
                 continue
             }
-            let tens = cells.count == 2 ? 10 : 0
+            let tens = tail.hasTens.indices.contains(row) && tail.hasTens[row] ? 10 : 0
             let band = grid.rows[row]
-            let rect = CGRect(x: units.lowerBound, y: band.lowerBound,
-                              width: units.upperBound - units.lowerBound,
+            let rect = CGRect(x: tail.units.lowerBound, y: band.lowerBound,
+                              width: tail.units.upperBound - tail.units.lowerBound,
                               height: band.upperBound - band.lowerBound)
-            // 两位数时左边那一竖就贴在旁边，裁图往左让的时候不许越过中线，
-            // 否则半个 `1` 进了画面，Vision 会连个位一起读歪。
-            let stop = cells.count == 2 ? (cells[0].upperBound + units.lowerBound) / 2 : 0
+            // 十位就贴在左边，裁图往左让的时候不许越过两列的中线，
+            // 否则半根竖道进了画面，Vision 会连个位一起读歪。
+            var stop: CGFloat = 0
+            if tens == 10, let tensColumn = tail.tens {
+                stop = (tensColumn.upperBound + tail.units.lowerBound) / 2
+            }
             let read = await digits(in: zone, rect: rect, notLeftOf: stop)
-            raws.append(read.isEmpty ? "—" : read.map(String.init).joined())
+            let prefix = tens == 10 ? "1" : ""
+            raws.append(read.isEmpty ? prefix + "?" : prefix + read.map(String.init).joined())
             guard read.count == 1, let digit = read.first else { continue }
             let value = tens + digit
             guard value <= maximum else { continue }
@@ -345,7 +346,7 @@ extension NumberGrid {
     /// 画得出来就等于「这个号码来自票面哪个像素格子」答得上来 ——
     /// 硬约束一在界面上的样子就是这些框。
     func debugCells(frame: TicketFrame,
-                    trailing: TrailingGlyphs? = nil) -> [ScanDebugReport.Cell] {
+                    trailing: TrailingColumns? = nil) -> [ScanDebugReport.Cell] {
         var out: [ScanDebugReport.Cell] = []
         for row in rows.indices {
             for column in columns.indices {
@@ -355,8 +356,16 @@ extension NumberGrid {
             }
             // 特别号切出来的每一个字形也画一个框。切成一段还是两段，
             // 就是这一注读 4 还是读 14 的全部依据 —— 框画对了结论就对了。
-            guard let trailing, trailing.rows.indices.contains(row) else { continue }
-            for (index, cell) in trailing.rows[row].enumerated() {
+            guard let trailing else { continue }
+            var cells: [ClosedRange<CGFloat>] = []
+            if let tens = trailing.tens, trailing.hasTens.indices.contains(row),
+               trailing.hasTens[row] {
+                cells.append(tens)
+            }
+            if trailing.hasUnits.indices.contains(row), trailing.hasUnits[row] {
+                cells.append(trailing.units)
+            }
+            for (index, cell) in cells.enumerated() {
                 let rect = CGRect(x: cell.lowerBound, y: rows[row].lowerBound,
                                   width: cell.upperBound - cell.lowerBound,
                                   height: rows[row].upperBound - rows[row].lowerBound)

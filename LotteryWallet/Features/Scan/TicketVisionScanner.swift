@@ -119,7 +119,7 @@ enum TicketVisionScanner {
         var text: String
         var grid: NumberGrid?
         /// 特别号那一块切出来的字形，画到调试图上。
-        var trailing: NumberGrid.TrailingGlyphs? = nil
+        var trailing: NumberGrid.TrailingColumns? = nil
         /// 调试图上写出来的那句话。号码路没跑（不是数字型彩种）时为 nil。
         var note: String?
     }

@@ -433,47 +433,72 @@ struct NumberGrid: Equatable {
 
     // MARK: - 特别号那一块
 
-    /// 特别号那一块每一注切出来的字形。
-    struct TrailingGlyphs: Equatable {
-        /// 一注一组，组里是从左到右的字形（标准矩形里的 0–1）。
-        /// 一位数一段，两位数两段，切不出来就是空的。
-        let rows: [[ClosedRange<CGFloat>]]
+    /// 特别号那一块切出来的**两列**。
+    struct TrailingColumns: Equatable {
+        /// 十位那一列。整张票都没有两位数时是 nil。
+        let tens: ClosedRange<CGFloat>?
+        /// 个位那一列 —— 每一注都在这儿。
+        let units: ClosedRange<CGFloat>
+        /// 每一注的十位上有没有墨。
+        let hasTens: [Bool]
+        /// 每一注的个位上有没有墨。
+        let hasUnits: [Bool]
+        /// 调试图上那句几何说明。切错了要一眼看得出错在哪一步。
+        let note: String
 
-        /// 调试图上写「每注切出几个字形」。
+        /// 每一注是一位还是两位，写给调试图。
         var shape: String {
             var parts: [String] = []
-            for row in rows { parts.append(String(row.count)) }
+            for index in hasUnits.indices {
+                if !hasUnits[index] {
+                    parts.append("0")
+                } else if hasTens.indices.contains(index), hasTens[index] {
+                    parts.append("2")
+                } else {
+                    parts.append("1")
+                }
+            }
             return parts.joined(separator: "/")
         }
     }
 
-    /// 把号码区右边单独分出去的那一块，按墨迹切成一个个字形。
+    /// 把号码区右边单独分出去的那一块，定成**个位列 + 十位列**两列。
     ///
-    /// **为什么要切字形，而不是把那一块整条交给 Vision。**
+    /// **为什么十位不用交给 Vision。**
     ///
-    /// 七星彩的特别号取值 0–14。两位数只有 10…14，十位**必然是 1**；
-    /// 而 0 不打头（票面上 04 就印成 4）。也就是说：
-    /// 切出两个字形 → 这一注是 1X；切出一个 → 就是个位数本身。
-    /// **十位根本不需要被认出来**，它是从取值范围推出来的，不是猜的。
+    /// 七星彩的特别号取值 0–14：两位数只有 10…14，十位**必然是 1**，
+    /// 而 0 不打头（票面上 04 就印成 4）。所以十位上**有没有墨**就等于
+    /// 这一注是不是 1X —— 从取值范围推出来的，不是认出来的。
+    /// 热敏票的 `1` 是一根没有衬线的竖道、只有别的数字一半宽，
+    /// Vision 对它连着三轮要么只返回个位、要么整条返回零个字符；
+    /// 而它本来就不必被认。
     ///
-    /// 前三轮都栽在反过来做：把那一竖道连同个位一起交给 Vision 去读两位数。
-    /// 那个 `1` 在热敏票的字体里是一根没有衬线的竖道、只有别的数字一半宽，
-    /// 孤零零摆在一大片空白里 —— Vision 要么只返回个位（build 47、49），
-    /// 要么整条返回零个字符（build 48）。而它本来就不必被认。
+    /// **怎么定这两列（build 50 栽在这一步，记下来）。**
     ///
-    /// 切法和主号码的列位是同一套：**整块投影定位置，每一注再看落了几段墨**。
-    /// 两张真票十行特别号（13/4/9/10/2 和 9/8/12/5/1）按这个切法结构全对，
-    /// 连「个位本身就是 1」那一行（只有一段、而且很窄）都没切错。
-    func trailingGlyphs(mask: InkMask,
-                        within span: ClosedRange<Int>,
-                        divider: CGFloat) -> TrailingGlyphs? {
+    /// 上一版是「把这一块里的墨段合并，取最左那一坨」。合并用的是
+    /// `merging`，而 `merging` 的界是**它拿到的那几段自己的中位字宽** ——
+    /// 主号码那边一行有九段真数字，中位数稳；这一块只有两三段，
+    /// 混进一点噪点中位数就塌了，十位和个位当场合不到一起，
+    /// 「最左那一坨」于是只剩十位列。真机上两张票都成了
+    /// 「有 1 的那两注读出 1，其余全是问号」。
+    ///
+    /// 现在不靠合并，靠**每一注都得有个位**这条结构：
+    ///
+    /// 1. 个位列 = 这一块里**落墨的注数最多**的那一段（并列取最左，
+    ///    26051 那张票号码区右沿还印着别的东西，它在更右边）。
+    ///    宽度还得像个数字（0.35–1.6 个字宽），免得挑中一道噪点。
+    /// 2. 十位列 = 紧挨在它左边、间隙不到 **0.75 个字宽**的那一段。
+    ///    这条界和主号码"两位是一个号"用的是同一条，而字宽取的是
+    ///    **主号码那几列**的中位数 —— 不再拿这一小块自己的中位数说话。
+    func trailingColumns(mask: InkMask,
+                         within span: ClosedRange<Int>,
+                         divider: CGFloat) -> TrailingColumns? {
         guard columns.count >= 2, let last = columns.last,
-              let top = rows.first, let bottom = rows.last else { return nil }
+              let first = rows.first, let bottom = rows.last else { return nil }
         let width = CGFloat(mask.width)
         let height = CGFloat(mask.height)
         guard width > 0, height > 0 else { return nil }
 
-        // 列距用这张票自己的（六列一算就有）
         let centers = columns.map { ($0.lowerBound + $0.upperBound) / 2 }
         var gaps: [CGFloat] = []
         for (a, b) in zip(centers, centers.dropFirst()) { gaps.append(b - a) }
@@ -481,13 +506,26 @@ struct NumberGrid: Equatable {
         let pitch = gaps.sorted()[gaps.count / 2]
         guard pitch > 0 else { return nil }
 
-        // 分界线：最后一列中心 + divider × 列距。线右边到号码区右沿都算这一块的。
+        // 字宽取主号码那几列的中位数 —— 那是一批真数字，量得准。
+        var glyphWidths: [CGFloat] = []
+        for column in columns { glyphWidths.append((column.upperBound - column.lowerBound) * width) }
+        glyphWidths.sort()
+        let glyph = glyphWidths[glyphWidths.count / 2]
+        guard glyph > 1 else { return nil }
+
         let line = ((last.lowerBound + last.upperBound) / 2 + divider * pitch) * width
         let left = Swift.max(0, Int(line.rounded()))
         let right = Swift.min(span.upperBound, mask.width - 1)
         guard left < right else { return nil }
 
-        let blockTop = Swift.max(0, Int((top.lowerBound * height).rounded()))
+        var bands: [ClosedRange<Int>] = []
+        for band in rows {
+            let low = Swift.max(0, Int((band.lowerBound * height).rounded()))
+            let high = Swift.min(mask.height - 1, Int((band.upperBound * height).rounded()))
+            guard low <= high else { return nil }
+            bands.append(low...high)
+        }
+        let blockTop = Swift.max(0, Int((first.lowerBound * height).rounded()))
         let blockBottom = Swift.min(mask.height - 1, Int((bottom.upperBound * height).rounded()))
         guard blockTop <= blockBottom else { return nil }
 
@@ -497,35 +535,66 @@ struct NumberGrid: Equatable {
             segments.append((run.lowerBound + left)...(run.upperBound + left))
         }
         guard !segments.isEmpty else { return nil }
-        // 同一个号码的两位合成一段（和主号码用同一条"不到 0.75 个字宽就是一个号"的界），
-        // 取**最左**那一段 —— 特别号右边可能还有别的东西（26051 那张票的右沿就有），
-        // 它们隔着一整个列距，合不进来。
-        let merged = NumberGrid.merging(segments)
-        guard let block = merged.first else { return nil }
 
-        var widths: [Int] = []
-        for segment in segments { widths.append(segment.count) }
-        widths.sort()
-        let glyph = widths[widths.count / 2]
-        // 特别号最多两位。合出来比两位还宽，说明并进了不该并的东西 ——
-        // 整块作废，退回上一层（硬约束二）。
-        guard glyph > 0, CGFloat(block.count) <= CGFloat(glyph) * 2.6 else { return nil }
-
-        var out: [[ClosedRange<CGFloat>]] = []
-        for band in rows {
-            let bandTop = Swift.max(0, Int((band.lowerBound * height).rounded()))
-            let bandBottom = Swift.min(mask.height - 1, Int((band.upperBound * height).rounded()))
-            guard bandTop <= bandBottom else { out.append([]); continue }
-            let rowProfile = mask.columnProfile(rows: bandTop...bandBottom, columns: block)
-            var cells: [ClosedRange<CGFloat>] = []
-            for run in InkMask.runs(rowProfile, above: 0.5) {
-                let lower = CGFloat(run.lowerBound + block.lowerBound) / width
-                let upper = CGFloat(run.upperBound + block.lowerBound + 1) / width
-                cells.append(lower...upper)
+        // 个位列：落墨的注数最多、宽度又像个数字的那一段。并列取最左。
+        var pick: Int?
+        var best = 0
+        for (index, segment) in segments.enumerated() {
+            let segmentWidth = CGFloat(segment.count)
+            guard segmentWidth >= glyph * 0.35, segmentWidth <= glyph * 1.6 else { continue }
+            var landed = 0
+            for band in bands where mask.columnProfile(rows: band, columns: segment).reduce(0, +) > 0 {
+                landed += 1
             }
-            out.append(cells)
+            if pick == nil || landed > best {
+                pick = index
+                best = landed
+            }
         }
-        return TrailingGlyphs(rows: out)
+        // **个位那一列必须过半数的注都有墨。** 这是"每一注都有一个特别号"这条
+        // 结构的直接写法，也挡住了最要命的那种错法：个位那一段因为糊在一起
+        // 被宽度筛掉之后，十位列（只有两注有墨）顶上来冒充个位 ——
+        // build 50 的结果就长这样，五注里两注读出 `1`、三注问号。
+        // 定不出来就整块作废、全标问号，不拿十位凑一个数出来。
+        guard let unitsIndex = pick, best * 2 >= bands.count else { return nil }
+        let unitsSegment = segments[unitsIndex]
+
+        var tensSegment: ClosedRange<Int>?
+        if unitsIndex > 0 {
+            let previous = segments[unitsIndex - 1]
+            if CGFloat(unitsSegment.lowerBound - previous.upperBound) <= glyph * 0.75 {
+                tensSegment = previous
+            }
+        }
+
+        var hasTens: [Bool] = []
+        var hasUnits: [Bool] = []
+        for band in bands {
+            let unitsInk = mask.columnProfile(rows: band, columns: unitsSegment).reduce(0, +)
+            hasUnits.append(unitsInk > 0)
+            guard let tensSegment, unitsInk > 0 else { hasTens.append(false); continue }
+            let tensInk = mask.columnProfile(rows: band, columns: tensSegment).reduce(0, +)
+            // 相对判据，不用绝对阈值：十位那一竖的墨量本来就比个位少，
+            // 但也绝不会少到只剩个零头。没有两位数的那几注是实打实的 0。
+            hasTens.append(tensInk > 0 && Double(tensInk) >= Double(unitsInk) * 0.2)
+        }
+
+        var note = "字宽 \(Int(glyph))，切出 \(segments.count) 段，"
+        note += "个位 \(unitsSegment.lowerBound)–\(unitsSegment.upperBound)"
+        if let tensSegment {
+            note += "，十位 \(tensSegment.lowerBound)–\(tensSegment.upperBound)"
+            note += "（间隙 \(unitsSegment.lowerBound - tensSegment.upperBound)）"
+        } else if unitsIndex > 0 {
+            let previous = segments[unitsIndex - 1]
+            note += "，左边那段 \(previous.lowerBound)–\(previous.upperBound) 离得太远"
+        } else {
+            note += "，左边没有别的段"
+        }
+
+        return TrailingColumns(tens: tensSegment.map {
+            CGFloat($0.lowerBound) / width...CGFloat($0.upperBound + 1) / width
+        }, units: CGFloat(unitsSegment.lowerBound) / width...CGFloat(unitsSegment.upperBound + 1) / width,
+           hasTens: hasTens, hasUnits: hasUnits, note: note)
     }
 
     private static func median(_ values: [Double]) -> Double {
