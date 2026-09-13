@@ -84,7 +84,7 @@ final class MissingNumberTests: XCTestCase {
     /// 七乐彩（单区 7 个）少认一个也补问号。
     func testSingleZoneGameAlsoPads() {
         let set = TicketTextParser.singleLineForTesting("01 05 12 19 23 28", game: .qlc)
-        XCTAssertEqual(set?[.nums7]?.count, 7)
-        XCTAssertEqual(set?[.nums7]?.last, NumberSet.unknown)
+        XCTAssertEqual(set?[.nums7].count, 7)
+        XCTAssertEqual(set?[.nums7].last, NumberSet.unknown)
     }
 }
