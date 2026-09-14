@@ -16,7 +16,7 @@
 
 ## CI 的判断顺序
 
-1. `App Icon Preview / Xcode native icon validation` 使用最新稳定版 Xcode 生成工程并执行 Release device build；只有 Xcode 成功生成 `Assets.car` 与 `AppIcon*.png` 才算有效。
+1. `App Icon Preview / Xcode native icon validation` 使用最新稳定版 Xcode 生成工程并执行 unsigned Release archive；只有归档内成功生成 `Assets.car` 与 `AppIcon*.png` 才算有效。
 2. `Build & Test` 再次原生编译图标并运行全部单元测试。
 3. `TestFlight` 在归档后检查归档内的图标产物，再沿用原有签名与上传流程。
 4. `App Icon Preview / Third-party preview` 使用固定版 `icon-composer-mcp` 做 inspect、六种外观预览与营销 PNG 导出。它是非阻塞辅助工具，兼容问题不会否定已通过的 Xcode 构建。
