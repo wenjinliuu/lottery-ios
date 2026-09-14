@@ -7,6 +7,7 @@ on:
       - "DesignAssets/AppIcon/*.svg"
       - "LotteryWallet/Resources/AppIcon.icon/**"
       - "project.yml"
+      - "Scripts/sync-app-icon.sh"
       - ".github/workflows/icon-preview.yml"
   workflow_dispatch:
 
@@ -15,9 +16,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  render:
+  native-validation:
+    name: Xcode native icon validation
     runs-on: macos-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
 
     steps:
       - uses: actions/checkout@v4
@@ -27,15 +29,69 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Check Icon Composer
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Install build tools
+        run: brew install xcodegen xcbeautify
+
+      - name: Sync icon source artwork
+        run: bash Scripts/sync-app-icon.sh
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build Release with Xcode
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild \
+            -project LotteryWallet.xcodeproj \
+            -scheme LotteryWallet \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build \
+            | tee build/native-icon-build.log \
+            | xcbeautify --renderer github-actions
+
+      - name: Verify Xcode compiled AppIcon.icon
+        run: |
+          APP_PATH=$(find build/DerivedData/Build/Products -type d -name 'LotteryWallet.app' -print -quit)
+          test -n "$APP_PATH"
+          test -f "$APP_PATH/Assets.car"
+          find "$APP_PATH" -maxdepth 1 -type f -name 'AppIcon*.png' -print -quit | grep -q .
+          if grep -Eiq 'app icon.*(conflict|error)|failed to generate flattened icon' build/native-icon-build.log; then
+            echo 'Xcode reported an App Icon compilation problem.'
+            exit 1
+          fi
+
+  preview:
+    name: Third-party preview (non-blocking)
+    runs-on: macos-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare artifact
+        run: |
+          bash Scripts/sync-app-icon.sh
+          mkdir -p build/app-icon
+          cp -R LotteryWallet/Resources/AppIcon.icon build/app-icon/AppIcon.icon
+
+      - name: Check third-party renderer
+        continue-on-error: true
         run: npx -y -p icon-composer-mcp@1.1.0 icon-composer doctor
 
-      - name: Validate icon bundle
+      - name: Inspect icon bundle (third-party)
+        continue-on-error: true
         run: npx -y -p icon-composer-mcp@1.1.0 icon-composer inspect LotteryWallet/Resources/AppIcon.icon
 
-      - name: Render Apple Liquid Glass appearances
+      - name: Render preview appearances (third-party)
+        continue-on-error: true
         run: |
-          mkdir -p build/app-icon
           for rendition in Default Dark TintedLight TintedDark ClearLight ClearDark; do
             npx -y -p icon-composer-mcp@1.1.0 icon-composer render \
               LotteryWallet/Resources/AppIcon.icon \
@@ -47,18 +103,17 @@ jobs:
           done
 
       - name: Export marketing icon
+        continue-on-error: true
         run: |
           npx -y -p icon-composer-mcp@1.1.0 icon-composer export-marketing \
             LotteryWallet/Resources/AppIcon.icon \
             build/app-icon/Marketing-1024.png \
             --size 1024
 
-      - name: Include source bundle
-        run: cp -R LotteryWallet/Resources/AppIcon.icon build/app-icon/AppIcon.icon
-
       - name: Upload icon package
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: app-icon-${{ github.sha }}
           path: build/app-icon
-          if-no-files-found: error
+          if-no-files-found: warn

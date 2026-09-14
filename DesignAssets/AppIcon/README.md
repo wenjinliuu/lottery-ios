@@ -10,4 +10,6 @@
 - SVG 均使用 1024×1024 画布，不包含圆角蒙版、高光、阴影或玻璃效果。
 - 最终材质、深色与着色外观由 `AppIcon.icon/icon.json` 和 Apple Icon Composer 渲染。
 
-`LotteryWallet/Resources/AppIcon.icon/Assets/` 保存同一套可编译图层。修改源图后需同步两处，随后运行 `App Icon Preview` workflow。
+`LotteryWallet/Resources/AppIcon.icon/Assets/` 保存同一套可编译图层。修改这里只需 push；CI 会先运行 `Scripts/sync-app-icon.sh` 同步到 `.icon`，再交给 Xcode 编译。
+
+有效性以稳定版 Xcode 原生编译为准；`icon-composer-mcp` 只负责快速检查、预览和营销图导出，失败不会覆盖 Xcode 的结论。完整维护流程见 [`../../docs/app-icon-workflow.md`](../../docs/app-icon-workflow.md)。

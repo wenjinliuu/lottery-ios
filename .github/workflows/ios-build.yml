@@ -32,6 +32,9 @@ jobs:
       - name: Install tools
         run: brew install xcodegen xcbeautify
 
+      - name: Sync icon source artwork
+        run: bash Scripts/sync-app-icon.sh
+
       - name: Generate project
         run: xcodegen generate
 
@@ -73,3 +76,10 @@ jobs:
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }}" \
             CODE_SIGNING_ALLOWED=NO \
             clean test | xcbeautify --renderer github-actions
+
+      - name: Verify compiled App Icon
+        run: |
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -type d -path '*/Build/Products/Debug-iphonesimulator/LotteryWallet.app' -print -quit)
+          test -n "$APP_PATH"
+          test -f "$APP_PATH/Assets.car"
+          find "$APP_PATH" -maxdepth 1 -type f -name 'AppIcon*.png' -print -quit | grep -q .

@@ -47,7 +47,7 @@ brew install xcodegen
 原始图层在 `DesignAssets/AppIcon/`，可编译的分层包在
 `LotteryWallet/Resources/AppIcon.icon/`。三个 SVG 只保存几何与项目色，不预制圆角蒙版、高光、阴影或玻璃效果；这些材质由 `icon.json` 和 Apple Icon Composer 统一渲染。
 
-修改图形时同步更新两处 SVG，然后运行 `App Icon Preview` workflow。它会验证 `.icon` 包，并返回 Default、Dark、Tinted、Clear 六种苹果真实渲染、营销 PNG 和完整 `.icon` 包作为 Artifact。正常 Build 与 TestFlight workflow 会直接编译当前 `AppIcon.icon`，生成物不会回写源码。
+修改 `DesignAssets/AppIcon/` 的 SVG 后直接 push 即可：CI 会自动同步到 `.icon`，再由稳定版 Xcode 原生编译验证。`App Icon Preview` 还会用第三方工具尝试生成六种外观与营销 PNG Artifact，但该预览只作辅助；正式有效性以 Xcode Build/TestFlight 为准。维护细节见 [`docs/app-icon-workflow.md`](docs/app-icon-workflow.md)。
 
 ## 开奖日历
 

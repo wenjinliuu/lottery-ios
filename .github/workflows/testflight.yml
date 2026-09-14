@@ -39,6 +39,9 @@ jobs:
       - name: Install tools
         run: brew install xcodegen xcbeautify
 
+      - name: Sync icon source artwork
+        run: bash Scripts/sync-app-icon.sh
+
       - name: Write App Store Connect API key
         env:
           PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
@@ -88,6 +91,13 @@ jobs:
             CURRENT_PROJECT_VERSION=${{ steps.build.outputs.number }} \
             ${{ steps.build.outputs.version_flag }} \
             | xcbeautify --renderer github-actions
+
+      - name: Verify archived App Icon
+        run: |
+          APP_PATH=$(find build/LotteryWallet.xcarchive/Products/Applications -maxdepth 1 -type d -name '*.app' -print -quit)
+          test -n "$APP_PATH"
+          test -f "$APP_PATH/Assets.car"
+          find "$APP_PATH" -maxdepth 1 -type f -name 'AppIcon*.png' -print -quit | grep -q .
 
       - name: Write export options
         run: |
