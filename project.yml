@@ -27,6 +27,9 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wenjinliu.lotterywallet
+        # iCloud 备份要的 entitlements。容器标识符和
+        # `ICloudBackupService.containerID` 必须一字不差。
+        CODE_SIGN_ENTITLEMENTS: LotteryWallet/Resources/LotteryWallet.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         TARGETED_DEVICE_FAMILY: "1"
@@ -52,6 +55,13 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
+        # 让备份文件在「文件」App 里显示成一个有名字的文件夹，
+        # 而不是一串容器标识符。没有这一段用户根本找不到自己的备份。
+        NSUbiquitousContainers:
+          iCloud.com.wenjinliu.lotterywallet:
+            NSUbiquitousContainerIsDocumentScopePublic: true
+            NSUbiquitousContainerName: 对个号
+            NSUbiquitousContainerSupportedFolderLevels: Any
 
   LotteryWalletTests:
     type: bundle.unit-test

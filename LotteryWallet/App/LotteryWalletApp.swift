@@ -38,6 +38,17 @@ final class AppSettings {
         didSet { defaults.set(lastBackupAt?.timeIntervalSince1970 ?? 0, forKey: Keys.lastBackup) }
     }
 
+    /// iCloud 备份开关。**默认关闭** —— 数据往哪儿放是用户的选择，
+    /// 不该由我们替他决定，隐私政策也是照着「默认只存本机」写的。
+    var iCloudBackupEnabled: Bool {
+        didSet { defaults.set(iCloudBackupEnabled, forKey: Keys.iCloudBackup) }
+    }
+
+    /// 上次成功写进 iCloud 的时间。
+    var lastICloudBackupAt: Date? {
+        didSet { defaults.set(lastICloudBackupAt?.timeIntervalSince1970 ?? 0, forKey: Keys.lastICloudBackup) }
+    }
+
     /// 理性购彩提示是否已确认过。
     var responsibleAcknowledged: Bool {
         didSet { defaults.set(responsibleAcknowledged, forKey: Keys.responsible) }
@@ -70,6 +81,8 @@ final class AppSettings {
         static let responsible = "lottery.responsibleAck"
         static let seenBackfilled = "lottery.resultSeenBackfilled.v1"
         static let debugVision = "lottery.debugVision"
+        static let iCloudBackup = "lottery.iCloudBackup"
+        static let lastICloudBackup = "lottery.lastICloudBackupAt"
     }
 
     init() {
@@ -80,6 +93,9 @@ final class AppSettings {
         responsibleAcknowledged = defaults.bool(forKey: Keys.responsible)
         seenBackfilled = defaults.bool(forKey: Keys.seenBackfilled)
         debugVision = defaults.bool(forKey: Keys.debugVision)
+        iCloudBackupEnabled = defaults.bool(forKey: Keys.iCloudBackup)
+        let cloudStamp = defaults.double(forKey: Keys.lastICloudBackup)
+        lastICloudBackupAt = cloudStamp > 0 ? Date(timeIntervalSince1970: cloudStamp) : nil
     }
 
     var colorScheme: ColorScheme? {

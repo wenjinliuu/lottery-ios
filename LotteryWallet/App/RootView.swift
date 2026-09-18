@@ -8,6 +8,7 @@ struct RootView: View {
     @Environment(DrawStore.self) private var drawStore
     @Environment(AppSettings.self) private var settings
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
 
     /// 票夹角标要的数字：出了结果、用户还没看过的票有几张。
     ///
@@ -116,6 +117,18 @@ struct RootView: View {
         // 认清这一点之后就没有理由自己造轮子了：拖拽、吸附、回弹、
         // 跟手的高度切换，系统这套是渲染服务级别的，而自绘版本每一帧
         // 都要让 SwiftUI 重新过一遍整个扫描页 —— 差距不是调参能补上的。
+        // 退到后台时把备份写进 iCloud。
+        //
+        // 选这个时机而不是「记录一变就写」：录一张 20 注的复式票会连着触发
+        // 二十次写入，而 iCloud 写的是整份 JSON，等于把整个票夹重写二十遍。
+        // 退后台是「这一轮操作做完了」的天然分界点。
+        //
+        // 静默执行：这一刻 App 已经不在前台，弹什么都没人看得见。
+        // 真出问题时设置页那行「上次备份」不会往前走，那才是用户看得到的信号。
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .background, settings.iCloudBackupEnabled else { return }
+            backupToICloud()
+        }
         .sheet(item: $activeSheet, onDismiss: {
             guard let next = queuedSheet else {
                 // 抽屉全关完了，快照没用了 —— 留着会在下次点开时
@@ -192,6 +205,17 @@ struct RootView: View {
     ///
     /// 这一步必须发生在首帧之后。早期版本在 `.task` 里同步跑完全部核对，
     /// 记录一多首帧就画不出来，被系统看门狗当成无响应 —— 表现就是"打不开"。
+    /// 静默写一份备份到 iCloud。开关关着时根本不会走到这里。
+    private func backupToICloud() {
+        let descriptor = FetchDescriptor<TicketRecord>()
+        guard let all = try? context.fetch(descriptor),
+              let data = try? BackupService(context: context).exportData(records: all) else { return }
+        Task {
+            guard (try? await Task.detached { try ICloudBackupService.write(data) }.value) != nil else { return }
+            settings.lastICloudBackupAt = Date()
+        }
+    }
+
     private func runStartupChecks() async {
         // 回填要在自动核对**之前**跑，而且和 autoCheck 开关无关：
         // 它修的是「已读状态是后加的」这件事，跟用不用自动核对没有关系。

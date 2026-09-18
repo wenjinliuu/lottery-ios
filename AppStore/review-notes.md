@@ -25,6 +25,7 @@ WHAT THIS APP DOES NOT DO (regarding Guideline 5.3 / 5.3.4)
 - It handles NO money: no payment, wager, balance, top-up, prize redemption or In-App Purchase. The binary contains no StoreKit code.
 - It does NOT predict, recommend or rank numbers, and gives no odds, trend, "hot/cold number" or strategy advice.
 - The only outbound links are the Privacy Policy and Support pages listed in App Store Connect, reachable from Settings > About. There is no embedded web view and no third-party SDK.
+- Optional iCloud backup (Settings > iCloud, OFF by default) writes the same JSON backup file into the user's OWN iCloud Drive container. It uses iCloud Documents only - no CloudKit, no developer-accessible storage, no server of ours. Nothing is uploaded unless the user switches it on.
 - Every amount shown is either the face value the user transcribed from their ticket ("票面金额"), or the published fixed prize tier of a ticket already drawn. It is a personal ledger, not a payout. The app holds no balance and displays no sales cut-off, "on sale" or "closed" state for any draw.
 The app never places the user in a position to gamble. It only helps someone read a paper ticket they already hold.
 
@@ -41,7 +42,7 @@ PERMISSIONS
 Camera and Photo Library are requested only when the user taps the scan button, to read the numbers printed on their own ticket. Text recognition runs entirely on-device via Apple's Vision framework. Photographs are never uploaded and never stored by the app.
 
 NETWORKING AND PRIVACY
-The app makes exactly one kind of network request: an unauthenticated HTTPS GET for static public JSON files (official draw results and the yearly draw calendar) hosted at raw.githubusercontent.com. No user data, device identifier or usage information is ever transmitted. There is no analytics, no advertising and no server of our own - hence the privacy label declares "Data Not Collected".
+Apart from the optional iCloud backup described above (user's own iCloud account, opt-in, off by default), the app makes exactly one kind of network request: an unauthenticated HTTPS GET for static public JSON files (official draw results and the yearly draw calendar) hosted at raw.githubusercontent.com. No user data, device identifier or usage information is ever transmitted. There is no analytics, no advertising and no server of our own - hence the privacy label declares "Data Not Collected".
 
 DISCLAIMERS SHOWN IN THE APP
 Disclaimers appear wherever a number is shown or entered, not only in an About page: beneath the draw numbers on Home; at the bottom of every single ticket card in the Wallet; on the scan entry, crop and recognition-review screens; and directly above the "加入票夹" (add to wallet) save button in manual entry. They state that recognition can be wrong and must be checked against the physical ticket, that the physical ticket and the official claim process govern any prize, and that this app does not sell tickets, does not buy them on the user's behalf and does not redeem prizes. The first time a record is saved - by either manual entry or scan import - a "理性购彩" (play responsibly) dialog repeats this and must be acknowledged before anything is written. Settings > About repeats the full statement, links to the Privacy Policy and Support pages, and asks users to buy only through licensed local retail channels and to play responsibly.
@@ -69,3 +70,6 @@ Thank you for your review. A video walkthrough is available on request.
 | 票面类型三条路径同源 | `EntryMode.shape` / `ScanPlay.shape` / `EntryKind.shape` 全部返回 `TicketShape`，显示名只在 `Models/TicketShape.swift` |
 | 理性购彩弹窗两条保存路径都拦 | `grep -rn 'responsibleAcknowledged' LotteryWallet/` 应同时命中 `EntryFlowView.swift` 与 `TicketScanView.swift` |
 | 公益金按彩种计提 | `GameKey.welfareRate`，比例由 `Tests/` 里的真实样票反推 |
+| iCloud 备份默认关闭 | `AppSettings.iCloudBackupEnabled` 初值来自 `defaults.bool`，未设置即 false |
+| iCloud 只用 Documents，不用 CloudKit | `LotteryWallet.entitlements` 的 `icloud-services` 只有 `CloudDocuments` |
+| 奖级对照表不参与判奖 | `grep -rn 'PrizeTable' LotteryWallet/` 只应命中 `Features/Settings/` 下两个文件 |

@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var isRefreshing = false
     @State private var isBusy = false
     @State private var busyLabel = ""
+    @State private var isICloudRestoreConfirmPresented = false
 
     var body: some View {
         @Bindable var settings = settings
@@ -111,6 +112,35 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle(isOn: Binding(get: { settings.iCloudBackupEnabled },
+                                         set: { toggleICloud($0) })) {
+                        row("icloud.fill", .cyan, "iCloud 备份")
+                    }
+
+                    if settings.iCloudBackupEnabled {
+                        LabeledContent {
+                            Text(settings.lastICloudBackupAt.map { DateText.friendly(DateText.day($0)) } ?? "尚未备份")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } label: {
+                            row("clock.arrow.circlepath", .gray, "上次备份")
+                        }
+
+                        Button { backupToICloud(announce: true) } label: {
+                            row("arrow.up.to.line", .blue, "立即备份")
+                        }
+
+                        Button { isICloudRestoreConfirmPresented = true } label: {
+                            row("arrow.down.to.line", .green, "从 iCloud 恢复")
+                        }
+                    }
+                } header: {
+                    Text("iCloud")
+                } footer: {
+                    Text("打开后，每次退到后台时会把一份备份写进你自己的 iCloud 云盘（「文件」App 里的「对个号」文件夹）。备份只存在你的 iCloud 账户里，开发者无法访问。关掉开关不会删除已经备份的文件。")
+                }
+
+                Section {
                     Toggle(isOn: $settings.debugVision) {
                         row("ruler.fill", .teal, "识别调试图")
                     }
@@ -169,6 +199,13 @@ struct SettingsView: View {
             .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
                 handleImport(result)
             }
+            .confirmationDialog("从 iCloud 恢复？", isPresented: $isICloudRestoreConfirmPresented,
+                                titleVisibility: .visible) {
+                Button("恢复") { restoreFromICloud() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("会把 iCloud 上那份备份里的记录合并进来。已有的同一条记录会被备份里的版本覆盖，本机多出来的记录不会被删掉。")
+            }
             .confirmationDialog("清空全部记录？", isPresented: $isClearConfirmPresented, titleVisibility: .visible) {
                 Button("清空", role: .destructive) { clearAll() }
                 Button("取消", role: .cancel) {}
@@ -225,6 +262,75 @@ struct SettingsView: View {
             await drawStore.loadAllHistories()
             isRefreshing = false
             showToast("数据状态已更新")
+        }
+    }
+
+    // MARK: - iCloud
+
+    /// 打开开关时先确认 iCloud 真的能用，再立刻备份一次。
+    ///
+    /// 不先探一下的话，用户没登录 iCloud 也能把开关拨开，然后一直以为自己
+    /// 有备份 —— 直到换手机那天才发现什么都没有。
+    private func toggleICloud(_ isOn: Bool) {
+        guard isOn else {
+            settings.iCloudBackupEnabled = false
+            return
+        }
+        Task {
+            // `url(forUbiquityContainerIdentifier:)` 会阻塞，不能放主线程。
+            let available = await Task.detached { ICloudBackupService.isAvailable() }.value
+            guard available else {
+                showToast("iCloud 不可用，请先在系统设置里登录 iCloud",
+                          symbol: "icloud.slash", feedback: .error)
+                return
+            }
+            settings.iCloudBackupEnabled = true
+            backupToICloud(announce: true)
+        }
+    }
+
+    /// 写一份到 iCloud。退到后台时也会调这个（见 `RootView`），那种情况不弹提示。
+    private func backupToICloud(announce: Bool) {
+        let service = BackupService(context: context)
+        guard let data = try? service.exportData(records: records) else {
+            if announce { showToast("生成备份失败", symbol: "exclamationmark.triangle", feedback: .error) }
+            return
+        }
+        Task {
+            do {
+                try await Task.detached { try ICloudBackupService.write(data) }.value
+                settings.lastICloudBackupAt = Date()
+                if announce { showToast("已备份到 iCloud", symbol: "icloud.and.arrow.up", feedback: .success) }
+            } catch {
+                if announce {
+                    showToast(error.localizedDescription, symbol: "icloud.slash", feedback: .error)
+                }
+            }
+        }
+    }
+
+    /// 从 iCloud 恢复。走的是和「导入备份」完全相同的那条路，只是数据来源不同。
+    private func restoreFromICloud() {
+        Task {
+            isBusy = true
+            busyLabel = "正在从 iCloud 读取…"
+            defer { isBusy = false }
+            do {
+                let data = try await Task.detached { try ICloudBackupService.read() }.value
+                busyLabel = "正在导入记录…"
+                let outcome = try BackupService(context: context).importData(data)
+                await Task.yield()
+
+                busyLabel = "正在核对开奖…"
+                await drawStore.loadAllHistories()
+                let service = RecordService(context: context, drawStore: drawStore)
+                let checked = try? service.checkAll()
+                if let checked, checked.won > 0 { celebrate() }
+                showToast("已恢复 \(outcome.inserted + outcome.updated) 条记录",
+                          symbol: "icloud.and.arrow.down", feedback: .success)
+            } catch {
+                showToast(error.localizedDescription, symbol: "icloud.slash", feedback: .error)
+            }
         }
     }
 
