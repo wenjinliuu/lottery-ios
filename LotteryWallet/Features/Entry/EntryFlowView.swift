@@ -16,7 +16,14 @@ struct EntryReference {
     var image: UIImage
     /// 认出了彩种就先替用户选上。彩种往往认得出来（票头那几个大字），
     /// 认不出的只是号码。
-    var game: GameKey?
+    var game: GameKey? = nil
+    /// 用户在扫描复核页改过的票面类型。
+    ///
+    /// 改票面类型是**不能就地转换**的：单式的每一注是独立的号码，复式是一个区
+    /// 多选几个号再展开，胆拖还要分出胆码 —— 三者的号码结构根本不是一回事，
+    /// 硬转出来的号码必然和用户手里那张票对不上。所以扫描页改了票型就直接
+    /// 带着照片转到这里重录，这个字段只负责让录入页**一进来就落在那一种**上。
+    var shape: TicketShape? = nil
 }
 
 struct EntryFlowView: View {
@@ -215,6 +222,12 @@ struct EntryFlowView: View {
                 // 票头那几个大字一般都认得出来。
                 if let detected = reference?.game { game = detected }
                 resetForGame(game)
+                // 从扫描页改票面类型转过来的，直接落在用户选的那一种上。
+                // `resetForGame` 会把 mode 打回 .manual，所以必须放在它后面。
+                if let shape = reference?.shape,
+                   let target = EntryMode.modes(for: game).first(where: { $0.shape == shape }) {
+                    mode = target
+                }
                 await drawStore.loadYearCalendars()
             }
         }
@@ -515,7 +528,7 @@ struct EntryFlowView: View {
                 Divider().padding(.vertical, 12)
                 Toggle(isOn: addOnBinding) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("追加")
+                        Text("票面追加")
                             .font(.subheadline.weight(.semibold))
                         Text("票面印有「追加」时打开，单注 3 元")
                             .font(.caption2)

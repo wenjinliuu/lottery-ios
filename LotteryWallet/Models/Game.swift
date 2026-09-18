@@ -105,6 +105,33 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         self == .dlt && addOn ? 3 : 2
     }
 
+    /// 票面金额里计提公益金的比例。
+    ///
+    /// **每个彩种不一样，不能一律按 36% 算。** 原来首页固定乘 0.36，
+    /// 八个彩种里有五个是错的，快乐8 更是差了六个百分点。
+    ///
+    /// 这些数字不是查来的，是从**真实票面反推**的 —— 每张票底都印着
+    /// 「感谢您为公益事业贡献 X 元」，和票面合计一除就是这个比例
+    /// （见 `Tests/LotteryWalletTests` 里的样票夹具）：
+    ///
+    /// | 彩种 | 票面合计 | 公益金 | 比例 |
+    /// | --- | --- | --- | --- |
+    /// | 双色球 / 大乐透 / 七乐彩 | 18 元 | 6.48 元 | 0.36 |
+    /// | 七星彩 / 排列5 | 10 元 | 3.70 元 | 0.37 |
+    /// | 福彩3D / 排列3 | 10 元 | 3.40 元 | 0.34 |
+    /// | 快乐8 | 4 元 | 1.20 元 | 0.30 |
+    ///
+    /// 大乐透有六张不同样票全部精确命中 0.36，排列3 两张都是 0.34，
+    /// 其余彩种各一张。数值都是干净的两位小数，是各彩种公布的提取比例。
+    var welfareRate: Double {
+        switch self {
+        case .ssq, .dlt, .qlc: 0.36
+        case .qxc, .pl5: 0.37
+        case .fc3d, .pl3: 0.34
+        case .k8: 0.30
+        }
+    }
+
     /// 支持"注数"快捷选择的彩种，与 web 版 `COUNT_GAMES` 一致。
     var supportsMultiTicketCount: Bool {
         [.ssq, .dlt, .pl5, .qxc, .qlc].contains(self)

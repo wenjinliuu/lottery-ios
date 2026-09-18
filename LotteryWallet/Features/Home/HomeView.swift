@@ -60,6 +60,15 @@ struct HomeView: View {
                 .padding(.bottom, 120)
             }
             .background(Palette.canvas)
+            // **导航栏必须有底色。**
+            //
+            // 首页 / 票夹 / 设置是全 App 仅有的三个大标题页面，而
+            // `Palette.canvas` 是加在 ScrollView 上的，导航栏本身是透明的。
+            // 大标题往小标题收的过程中，标题文字底下没有任何遮挡，
+            // 滚动的卡片会直接从它下面穿过去 —— 看起来就是「首页」两个字
+            // 卡在卡片里。录入页和扫描页早就这么写了，这里补齐。
+            .toolbarBackground(Palette.canvas, for: .navigationBar)
+            .toolbarBackgroundVisibility(.visible, for: .navigationBar)
             .navigationTitle("首页")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -108,13 +117,13 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - 累计盈亏
+    // MARK: - 累计收支
 
     private var profitCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("累计盈亏")
+                    Text("累计收支")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Text(MoneyText.format(series.netTotal))
@@ -141,10 +150,11 @@ struct HomeView: View {
             Divider()
 
             HStack(alignment: .top, spacing: 8) {
-                statPair("投入", MoneyText.format(series.costTotal))
+                statPair("票面金额", MoneyText.format(series.costTotal))
                 statPair("奖金", MoneyText.format(series.prizeTotal))
-                // 公益金：彩票面额的 36% 计提，这部分钱是确定流向公益事业的
-                statPair("公益金", MoneyText.format(series.costTotal * 0.36))
+                // 公益金逐条按彩种计提，比例见 `GameKey.welfareRate` ——
+                // 原来固定乘 0.36，八个彩种里五个是错的。
+                statPair("公益金", MoneyText.format(series.welfareTotal))
                 statPair("已结算", "\(series.settledCount) 注")
             }
         }
@@ -203,6 +213,15 @@ struct HomeView: View {
             // 系统自带的分页圆点画在 TabView 的画布里，会压在卡片下沿上。
             // 关掉它自己画一排放到卡片外面，既不重叠也能控制配色。
             .tabViewStyle(.page(indexDisplayMode: .never))
+            // 翻页动画绑在 TabView 上，而不是在 `runAutoScroll` 里用
+            // `withAnimation` 包住 `pageIndex += 1`。
+            //
+            // `pageIndex` 是 HomeView 自己的 @State，用全局 withAnimation 写它
+            // 等于**每 4 秒把整个 HomeView 的 body 拖进一次显式动画事务**。
+            // 这一下要是正好落在用户滚动、大标题正在收起的瞬间，标题的布局
+            // 会被卷进这个事务里停在半路 —— 就是那个偶发的标题卡住。
+            // 绑在这里，动画只作用于轮播子树。
+            .animation(.easeInOut(duration: 0.45), value: pageIndex)
             // 八张卡一个高度。跟着当前页的内容变高变矮是很难受的：
             // 页面下半截会跟着上下跳，眼睛每翻一页都要重新找位置。
             .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: HomeLayout.screenWidth))
@@ -242,9 +261,8 @@ struct HomeView: View {
             guard !Task.isCancelled, Date() >= autoScrollResumeAt else { continue }
             // 一直往后推就行 —— 推到尾部那张哨兵页之后，
             // `wrapIfNeeded` 会无动画地接回第一张，转成一个环。
-            withAnimation(.easeInOut(duration: 0.45)) {
-                pageIndex += 1
-            }
+            // 动画由 TabView 上的 `.animation(_:value:)` 负责，这里只改值。
+            pageIndex += 1
         }
     }
 
@@ -312,8 +330,8 @@ struct HomeView: View {
         return VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "\(month) 月概览", subtitle: "本机记录 · \(monthStats.ticketCount) 注")
 
-            // 盈亏是这张卡的主角，单独占一行给足字号；
-            // 投入和奖金退到下面一行当支撑数据。
+            // 收支是这张卡的主角，单独占一行给足字号；
+            // 票面金额和奖金退到下面一行当支撑数据。
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(MoneyText.format(monthStats.net))
                     .font(.system(.title, design: .rounded, weight: .bold))
@@ -323,7 +341,7 @@ struct HomeView: View {
                     .minimumScaleFactor(0.6)
                     .foregroundStyle(Palette.profitColor(monthStats.net))
                 if monthStats.ticketCount > 0 {
-                    Text(monthStats.net >= 0 ? "盈利" : "亏损")
+                    Text(monthStats.net >= 0 ? "结余" : "支出")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -341,7 +359,7 @@ struct HomeView: View {
             }
 
             HStack(spacing: 10) {
-                miniStat("投入", MoneyText.format(monthStats.cost), "arrow.down.circle.fill", .secondary)
+                miniStat("票面金额", MoneyText.format(monthStats.cost), "arrow.down.circle.fill", .secondary)
                 miniStat("奖金", MoneyText.format(monthStats.prize), "trophy.fill", Palette.profit)
             }
 
@@ -405,9 +423,9 @@ enum HomeLayout {
     }
 }
 
-// MARK: - 盈亏热力图
+// MARK: - 收支热力图
 
-/// 逐日盈亏方格图。
+/// 逐日收支方格图。
 ///
 /// 换掉原来的折线图：买彩票长期期望为负，折线永远是一条从左上到右下的
 /// 45° 斜坡，看一次就没有信息量了。方格图把「哪天买了、那天是赚是亏、
@@ -575,7 +593,7 @@ struct ProfitHeatmap: View {
             .defaultScrollAnchor(.trailing)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("逐日盈亏方格图，共 \(grid.byDay.count) 天有记录")
+        .accessibilityLabel("逐日收支方格图，共 \(grid.byDay.count) 天有记录")
     }
 
     /// 一周小结。
@@ -608,9 +626,9 @@ struct ProfitHeatmap: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                row("投入", MoneyText.format(summary.cost), .primary)
+                row("票面金额", MoneyText.format(summary.cost), .primary)
                 row("奖金", MoneyText.format(summary.prize), .primary)
-                row("盈亏", MoneyText.format(summary.net), Palette.profitColor(summary.net))
+                row("收支", MoneyText.format(summary.net), Palette.profitColor(summary.net))
                 row("中奖率", "\(summary.wonDays)/\(summary.days) 天 · \(Int((summary.hitRate * 100).rounded()))%", .secondary)
             }
         }
@@ -657,12 +675,12 @@ struct ProfitHeatmap: View {
 
     /// 图例 + 最好的一天。
     ///
-    /// 图例的字收成「亏 / 赚」两个字。原来写「全亏 / 大赚」是想说明色阶的
+    /// 图例的字收成「支 / 收」两个字。原来写「全亏 / 大赚」是想说明色阶的
     /// 两端，但色块本身已经从浅到深排开了，浓度的含义一眼就看得出来，
     /// 那两个字只是把一行挤窄。
     private var topBar: some View {
         HStack(spacing: 6) {
-            Text("亏")
+            Text("支")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             ForEach([1.0, 0.55, 0.25], id: \.self) { level in
@@ -678,7 +696,7 @@ struct ProfitHeatmap: View {
                     .fill(Palette.profit.opacity(0.30 + 0.70 * level))
                     .frame(width: 9, height: 9)
             }
-            Text("赚")
+            Text("收")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)

@@ -16,7 +16,9 @@ DEMO ACCOUNT: Not required. The app has no accounts, no login and no backend; ev
 WHAT THIS APP IS
 "对个号" is an offline record-keeping utility for paper lottery tickets. The user types in, or photographs, the numbers printed on tickets they ALREADY hold, bought at licensed retail outlets in China. The app checks those numbers against published draw results and summarises the user's own record. It is a notebook and a calculator, nothing more.
 
-Every field in the entry screen is labelled as a transcription of the physical ticket rather than a choice the user is making: "票面玩法" (ticket play type), "票面类型" (single / multiple / dan-tuo TICKET), "票面倍数" (ticket multiplier), "票面共 N 注" (N lines printed on the ticket) and "票面金额" (the amount printed on the ticket). The issue picker shows only draw progress ("待开奖" pending / "已开奖" drawn); it never shows sales status, a sales cut-off time or whether a draw can still be entered.
+Every field in the entry and scan-review screens is labelled as a transcription of the physical ticket rather than a choice the user is making: "票面玩法" (ticket play type), "票面类型" (single / multiple / dan-tuo TICKET), "票面倍数" (ticket multiplier), "票面追加" (the "add-on" line printed on a Da Le Tou ticket), "票面共 N 注" (N lines printed on the ticket) and "票面金额" (the amount printed on the ticket). The issue picker shows only draw progress ("待开奖" pending / "已开奖" drawn); it never shows sales status, a sales cut-off time or whether a draw can still be entered.
+
+Changing the ticket type on the scan-review screen never silently rewrites the recognised numbers: single, multiple and dan-tuo tickets have genuinely different number structures, so the app hands the user back to manual entry with the ticket photo attached and asks them to re-enter from the printed ticket.
 
 WHAT THIS APP DOES NOT DO (regarding Guideline 5.3 / 5.3.4)
 - It does NOT sell, order, reserve, broker or facilitate the purchase of a ticket. There is no purchase entry point anywhere in the app.
@@ -42,7 +44,7 @@ NETWORKING AND PRIVACY
 The app makes exactly one kind of network request: an unauthenticated HTTPS GET for static public JSON files (official draw results and the yearly draw calendar) hosted at raw.githubusercontent.com. No user data, device identifier or usage information is ever transmitted. There is no analytics, no advertising and no server of our own - hence the privacy label declares "Data Not Collected".
 
 DISCLAIMERS SHOWN IN THE APP
-Disclaimers appear wherever a number is shown or entered, not only in an About page: beneath the draw numbers on Home; at the bottom of every single ticket card in the Wallet; on the scan entry, crop and recognition-review screens; and directly above the "加入票夹" (add to wallet) save button in manual entry. They state that recognition can be wrong and must be checked against the physical ticket, that the physical ticket and the official claim process govern any prize, and that this app does not sell tickets, does not buy them on the user's behalf and does not redeem prizes. The first time a record is saved, a "理性购彩" (play responsibly) dialog repeats this. Settings > About repeats the full statement, links to the Privacy Policy and Support pages, and asks users to buy only through licensed local retail channels and to play responsibly.
+Disclaimers appear wherever a number is shown or entered, not only in an About page: beneath the draw numbers on Home; at the bottom of every single ticket card in the Wallet; on the scan entry, crop and recognition-review screens; and directly above the "加入票夹" (add to wallet) save button in manual entry. They state that recognition can be wrong and must be checked against the physical ticket, that the physical ticket and the official claim process govern any prize, and that this app does not sell tickets, does not buy them on the user's behalf and does not redeem prizes. The first time a record is saved - by either manual entry or scan import - a "理性购彩" (play responsibly) dialog repeats this and must be acknowledged before anything is written. Settings > About repeats the full statement, links to the Privacy Policy and Support pages, and asks users to buy only through licensed local retail channels and to play responsibly.
 
 Support URL: https://wenjinliuu.github.io/lottery-ios/support.html
 Privacy Policy: https://wenjinliuu.github.io/lottery-ios/
@@ -65,3 +67,5 @@ Thank you for your review. A video walkthrough is available on request.
 | 保存按钮写的是「加入票夹」 | `grep -rn '加入票夹' LotteryWallet/` 命中 `EntryFlowView.swift` 与 `TicketScanView.swift` |
 | 界面不出现销售状态 | `grep -rn '停售\|已截止\|可购买\|在售\|投注' LotteryWallet/ --include=*.swift` 只应命中注释与内部字段名，无用户可见字符串 |
 | 票面类型三条路径同源 | `EntryMode.shape` / `ScanPlay.shape` / `EntryKind.shape` 全部返回 `TicketShape`，显示名只在 `Models/TicketShape.swift` |
+| 理性购彩弹窗两条保存路径都拦 | `grep -rn 'responsibleAcknowledged' LotteryWallet/` 应同时命中 `EntryFlowView.swift` 与 `TicketScanView.swift` |
+| 公益金按彩种计提 | `GameKey.welfareRate`，比例由 `Tests/` 里的真实样票反推 |

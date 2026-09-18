@@ -1,7 +1,7 @@
 import XCTest
 @testable import LotteryWallet
 
-/// 盈亏统计的回归测试。
+/// 收支统计的回归测试。
 /// 这一块正是导入备份后卡死的根源，重点锁两件事：
 /// 累计值要对，点数不能随时间跨度无限增长。
 final class ProfitStatsTests: XCTestCase {
@@ -23,6 +23,45 @@ final class ProfitStatsTests: XCTestCase {
         // "全部"范围会在最前面补一个 0 基线点
         XCTAssertEqual(series.days.first?.close, 0)
         XCTAssertEqual(series.days.last?.close, 10)
+    }
+
+    /// 公益金比例必须逐个彩种对上**真实票面**。
+    ///
+    /// 这些数字来自 `TicketTextParserTests` / `TicketTextParserGamesTests` 里的
+    /// 样票：每张票底都印着「感谢您为公益事业贡献 X 元」，和票面合计一除
+    /// 就是这个比例。原来首页一律乘 0.36，八个彩种里五个是错的。
+    func testWelfareRateMatchesPrintedTickets() {
+        // 票面合计 → 票面印的公益金
+        let samples: [(GameKey, Double, Double)] = [
+            (.ssq,  18, 6.48),   // 双色球样票
+            (.dlt,  18, 6.48),   // 大乐透样票（另有 60/21.6、2772/997.92 等五张）
+            (.qlc,   6, 2.16),   // 七乐彩样票
+            (.qxc,  10, 3.70),   // 七星彩样票
+            (.pl5,   4, 1.48),   // 排列5 样票
+            (.fc3d, 10, 3.40),   // 福彩3D 样票
+            (.pl3,   4, 1.36),   // 排列3 样票
+            (.k8,    4, 1.20)    // 快乐8 样票
+        ]
+        for (game, total, printed) in samples {
+            XCTAssertEqual(total * game.welfareRate, printed, accuracy: 0.001,
+                           "\(game.label) 的公益金应与票面一致")
+        }
+        // 固定 0.36 的老写法必须已经被打破，否则这个测试形同虚设
+        XCTAssertNotEqual(GameKey.k8.welfareRate, 0.36)
+        XCTAssertNotEqual(GameKey.pl3.welfareRate, 0.36)
+        XCTAssertNotEqual(GameKey.qxc.welfareRate, 0.36)
+    }
+
+    /// 公益金合计要逐条按彩种累加，不能拿总额乘一个比例。
+    func testWelfareTotalIsSummedPerGame() {
+        let entries = [
+            entry("2026-05-01", cost: 100, prize: 0, game: .ssq),  // 0.36 → 36
+            entry("2026-05-02", cost: 100, prize: 0, game: .k8)    // 0.30 → 30
+        ]
+        let series = ProfitStats.series(entries: entries, range: .all)
+        XCTAssertEqual(series.welfareTotal, 66, accuracy: 0.001)
+        // 拿总额乘 0.36 会得到 72 —— 正是这次要修掉的算法
+        XCTAssertNotEqual(series.welfareTotal, series.costTotal * 0.36)
     }
 
     /// 同一天的多注要合并成一个点。
