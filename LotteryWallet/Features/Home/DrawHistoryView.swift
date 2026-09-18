@@ -104,7 +104,11 @@ struct DrawHistoryView: View {
                      ? "没读到整年数据，检查一下网络再试"
                      : "当前显示最近 \(count) 期")
                     .font(.caption2)
-                    .foregroundStyle(drawStore.yearLoadFailed(item) ? Palette.warning : .tertiary)
+                    // 三元的两支必须同类型：Palette.warning 是 Color，
+                    // 而 .tertiary 是 HierarchicalShapeStyle，直接混写编译不过。
+                    .foregroundStyle(drawStore.yearLoadFailed(item)
+                                     ? AnyShapeStyle(Palette.warning)
+                                     : AnyShapeStyle(.tertiary))
             }
             .frame(maxWidth: .infinity)
             .padding(.top, 10)
