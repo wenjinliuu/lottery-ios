@@ -135,9 +135,9 @@ struct SettingsView: View {
                     }
                 }
             }
-            // 见 `HomeView` 里同一处的说明：大标题页面的导航栏必须有底色。
+            // 见 `HomeView` 里同一处的说明：大标题页面只给底色，
+            // 绝不能再加 toolbarBackgroundVisibility(.visible) —— 那会把大标题弄没。
             .toolbarBackground(Palette.canvas, for: .navigationBar)
-            .toolbarBackgroundVisibility(.visible, for: .navigationBar)
             .navigationTitle("设置")
             .disabled(isBusy)
             .overlay { if isBusy { busyOverlay } }

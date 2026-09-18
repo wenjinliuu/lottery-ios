@@ -24,11 +24,15 @@ struct EntryReference {
     /// 硬转出来的号码必然和用户手里那张票对不上。所以扫描页改了票型就直接
     /// 带着照片转到这里重录，这个字段只负责让录入页**一进来就落在那一种**上。
     var shape: TicketShape? = nil
+    /// 扫描已经认出来的期次。改票面类型只是重录号码，期号没有理由让人再选一遍。
+    var issue: CalendarIssue? = nil
 }
 
 struct EntryFlowView: View {
     /// 从扫描页转过来时带的票面照片。手动从标签栏进来就是 nil。
     var reference: EntryReference?
+    /// 存进票夹之后通知调用方。扫描页靠它把已经处理掉的那张票从复核列表里摘掉。
+    var onSaved: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -119,10 +123,43 @@ struct EntryFlowView: View {
     private var isOverLimit: Bool { combinationCount > TicketBuilder.maxCombinations }
     private var canSave: Bool { combinationCount > 0 && !isOverLimit && target.isAvailable }
 
+    /// 从扫描页改票面类型转过来时的说明。
+    ///
+    /// 没有这一句的话，用户点一下「复式票」，屏幕上换出来一个空的选号盘 ——
+    /// 他既不知道自己为什么到了这里，也不知道该干什么。这一句要回答的就是
+    /// 这两个问题：为什么换页面，以及现在要做什么。
+    @ViewBuilder
+    private var handoffNotice: some View {
+        if let shape = reference?.shape {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(game.accent.accentColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("已切换为\(shape.label)")
+                        .font(.caption.weight(.semibold))
+                    Text("\(shape.label)和原来的号码结构不一样，没法直接换算。期号已经带过来了，对照下面的票面把号码重录一遍就行。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(game.tint.opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .accessibilityElement(children: .combine)
+        }
+    }
+
     /// 票面照片。只在从扫描页转过来时才有。
     ///
-    /// 压得很扁（110pt）—— 它是**对照用**的，不是主角；真要看清小字有「放大」。
-    /// 给太高的话选号盘会被挤出屏幕，而那才是这一页要干的事。
+    /// 它是**对照用**的，不是主角；真要看清小字有「放大」。
+    /// 给太高的话选号盘会被挤出屏幕，而那才是这一页要干的事 ——
+    /// 所以只在「改票面类型转过来」这条路上给得高一些（150pt）：
+    /// 那条路上用户是**照着这张照片一个号一个号敲**的，看不清就干不了活。
     @ViewBuilder
     private var referenceCard: some View {
         if let image = reference?.image {
@@ -134,7 +171,7 @@ struct EntryFlowView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: .infinity)
-                        .frame(maxHeight: 110)
+                        .frame(maxHeight: reference?.shape == nil ? 110 : 150)
                     Label("放大", systemImage: "arrow.up.left.and.arrow.down.right")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white)
@@ -161,6 +198,7 @@ struct EntryFlowView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    handoffNotice
                     referenceCard
                     gamePicker
                     if showsPlayModePicker { playModePicker }
@@ -223,11 +261,13 @@ struct EntryFlowView: View {
                 if let detected = reference?.game { game = detected }
                 resetForGame(game)
                 // 从扫描页改票面类型转过来的，直接落在用户选的那一种上。
-                // `resetForGame` 会把 mode 打回 .manual，所以必须放在它后面。
+                // `resetForGame` 会把 mode 打回 .manual、把 pickedIssue 清空，
+                // 所以这两样都必须放在它后面。
                 if let shape = reference?.shape,
                    let target = EntryMode.modes(for: game).first(where: { $0.shape == shape }) {
                     mode = target
                 }
+                if let issue = reference?.issue { pickedIssue = issue }
                 await drawStore.loadYearCalendars()
             }
         }
@@ -701,6 +741,7 @@ struct EntryFlowView: View {
                              target: target,
                              source: mode.rawValue)
             showToast("已保存 \(built.count) 注", symbol: "checkmark.seal.fill", feedback: .success)
+            onSaved?()
             dismiss()
         } catch {
             saveError = "保存失败：\(error.localizedDescription)"
