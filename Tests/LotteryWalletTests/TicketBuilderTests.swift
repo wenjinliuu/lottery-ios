@@ -74,7 +74,57 @@ final class TicketBuilderTests: XCTestCase {
         XCTAssertEqual(EntryMode.modes(for: .ssq), [.manual, .system, .dantuo])
         XCTAssertEqual(EntryMode.modes(for: .k8), [.manual])
         XCTAssertEqual(EntryMode.allCases, [.manual, .system, .dantuo])
-        XCTAssertEqual(EntryMode.manual.label, "手选")
+        XCTAssertEqual(EntryMode.manual.label, "单式票")
+        XCTAssertEqual(EntryMode.system.label, "复式票")
+        XCTAssertEqual(EntryMode.dantuo.label, "胆拖票")
+    }
+
+    /// 票面类型的显示名只有 `TicketShape` 一处，三条录入路径都落到它上面。
+    func testTicketShapeIsSharedByEntryAndScan() {
+        XCTAssertEqual(EntryMode.manual.shape, .single)
+        XCTAssertEqual(EntryMode.system.shape, .system)
+        XCTAssertEqual(EntryMode.dantuo.shape, .dantuo)
+
+        XCTAssertEqual(ScanPlay.single.shape, .single)
+        XCTAssertEqual(ScanPlay.system.shape, .system)
+        XCTAssertEqual(ScanPlay.dantuo.shape, .dantuo)
+
+        // 扫描导入的复式票和手动录入的复式票，在票夹里必须是同一个标签
+        XCTAssertEqual(ScanPlay.system.label, EntryMode.system.label)
+        XCTAssertEqual(ScanPlay.dantuo.label, EntryMode.dantuo.label)
+    }
+
+    /// 历史记录里的各种 `entryLabel` 写法都要能折回正确的票面类型。
+    ///
+    /// 这是上一版的真实事故：`shapeLabel` 按**全等**匹配「复式」「胆拖」，
+    /// 只要把录入页的文案改一个字（比如改成「复式票」），所有新存的复式票
+    /// 在票夹里就会被标成「单式」。改成包含判断之后，新旧写法都认得。
+    func testShapeSurvivesEntryLabelRewording() {
+        // 旧写法
+        XCTAssertEqual(TicketShape.from(entryLabel: "复式"), .system)
+        XCTAssertEqual(TicketShape.from(entryLabel: "胆拖"), .dantuo)
+        XCTAssertEqual(TicketShape.from(entryLabel: "单式"), .single)
+        // 旧录入方式写法，一律按单式票看
+        XCTAssertEqual(TicketShape.from(entryLabel: "手选"), .single)
+        XCTAssertEqual(TicketShape.from(entryLabel: "普通"), .single)
+        XCTAssertEqual(TicketShape.from(entryLabel: "随机"), .single)
+        XCTAssertEqual(TicketShape.from(entryLabel: "扫描"), .single)
+        XCTAssertEqual(TicketShape.from(entryLabel: ""), .single)
+        // 新写法
+        XCTAssertEqual(TicketShape.from(entryLabel: "复式票"), .system)
+        XCTAssertEqual(TicketShape.from(entryLabel: "胆拖票"), .dantuo)
+        XCTAssertEqual(TicketShape.from(entryLabel: "单式票"), .single)
+
+        // 当前录入 / 扫描实际会存进去的值，必须原样折回来
+        for mode in EntryMode.allCases {
+            XCTAssertEqual(TicketShape.from(entryLabel: mode.label), mode.shape)
+        }
+        for play in [ScanPlay.single, .system, .dantuo] {
+            XCTAssertEqual(TicketShape.from(entryLabel: play.label), play.shape)
+        }
+        for kind in [EntryKind.random, .manual, .system, .dantuo, .scan] {
+            XCTAssertEqual(TicketShape.from(entryLabel: kind.label), kind.shape)
+        }
     }
 
     /// 组三必须出两个相同的号，组六必须三个都不同。

@@ -37,15 +37,20 @@ enum EntryKind: String, Codable, Sendable {
     case dantuo     // 胆拖
     case scan       // 扫描导入
 
-    var label: String {
+    /// 这种录入方式对应的票面类型。
+    ///
+    /// `random` 和 `scan` 只说明记录是**怎么进来的**，不决定票型：
+    /// 扫描导入的复式票会自己带上 `entryLabel`，走不到这里的兜底。
+    var shape: TicketShape {
         switch self {
-        case .random: "随机"
-        case .manual: "普通"
-        case .system: "复式"
-        case .dantuo: "胆拖"
-        case .scan: "扫描"
+        case .system: .system
+        case .dantuo: .dantuo
+        case .random, .manual, .scan: .single
         }
     }
+
+    /// 落库时的兜底标签。票面类型的显示名只有 `TicketShape` 一处。
+    var label: String { shape.label }
 }
 
 /// 一注彩票记录。一次购买生成一个 `batchId`，一张电子票即一个 batch。

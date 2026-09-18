@@ -514,7 +514,7 @@ struct TicketScanView: View {
     /// 现在两边都走 `Game.ticketLabel`，玩法是从**每一注**的集合里取的：
     /// 排列3 的组选票一眼能看出是组选还是直选，快乐8 看得出是选几。
     private func headLabel(_ ticket: ScannedTicket) -> String {
-        ticket.game.ticketLabel(modes: playModes(ticket), shape: ticket.play.label)
+        ticket.game.ticketLabel(modes: playModes(ticket), shape: ticket.play.shape)
     }
 
     /// 这张票上出现过的玩法。
@@ -874,15 +874,18 @@ struct TicketScanView: View {
         VStack(spacing: 4) {
             // 玩法和「追不追加」排在最上面，两个加减号的 Stepper 挨在一起。
             // 开关和 Stepper 交错着放，手指要在两种交互之间来回切，很别扭。
+            //
+            // 这几行的措辞和手动录入页保持一致：一律是「票面……」，
+            // 说的是**那张纸上印着什么**，不是在这儿决定要买什么。
             playModeRow(ticket)
             if game == .dlt {
-                Toggle("追加投注（3 元一注）", isOn: ticket.addOn)
+                Toggle("票面追加（3 元一注）", isOn: ticket.addOn)
                     .font(.subheadline)
             }
-            Stepper("倍数 \(ticket.wrappedValue.multiple)", value: ticket.multiple, in: 1...99)
+            Stepper("票面倍数 \(ticket.wrappedValue.multiple)", value: ticket.multiple, in: 1...99)
                 .font(.subheadline)
             if game == .dlt {
-                Stepper("连打 \(ticket.wrappedValue.periods) 期", value: ticket.periods, in: 1...20)
+                Stepper("票面连打 \(ticket.wrappedValue.periods) 期", value: ticket.periods, in: 1...20)
                     .font(.subheadline)
             }
         }
@@ -900,7 +903,7 @@ struct TicketScanView: View {
     ///
     /// 3D 和排列3 的直选·组三·组六不在这儿改 —— 那是**逐注**的东西
     /// （实体票每注各印各的），票头改一下就把每一注都盖成同一种，
-    /// 反而比认错更糟。大乐透的玩法就是「追不追加」，上面那个开关管着。
+    /// 反而比认错更糟。大乐透的票面玩法就是「追不追加」，上面那个开关管着。
     /// 双色球、七乐彩、排列5、七星彩本来就只有一种玩法。
     @ViewBuilder
     private func playModeRow(_ ticket: Binding<ScannedTicket>) -> some View {
@@ -909,9 +912,9 @@ struct TicketScanView: View {
         if value.game == .k8, modes.count > 1 {
             let current = value.playMode.isEmpty ? value.game.defaultPlayMode : value.playMode
             HStack(spacing: 8) {
-                Text("玩法").font(.subheadline)
+                Text("票面玩法").font(.subheadline)
                 Spacer(minLength: 8)
-                Picker("玩法", selection: Binding(
+                Picker("票面玩法", selection: Binding(
                     get: { current },
                     set: { newValue in
                         ticket.playMode.wrappedValue = newValue
@@ -1109,7 +1112,7 @@ struct TicketScanView: View {
                             }
                             return ticket.playMode
                         }()
-                        // entryLabel 存的是**票型**（单式 / 复式 / 胆拖），
+                        // entryLabel 存的是**票面类型**（单式票 / 复式票 / 胆拖票），
                         // 不是录入方式 —— 票夹卡片上要拼成票面那句话
                         // 「组选单式」「选八单式」，而「扫描」两个字对核对毫无帮助。
                         var item = Ticket(numbers: numbers,

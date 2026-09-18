@@ -156,16 +156,23 @@ struct EntryFlowView: View {
                 VStack(spacing: 16) {
                     referenceCard
                     gamePicker
-                    if !game.playModes.isEmpty { playModePicker }
+                    if showsPlayModePicker { playModePicker }
                     if EntryMode.modes(for: game).count > 1 { modePicker }
                     targetCard
                     pickerPanel
                     previewSection
                     multipleRow
                 }
-                // 快乐8 换玩法就是换"选几个号"，已选的号码必须一起清掉，
+                // 换玩法就是换"一注选几个号"，已选的号码必须一起清掉，
                 // 否则选十的 10 个号会被当成选五的票留在那里。
-                .onChange(of: playMode) { _, _ in resetSelections(clearCandidates: true) }
+                //
+                // **大乐透除外。** 它的「追加」只改单注价格（2 元 → 3 元），
+                // 号码个数和取值范围一个都不变。跟着清空的话，用户选好七个号
+                // 再想起来这张票是追加的，一打开开关号码全没了。
+                .onChange(of: playMode) { _, _ in
+                    guard game != .dlt else { return }
+                    resetSelections(clearCandidates: true)
+                }
                 .padding(.horizontal, 16)
                 // safeAreaInset 已经按底栏高度把内容顶上去了，
                 // 这里再垫 130 就是一大片滚不完的空白。
@@ -194,7 +201,7 @@ struct EntryFlowView: View {
                 Button("我已了解", action: { settings.responsibleAcknowledged = true; save() })
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("本应用只记录你已经在正规线下渠道购买的彩票，不销售也不代购。请理性参与，量力而行。")
+                Text("本应用仅用于记录和核对你已持有的实体彩票，不销售、不代购、不提供兑奖服务。请理性参与，量力而行。")
             }
             .alert("无法保存", isPresented: .init(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
                 Button("好", role: .cancel) { saveError = nil }
@@ -271,20 +278,23 @@ struct EntryFlowView: View {
 
     // MARK: - 玩法 / 录入方式
 
+    /// 大乐透的「普通 / 追加」不在这儿选。
+    ///
+    /// 它和别的玩法不是一回事：快乐8 的「选几」、3D 的「组三/组六」决定
+    /// 一注选几个号、按哪张奖级表核对，是**录号之前**就得定下来的事；
+    /// 追加只是票面上多打了一行、单注贵一块钱，号码一个都不变。
+    /// 把它和倍数放在一起（都是"抄票面上印的数字"），语义才对得上。
+    private var showsPlayModePicker: Bool {
+        !game.playModes.isEmpty && game != .dlt
+    }
+
     private var playModePicker: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "玩法")
-            // 快乐8 有「选一」到「选十」十个玩法。
-            //
-            // 十段分段控件每段只剩不到 30pt，中文标签会被压成省略号；
-            // 换成菜单又把选项藏进了二级弹窗 —— 十个平级选项本来一眼能看全，
-            // 藏起来只是把「看一眼」变成「点开、找、再点」。
-            // 现在是一条可横滑的芯片：全部可见、当前选中一直亮着、
-            // 手指落下就有反馈，不需要任何弹窗。
+            SectionHeader(title: "票面玩法")
             if game.playModes.count > 4 {
-                playModeScroller
+                playModeGrid
             } else {
-                Picker("玩法", selection: $playMode) {
+                Picker("票面玩法", selection: $playMode) {
                     ForEach(game.playModes) { item in
                         Text(item.label).tag(item.key)
                     }
@@ -295,43 +305,43 @@ struct EntryFlowView: View {
         .contentCard()
     }
 
-    /// 横滑的玩法芯片条。
-    private var playModeScroller: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(game.playModes) { item in
-                        let isOn = playMode == item.key
-                        Button {
-                            playMode = item.key
-                        } label: {
-                            Text(item.label)
-                                .font(.footnote.weight(.bold))
-                                .foregroundStyle(isOn ? game.onTint : Color.primary)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(isOn ? AnyShapeStyle(game.tint) : AnyShapeStyle(Color.primary.opacity(0.06)),
-                                            in: Capsule())
-                                .overlay(Capsule().strokeBorder(isOn ? game.accent.solidStroke : .clear, lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                        .id(item.key)
-                        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
-                    }
+    /// 快乐8 的「选一」到「选十」，两行五列铺开。
+    ///
+    /// 原来是一条横滑芯片条，两个毛病：十个选项只看得见前四五个，默认的
+    /// 「选十」在最右边，打开页面看到的是「选一」被选中的错觉；而且为了让
+    /// 芯片在滑动时不被裁掉用了 `scrollClipDisabled()`，芯片会**画到卡片
+    /// 外面去**，压在相邻的卡片上。
+    ///
+    /// 十个等价的平级选项本来就该一次全看见。固定两行五列之后没有滚动、
+    /// 没有溢出，当前选中一直亮着，和其他彩种的分段控件也是同一个观感。
+    private var playModeGrid: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5),
+                  spacing: 8) {
+            ForEach(game.playModes) { item in
+                let isOn = playMode == item.key
+                Button {
+                    playMode = item.key
+                } label: {
+                    Text(item.label)
+                        .font(.footnote.weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .foregroundStyle(isOn ? game.onTint : Color.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(isOn ? AnyShapeStyle(game.tint) : AnyShapeStyle(Color.primary.opacity(0.06)),
+                                    in: Capsule())
+                        .overlay(Capsule().strokeBorder(isOn ? game.accent.solidStroke : .clear, lineWidth: 1))
                 }
-                .padding(.vertical, 2)
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
             }
-            .scrollClipDisabled()
-            .animation(.spring(response: 0.28, dampingFraction: 0.82), value: playMode)
-            // 默认玩法是「选十」，在最右边。不滚过去的话打开页面看到的是
-            // 「选一」被选中的错觉。
-            .onAppear { proxy.scrollTo(playMode, anchor: .center) }
-            .onChange(of: game) { _, _ in proxy.scrollTo(playMode, anchor: .center) }
         }
+        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: playMode)
     }
 
     private var modePicker: some View {
-        Picker("录入方式", selection: $mode.animation(.spring(response: 0.3, dampingFraction: 0.85))) {
+        Picker("票面类型", selection: $mode.animation(.spring(response: 0.3, dampingFraction: 0.85))) {
             ForEach(EntryMode.modes(for: game)) { item in
                 Text(item.label).tag(item)
             }
@@ -385,13 +395,14 @@ struct EntryFlowView: View {
         .accessibilityHint("点按可以从整年开奖日历里改绑其他期次")
     }
 
+    /// 期次卡副标题。
+    ///
+    /// 只说开奖时刻，不说销售状态 —— 这一页在帮用户确认"手里这张票属于哪一期"，
+    /// 不是在告诉他"现在还能买哪一期"。`buyEndTime` 仍然留在 `DrawTarget` 里，
+    /// 自动落到下一期的推断还要用它（见 `DrawStore.calendarTarget`）。
     private var targetSubtitle: String {
         var text = "\(DateText.friendly(target.openTime)) 开奖"
-        if pickedIssue != nil {
-            text += " · 手动指定"
-        } else if !target.buyEndTime.isEmpty {
-            text += " · \(DateText.friendly(target.buyEndTime)) 停售"
-        }
+        if pickedIssue != nil { text += " · 手动指定" }
         return text
     }
 
@@ -423,7 +434,7 @@ struct EntryFlowView: View {
                 Button("随机填充", systemImage: "wand.and.stars") { fillRandomSelection() }
                     .buttonStyle(SecondaryGlassButton(tint: game.tint))
                 if mode == .manual {
-                    Button("加入候选", systemImage: "plus.circle") { addCandidate() }
+                    Button("加入", systemImage: "plus.circle") { addCandidate() }
                         .buttonStyle(SecondaryGlassButton(tint: game.tint))
                         .disabled(pendingLine == nil)
                 }
@@ -479,22 +490,48 @@ struct EntryFlowView: View {
         }
     }
 
-    // MARK: - 倍数
+    // MARK: - 票面倍数 / 追加
 
+    /// 票面上印着的倍数和「追加」。
+    ///
+    /// 这两样是同一类东西 —— 都是照着用户手里那张纸抄下来的数字，
+    /// 而不是在这儿决定要买多少。放在一张卡片里，标题都带「票面」两个字。
     private var multipleRow: some View {
-        HStack {
-            Text("倍数")
-                .font(.subheadline.weight(.semibold))
-            Spacer()
-            Stepper(value: $multiple, in: 1...99) {
-                Text("\(multiple) 倍")
-                    .font(.subheadline.weight(.bold))
-                    .monospacedDigit()
-                    .foregroundStyle(game.tint)
+        VStack(spacing: 0) {
+            HStack {
+                Text("票面倍数")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Stepper(value: $multiple, in: 1...99) {
+                    Text("\(multiple) 倍")
+                        .font(.subheadline.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(game.tint)
+                }
+                .fixedSize()
             }
-            .fixedSize()
+
+            if game == .dlt {
+                Divider().padding(.vertical, 12)
+                Toggle(isOn: addOnBinding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("追加")
+                            .font(.subheadline.weight(.semibold))
+                        Text("票面印有「追加」时打开，单注 3 元")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .tint(game.tint)
+            }
         }
         .contentCard()
+    }
+
+    /// 大乐透的追加就是 `playMode == "add"`，底层字段一个没动。
+    private var addOnBinding: Binding<Bool> {
+        Binding(get: { playMode == "add" },
+                set: { playMode = $0 ? "add" : "normal" })
     }
 
     // MARK: - 底栏
@@ -502,28 +539,36 @@ struct EntryFlowView: View {
     private var saveBar: some View {
         VStack(spacing: 8) {
             Divider()
-            HStack {
+            HStack(alignment: .bottom) {
                 Text(isOverLimit
                      ? "组合超过 \(TicketBuilder.maxCombinations) 注上限"
-                     : "共 \(combinationCount) 注")
+                     : "票面共 \(combinationCount) 注")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(isOverLimit ? Palette.warning : .primary)
                 Spacer(minLength: 8)
-                Text(MoneyText.format(totalCost))
-                    .font(.title3.weight(.bold))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .foregroundStyle(game.tint)
+                // 这个金额是**那张纸上印着的合计**，不是在这儿要付的钱。
+                // 不标一行字的话，一个跟着选号实时变的 ¥ 数字看着就像结账页。
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("票面金额")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(MoneyText.format(totalCost))
+                        .font(.title3.weight(.bold))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .foregroundStyle(game.tint)
+                }
+                .fixedSize()
             }
             .padding(.horizontal, 16)
 
-            // 就摆在「确认已购买」这颗按钮上方 —— 这一刻正是最需要说清
+            // 就摆在保存按钮上方 —— 这一刻正是最需要说清
             // 「本应用不卖票、你录的是你已经买到手的票」的时刻。
             DisclaimerNote(text: Disclaimer.entry)
                 .padding(.horizontal, 16)
 
-            Button("确认已购买并加入票夹") {
+            Button("加入票夹") {
                 if settings.responsibleAcknowledged {
                     save()
                 } else {

@@ -86,9 +86,9 @@ enum TicketPreviewBuilder {
 
         let title: String
         switch mode {
-        case .dantuo: title = "\(game.label)-胆拖"
-        case .system: title = "\(game.label)-复式"
-        case .manual: title = "\(game.label)-单式"
+        case .dantuo: title = "\(game.label) · \(TicketShape.dantuo.label)"
+        case .system: title = "\(game.label) · \(TicketShape.system.label)"
+        case .manual: title = "\(game.label) · \(TicketShape.single.label)"
         }
         // 双色球票面会把「红单蓝复」这种组合名印出来，大乐透不印。
         let combined = marksSingleOrMultiple(game) ? names.joined() : ""
@@ -116,7 +116,7 @@ enum TicketPreviewBuilder {
                                                              padded: section.padsNumbers)
                               })
         }
-        return TicketPreview(title: "\(game.label)-单式 · \(lines.count) 注", rows: rows)
+        return TicketPreview(title: "\(game.label) · \(TicketShape.single.label) · \(lines.count) 注", rows: rows)
     }
 }
 
@@ -214,7 +214,7 @@ struct TicketPreviewCard: View {
 
     private var footer: some View {
         HStack(spacing: 6) {
-            Text("\(count) 注")
+            Text("票面共 \(count) 注")
                 .font(.subheadline.weight(.bold))
                 .monospacedDigit()
             if multiple > 1 {
@@ -223,6 +223,9 @@ struct TicketPreviewCard: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
+            Text("票面金额")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             Text(MoneyText.format(cost))
                 .font(.subheadline.weight(.bold))
                 .monospacedDigit()

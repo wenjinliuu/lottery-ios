@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 
-/// 票夹：每次购买是一张电子票，按购买时间倒序。
+/// 票夹：一张实体票对应一条票据记录，按录入时间倒序。
 struct WalletView: View {
 
     @Environment(DrawStore.self) private var drawStore
@@ -16,7 +16,7 @@ struct WalletView: View {
     /// 渲染快照。记录变化时算一次，之后渲染完全不碰 SwiftData 对象。
     @State private var cards: [TicketCard] = []
     @State private var counts: [WalletFilter: Int] = [:]
-    /// 筛选结果也存下来。放在 body 里当计算属性的话，每帧都要把全部电子票过一遍。
+    /// 筛选结果也存下来。放在 body 里当计算属性的话，每帧都要把全部票据过一遍。
     @State private var visibleCards: [TicketCard] = []
 
     /// **进页面时冻结下来的顺序**（batchId → 名次）。
@@ -49,7 +49,7 @@ struct WalletView: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
-    /// 首屏一共画这么多张。一张电子票是一整块带号码球的卡片，
+    /// 首屏一共画这么多张。一张票据是一整块带号码球的卡片，
     /// 几十上百张一次性铺开，进票夹那一下明显要卡。
     static let previewLimit = 12
     /// 分区配额。一刀切 prefix 的话，新结果一多就把历史全挤出首屏，
@@ -356,14 +356,14 @@ struct WalletView: View {
             ContentUnavailableView {
                 Label("票夹是空的", systemImage: "wallet.bifold")
             } description: {
-                Text("扫描纸质彩票，或手动录入已经购买的号码 —— 右下角那颗加号就是入口")
+                Text("拍下你手里的实体彩票，或照着票面手动录入 —— 右下角那颗加号就是入口")
             }
             .padding(.top, 50)
         } else {
             ContentUnavailableView {
                 Label("没有\(filter.label)的票", systemImage: "line.3.horizontal.decrease.circle")
             } description: {
-                Text("这里只显示\(filter.label)的电子票，切回「全部」可以看到其余 \(cards.count) 张。")
+                Text("这里只显示\(filter.label)的票据，切回「全部」可以看到其余 \(cards.count) 张。")
             } actions: {
                 Button("查看全部") {
                     withAnimation(.easeOut(duration: 0.18)) { filter = .all }
@@ -430,7 +430,7 @@ enum WalletRow: Identifiable {
     }
 }
 
-/// 完整电子票列表。票夹首屏只放前几张，其余在这里翻。
+/// 完整票据列表。票夹首屏只放前几张，其余在这里翻。
 /// 完整票列表。
 ///
 /// 这一页原来只是把票铺开，**顶上的筛选条没跟过来** —— 首页只放十张，
@@ -494,7 +494,7 @@ struct WalletAllTicketsView: View {
             .padding(.bottom, 40)
         }
         .background(Palette.canvas)
-        .navigationTitle("全部电子票")
+        .navigationTitle("全部票据")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { status = initialFilter }
         .onDisappear {

@@ -121,14 +121,14 @@ final class PlayLabelParityTests: XCTestCase {
     /// 排列3 的组选票：票头写「组选单式」，组三/组六 是按号码推出来的，
     /// 票面并没有印，所以逐注不标。
     func testPL3GroupTicketLabelsHeadOnly() {
-        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["group6"], shape: "单式"), "组选单式")
+        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["group6"], shape: .single), "组选单式票")
         XCTAssertFalse(TicketCard.showsLineModes([record(.pl3, "group6"), record(.pl3, "group6")],
                                                  game: .pl3))
     }
 
     /// 排列3 直选票。
     func testPL3StraightTicketLabel() {
-        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["single"], shape: "单式"), "直选单式")
+        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["single"], shape: .single), "直选单式票")
     }
 
     /// 一张票上混了组三和组六，逐注就得标出来 —— 两者奖级不同。
@@ -139,7 +139,7 @@ final class PlayLabelParityTests: XCTestCase {
 
     /// 福彩 3D 的实体票**逐注印玩法**，所以永远标；票头反而不重复写。
     func testFC3DAlwaysLabelsEveryLine() {
-        XCTAssertEqual(GameKey.fc3d.ticketLabel(modes: ["group6"], shape: "单式"), "单式")
+        XCTAssertEqual(GameKey.fc3d.ticketLabel(modes: ["group6"], shape: .single), "单式票")
         XCTAssertTrue(TicketCard.showsLineModes([record(.fc3d, "group6"), record(.fc3d, "group6")],
                                                 game: .fc3d))
         XCTAssertEqual(GameKey.fc3d.playLabel(playMode: "single", addOn: false), "单选")
@@ -148,15 +148,15 @@ final class PlayLabelParityTests: XCTestCase {
 
     /// 快乐8 的「选几」和大乐透的「追加」同样要出现在票头。
     func testHeadLabelsForK8AndDLT() {
-        XCTAssertEqual(GameKey.k8.ticketLabel(modes: ["8"], shape: "单式"), "选八单式")
-        XCTAssertEqual(GameKey.dlt.ticketLabel(modes: ["add"], shape: "复式"), "追加复式")
-        XCTAssertEqual(GameKey.dlt.ticketLabel(modes: ["normal"], shape: "复式"), "复式")
+        XCTAssertEqual(GameKey.k8.ticketLabel(modes: ["8"], shape: .single), "选八单式票")
+        XCTAssertEqual(GameKey.dlt.ticketLabel(modes: ["add"], shape: .system), "追加复式票")
+        XCTAssertEqual(GameKey.dlt.ticketLabel(modes: ["normal"], shape: .system), "复式票")
     }
 
     /// 没有玩法可言的彩种，票头就只写票型，别凭空多出两个字。
     func testPlainGamesKeepShapeOnly() {
-        XCTAssertEqual(GameKey.qxc.ticketLabel(modes: [""], shape: "单式"), "单式")
-        XCTAssertEqual(GameKey.qlc.ticketLabel(modes: [""], shape: "单式"), "单式")
-        XCTAssertEqual(GameKey.ssq.ticketLabel(modes: [""], shape: "胆拖"), "胆拖")
+        XCTAssertEqual(GameKey.qxc.ticketLabel(modes: [""], shape: .single), "单式票")
+        XCTAssertEqual(GameKey.qlc.ticketLabel(modes: [""], shape: .single), "单式票")
+        XCTAssertEqual(GameKey.ssq.ticketLabel(modes: [""], shape: .dantuo), "胆拖票")
     }
 }

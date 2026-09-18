@@ -351,7 +351,7 @@ final class DrawStore {
     /// 录入票据时可以绑定的期次。
     ///
     /// 判断顺序刻意把整年日历放在最前面：仓库的 `latest.json` 只带"下一期"，
-    /// 一旦当期停售、开奖号又还没更新，它就只能回一句"本期已截止"，
+    /// 一旦当期停售、开奖号又还没更新，它就只能回一句"没有可绑定的期次"，
     /// 用户在录入页看到的是一个不能保存的死界面。而整年日历里每一期都带
     /// `sale_close_time`，只要顺着往后找第一期还没停售的，永远能给出一个
     /// 可以绑定的期次 —— 过了今天的截止时间就自动落到下一期。
@@ -388,7 +388,8 @@ final class DrawStore {
         }
         if now >= buyEndAt {
             target.isAvailable = false
-            target.message = "本期已截止，请等待下一期数据更新"
+            // 界面上不提销售状态：对用户来说这就是"下一期的数据还没到"。
+            target.message = "下一期的开奖数据还没更新，请稍后刷新"
             return target
         }
         target.isAvailable = true

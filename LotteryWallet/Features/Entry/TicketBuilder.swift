@@ -12,13 +12,18 @@ enum EntryMode: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var label: String {
+    /// 这种录入方式对应的票面类型。录入页的分段控件、落库的 `entryLabel`、
+    /// 票夹卡片上的标签全都从这里出，三处再也不会各说各的。
+    var shape: TicketShape {
         switch self {
-        case .manual: "手选"
-        case .system: "复式"
-        case .dantuo: "胆拖"
+        case .manual: .single
+        case .system: .system
+        case .dantuo: .dantuo
         }
     }
+
+    /// 「单式票 / 复式票 / 胆拖票」。显示名只有 `TicketShape` 一处。
+    var label: String { shape.label }
 
     var kind: EntryKind {
         switch self {

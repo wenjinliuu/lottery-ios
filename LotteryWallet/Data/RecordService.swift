@@ -363,15 +363,12 @@ struct TicketCard: Identifiable, Hashable {
         return game == .fc3d || modes.count > 1
     }
 
-    /// 把历史上各种写法的 `entryLabel` 折成票面用词。
+    /// 把历史上各种写法的 `entryLabel` 折成票面类型。
     ///
-    /// 老记录里存的可能是录入方式（扫描 / 手选）或者录入页的用词（普通），
-    /// 票面上一律叫「单式」。
-    static func shapeLabel(_ raw: String, addOn: Bool) -> String {
-        switch raw {
-        case "复式", "胆拖": return raw
-        default: return "单式"
-        }
+    /// 老记录里存的可能是录入方式（扫描 / 手选）或者录入页的旧用词（普通），
+    /// 一律按单式票看。匹配规则见 `TicketShape.from(entryLabel:)`。
+    static func shape(_ raw: String) -> TicketShape {
+        TicketShape.from(entryLabel: raw)
     }
 
     /// 从展开的每一注反推整票选号。
@@ -492,12 +489,12 @@ extension TicketCard {
         targetStatus = first?.targetStatus ?? .confirmed
         multiple = batch.multiple
         entryLabel = batch.entryLabel
-        // 票面那句话，比如「组选单式」「选八单式」「追加单式」。
+        // 票面那句话，比如「组选单式票」「选八单式票」「追加单式票」。
         // 玩法取**整张票里所有注**的集合 —— 3D 和排列3 一张票上可以混玩法，
         // 只看第一注会把「组选」说成「组六」。
         playLabel = batch.game.ticketLabel(
             modes: Set(records.map(\.playMode)),
-            shape: TicketCard.shapeLabel(batch.entryLabel, addOn: first?.ticket.addOn ?? false)
+            shape: TicketCard.shape(batch.entryLabel)
         )
         count = records.count
         createdAt = batch.createdAt

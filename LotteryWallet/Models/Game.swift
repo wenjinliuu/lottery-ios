@@ -145,14 +145,14 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     /// 大乐透的「追加」原来在票夹里完全看不见 —— 票面只显示录入方式
     /// （随机/普通/复式/胆拖），玩法字段虽然存了却没有任何地方读它。
 
-    /// 票面头部那个完整的玩法标签：`组选单式` / `直选单式` / `选八单式` / `追加单式`。
+    /// 票面头部那个完整的标签：`组选单式票` / `直选单式票` / `选八单式票` / `追加复式票`。
     ///
-    /// 要和实体票面写的一字不差 —— 用户核对时是拿票面对着看的。
     /// `modes` 是这张票里每一注的玩法（3D 和排列3 可以混），
-    /// `shape` 是票型（单式 / 复式 / 胆拖），两段拼起来才是票面那句话。
-    func ticketLabel(modes: Set<String>, shape: String) -> String {
+    /// `shape` 是票面类型（见 `TicketShape`），两段拼起来才是这张票的全名。
+    /// 样票上印的就是「单式票」三个字，所以这里也带「票」字。
+    func ticketLabel(modes: Set<String>, shape: TicketShape) -> String {
         let play = headPlayLabel(modes: modes)
-        return play.isEmpty ? shape : play + shape
+        return play.isEmpty ? shape.label : play + shape.label
     }
 
     /// 票头该写哪种玩法。

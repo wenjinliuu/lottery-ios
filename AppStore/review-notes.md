@@ -14,14 +14,16 @@
 DEMO ACCOUNT: Not required. The app has no accounts, no login and no backend; every feature works on first launch.
 
 WHAT THIS APP IS
-"对个号" is an offline record-keeping utility for paper lottery tickets. The user types in, or photographs, the numbers printed on tickets they have ALREADY purchased at licensed retail outlets in China. The app checks those numbers against published draw results and summarises the user's own spending. It is a notebook and a calculator, nothing more.
+"对个号" is an offline record-keeping utility for paper lottery tickets. The user types in, or photographs, the numbers printed on tickets they ALREADY hold, bought at licensed retail outlets in China. The app checks those numbers against published draw results and summarises the user's own record. It is a notebook and a calculator, nothing more.
+
+Every field in the entry screen is labelled as a transcription of the physical ticket rather than a choice the user is making: "票面玩法" (ticket play type), "票面类型" (single / multiple / dan-tuo TICKET), "票面倍数" (ticket multiplier), "票面共 N 注" (N lines printed on the ticket) and "票面金额" (the amount printed on the ticket). The issue picker shows only draw progress ("待开奖" pending / "已开奖" drawn); it never shows sales status, a sales cut-off time or whether a draw can still be entered.
 
 WHAT THIS APP DOES NOT DO (regarding Guideline 5.3 / 5.3.4)
 - It does NOT sell, order, reserve, broker or facilitate the purchase of a ticket. There is no purchase entry point anywhere in the app.
 - It handles NO money: no payment, wager, balance, top-up, prize redemption or In-App Purchase. The binary contains no StoreKit code.
 - It does NOT predict, recommend or rank numbers, and gives no odds, trend, "hot/cold number" or strategy advice.
 - The only outbound links are the Privacy Policy and Support pages listed in App Store Connect, reachable from Settings > About. There is no embedded web view and no third-party SDK.
-- Every amount shown is either the ticket cost the user typed in, or the published fixed prize tier of a ticket already drawn. It is a personal ledger, not a payout.
+- Every amount shown is either the face value the user transcribed from their ticket ("票面金额"), or the published fixed prize tier of a ticket already drawn. It is a personal ledger, not a payout. The app holds no balance and displays no sales cut-off, "on sale" or "closed" state for any draw.
 The app never places the user in a position to gamble. It only helps someone read a paper ticket they already hold.
 
 ABOUT THE "FILL RANDOMLY" BUTTON
@@ -40,7 +42,7 @@ NETWORKING AND PRIVACY
 The app makes exactly one kind of network request: an unauthenticated HTTPS GET for static public JSON files (official draw results and the yearly draw calendar) hosted at raw.githubusercontent.com. No user data, device identifier or usage information is ever transmitted. There is no analytics, no advertising and no server of our own - hence the privacy label declares "Data Not Collected".
 
 DISCLAIMERS SHOWN IN THE APP
-Disclaimers appear wherever a number is shown or entered, not only in an About page: beneath the draw numbers on Home; at the bottom of every single ticket card in the Wallet; on the scan entry, crop and recognition-review screens; and directly above the "confirm purchased" button in manual entry. They state that recognition can be wrong and must be checked against the physical ticket, that the physical ticket and the official claim process govern any prize, and that this app does not sell or broker tickets. Settings > About repeats the full statement, links to the Privacy Policy and Support pages, and asks users to buy only through licensed local retail channels and to play responsibly.
+Disclaimers appear wherever a number is shown or entered, not only in an About page: beneath the draw numbers on Home; at the bottom of every single ticket card in the Wallet; on the scan entry, crop and recognition-review screens; and directly above the "加入票夹" (add to wallet) save button in manual entry. They state that recognition can be wrong and must be checked against the physical ticket, that the physical ticket and the official claim process govern any prize, and that this app does not sell tickets, does not buy them on the user's behalf and does not redeem prizes. The first time a record is saved, a "理性购彩" (play responsibly) dialog repeats this. Settings > About repeats the full statement, links to the Privacy Policy and Support pages, and asks users to buy only through licensed local retail channels and to play responsibly.
 
 Support URL: https://wenjinliuu.github.io/lottery-ios/support.html
 Privacy Policy: https://wenjinliuu.github.io/lottery-ios/
@@ -60,3 +62,6 @@ Thank you for your review. A video walkthrough is available on request.
 | 权限用途 | `project.yml` 的 NSCameraUsageDescription / NSPhotoLibraryUsageDescription |
 | 随机填充只填选号盘 | `EntryFlowView.fillRandomSelection()` → `TicketBuilder.randomDigits` |
 | 各处免责声明 | `grep -rn 'Disclaimer\.' LotteryWallet/`，文案集中在 `Design/Disclaimer.swift` |
+| 保存按钮写的是「加入票夹」 | `grep -rn '加入票夹' LotteryWallet/` 命中 `EntryFlowView.swift` 与 `TicketScanView.swift` |
+| 界面不出现销售状态 | `grep -rn '停售\|已截止\|可购买\|在售\|投注' LotteryWallet/ --include=*.swift` 只应命中注释与内部字段名，无用户可见字符串 |
+| 票面类型三条路径同源 | `EntryMode.shape` / `ScanPlay.shape` / `EntryKind.shape` 全部返回 `TicketShape`，显示名只在 `Models/TicketShape.swift` |

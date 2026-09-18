@@ -1,18 +1,22 @@
 import Foundation
 
-/// 票面上的玩法。
+/// 识别出来的票面类型。
 enum ScanPlay: String, Hashable, Sendable {
     case single     // 单式：一行一注
     case system     // 复式
     case dantuo     // 胆拖
 
-    var label: String {
+    /// 和录入页共用同一套票面类型，扫描导入的票在票夹里和手动录入的完全一致。
+    var shape: TicketShape {
         switch self {
-        case .single: "单式"
-        case .system: "复式"
-        case .dantuo: "胆拖"
+        case .single: .single
+        case .system: .system
+        case .dantuo: .dantuo
         }
     }
+
+    /// 「单式票 / 复式票 / 胆拖票」。显示名只有 `TicketShape` 一处。
+    var label: String { shape.label }
 
     var entryMode: EntryMode {
         switch self {
@@ -1106,11 +1110,11 @@ enum TicketTextParser {
         let unit = total / units
         if abs(unit - 3) < 0.01, !ticket.addOn {
             ticket.addOn = true
-            return "票面合计 \(MoneyText.format(total)) 折下来是 3 元一注，按追加票记（已自动勾上「追加投注」）。"
+            return "票面合计 \(MoneyText.format(total)) 折下来是 3 元一注，按追加票记（已自动勾上「票面追加」）。"
         }
         if abs(unit - 2) < 0.01, ticket.addOn {
             ticket.addOn = false
-            return "票面合计 \(MoneyText.format(total)) 折下来是 2 元一注，不是追加票（已自动取消「追加投注」）。"
+            return "票面合计 \(MoneyText.format(total)) 折下来是 2 元一注，不是追加票（已自动取消「票面追加」）。"
         }
         return nil
     }
