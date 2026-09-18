@@ -121,6 +121,18 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        PrizeTableView()
+                    } label: {
+                        row("tablecells", .indigo, "奖级对照表")
+                    }
+                } header: {
+                    Text("彩种资料")
+                } footer: {
+                    Text("各彩种的中奖条件与单注奖金，整理自官方公布的游戏规则，仅供参考。")
+                }
+
+                Section {
                     LabeledContent {
                         Text("\(AppInfo.version) (\(AppInfo.build))")
                             .font(.footnote)

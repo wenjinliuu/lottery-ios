@@ -906,30 +906,14 @@ struct DrawCard: View {
     /// 和它描述的卡片隔得很远；写进卡片里既更省地方也更好懂。
     var opensToday: Bool = false
 
-    /// 卡片上要列的奖级。
-    ///
-    /// 快乐8 的奖级表是「选十中十、选十中九…选九中九…」几十行，一等奖这个
-    /// 概念在它身上不成立。排序的第一依据是**单注奖金**，不是表里的行序 ——
-    /// 官方那张表按「选几」从大到小排，而「选十中十 1000 万」和
-    /// 「选九中九 300 万」谁更值钱得按钱算。取金额最高的两档，
-    /// 奖级名本身就带着玩法（「选十中10」），一眼看得出是哪个玩法中的。
-    private var prizes: [PrizeEntry] {
-        PrizeRanking.topTwo(of: draw?.prizeList ?? [], game: game)
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: DrawCardMetrics.blockSpacing) {
             header
             Spacer(minLength: 0)
             numbersRow
             Spacer(minLength: 0)
-            if !prizes.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(prizes.enumerated()), id: \.offset) { rank, entry in
-                        prizeStrip(entry, rank: rank)
-                    }
-                }
-            }
+            // 奖级行和「往期开奖」共用，见 `DrawPrizeLines`
+            DrawPrizeLines(game: game, draw: draw)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, DrawCardMetrics.verticalPadding)
@@ -992,40 +976,6 @@ struct DrawCard: View {
         }
     }
 
-    /// 一个奖级一行。奖金后面不再跟「/注」—— 奖级本来就是按注计的，
-    /// 那两个字每行都重复一遍，纯占地方。
-    private func prizeStrip(_ entry: PrizeEntry, rank: Int) -> some View {
-        HStack(spacing: 6) {
-            // 快乐8 没有「一等奖」这个名字，用排名区分：金额最高的那行挂奖杯。
-            Image(systemName: isTopPrize(entry, rank: rank) ? "trophy.fill" : "rosette")
-                .font(.system(size: 10))
-                .foregroundStyle(game.tint)
-            Text("\(prizeLabel(entry)) \(entry.winningCount) 注")
-                .font(.caption2)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Spacer(minLength: 6)
-            if entry.amount > 0 {
-                Text(MoneyText.compactYuan(entry.amount))
-                    .font(.system(.footnote, design: .rounded, weight: .bold))
-                    .monospacedDigit()
-                    .foregroundStyle(game.tint)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-        }
-    }
-
-    private func isTopPrize(_ entry: PrizeEntry, rank: Int) -> Bool {
-        game == .k8 ? rank == 0 : entry.prizeName.contains("一等奖")
-    }
-
-    /// 快乐8 的奖级名照抄票面（「选十中9」），其余彩种收成「一等奖 / 二等奖」。
-    private func prizeLabel(_ entry: PrizeEntry) -> String {
-        if game == .k8 { return entry.prizeName }
-        return entry.prizeName.contains("一等奖") ? "一等奖" : "二等奖"
-    }
 }
 
 /// 卡片上那两行奖级挑谁。
