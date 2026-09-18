@@ -60,23 +60,20 @@ struct HomeView: View {
                 .padding(.bottom, 120)
             }
             .background(Palette.canvas)
-            // **导航栏要有底色，但不能强制它一直显示。**
+            // **导航栏这里什么都不要加。**
             //
-            // 首页 / 票夹 / 设置是全 App 仅有的三个大标题页面，而
-            // `Palette.canvas` 是加在 ScrollView 上的，导航栏本身是透明的。
-            // 大标题往小标题收的过程中，标题文字底下没有任何遮挡，
-            // 滚动的卡片会直接从它下面穿过去 —— 看起来就是「首页」两个字
-            // 卡在卡片里。
+            // 试过两版，两版都是退步：
+            // 1. `.toolbarBackgroundVisibility(.visible)` 把导航栏钉死在
+            //    「已滚动」外观上，大标题只存在于未滚动的 scrollEdge 外观里，
+            //    结果大标题整个消失，从头到尾只剩中间那行小字。
+            // 2. 只给 `.toolbarBackground(Palette.canvas)` 也不行 —— 那是一块
+            //    平涂的不透明色，把 iOS 26 自带的渐变模糊顶掉了，
+            //    滚动时是一条硬边界压在内容上，比原来更难看。
             //
-            // 但**不能**顺手加 `.toolbarBackgroundVisibility(.visible, ...)`：
-            // 那会把导航栏永远钉在「已滚动」外观上，而大标题只存在于未滚动的
-            // scrollEdge 外观里 —— 加上去之后大标题会整个消失，从头到尾只剩
-            // 中间那行小字。录入页和扫描页可以那样写，是因为它们本来就是
-            // inline 标题，没有大标题可丢。
-            //
-            // 这里只声明底色，可见性交回系统：顶部透明、大标题正常展开，
-            // 往下滚系统自己把底色推上来，收起时就有东西挡着。
-            .toolbarBackground(Palette.canvas, for: .navigationBar)
+            // 系统的 scroll edge effect 本来就会在滚动时给标题后面铺一层
+            // 渐变模糊，那才是这一版该有的观感。偶发的标题错位是轮播每 4 秒
+            // 用全局 withAnimation 写 @State 引起的，已经在下面 TabView 那里
+            // 把动画作用域收窄解决了，跟导航栏背景没关系。
             .navigationTitle("首页")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

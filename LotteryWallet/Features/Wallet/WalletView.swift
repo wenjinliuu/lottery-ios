@@ -137,9 +137,8 @@ struct WalletView: View {
                 .padding(.bottom, 120)
             }
             .background(Palette.canvas)
-            // 见 `HomeView` 里同一处的说明：大标题页面只给底色，
-            // 绝不能再加 toolbarBackgroundVisibility(.visible) —— 那会把大标题弄没。
-            .toolbarBackground(Palette.canvas, for: .navigationBar)
+            // 导航栏不要自己糊底色，交给系统的 scroll edge effect。
+            // 理由见 `HomeView` 里同一处那段注释。
             .navigationTitle("票夹")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
