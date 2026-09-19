@@ -41,6 +41,47 @@ struct RecordService {
         return batchId
     }
 
+    /// 就地改写一整张票。
+    ///
+    /// 「修改」不是「删了重录」：`batchId` 和 `createdAt` 都要原样留住，
+    /// 否则这张票会跳到票夹最上面、和用户记忆里的位置对不上，
+    /// 统计里的归属日期也会跟着漂。
+    ///
+    /// 实现上仍然是「删掉旧的几注、按新号码重新展开」—— 复式改一个号码，
+    /// 展开出来的注数可能从 14 变成 21，逐条对应地改是做不到的。
+    @discardableResult
+    func replace(batchId: String,
+                 tickets: [Ticket],
+                 game: GameKey,
+                 entryKind: EntryKind,
+                 price: Double,
+                 multiple: Int,
+                 target: DrawTarget,
+                 source: String,
+                 createdAt: Date) throws -> String {
+        let descriptor = FetchDescriptor<TicketRecord>(predicate: #Predicate { $0.batchId == batchId })
+        for record in (try? context.fetch(descriptor)) ?? [] {
+            context.delete(record)
+        }
+        for (index, ticket) in tickets.enumerated() {
+            let record = TicketRecord(
+                id: "\(batchId)_\(String(format: "%03d", index + 1))",
+                batchId: batchId,
+                game: game,
+                ticket: ticket,
+                entryKind: entryKind,
+                target: target,
+                price: price,
+                multiple: multiple,
+                source: source,
+                createdAt: createdAt
+            )
+            context.insert(record)
+        }
+        try context.save()
+        return batchId
+    }
+
     func allRecords() -> [TicketRecord] {
         let descriptor = FetchDescriptor<TicketRecord>(sortBy: [SortDescriptor(\TicketRecord.createdAt, order: .reverse)])
         return (try? context.fetch(descriptor)) ?? []

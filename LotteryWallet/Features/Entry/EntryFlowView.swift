@@ -30,9 +30,14 @@ struct EntryReference {
 
 struct EntryFlowView: View {
     /// 从扫描页转过来时带的票面照片。手动从标签栏进来就是 nil。
-    var reference: EntryReference?
+    var reference: EntryReference? = nil
     /// 存进票夹之后通知调用方。扫描页靠它把已经处理掉的那张票从复核列表里摘掉。
     var onSaved: (() -> Void)? = nil
+    /// 要修改的那张票。为空就是新录一张。
+    ///
+    /// 修改和新录共用这个工作台 —— 界面、校验、复式展开规则不该有第二套。
+    /// 差别只有两处：进来时把已有内容填回去，保存时走 `replace` 而不是 `save`。
+    var draft: EntryDraft? = nil
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -226,7 +231,7 @@ struct EntryFlowView: View {
             .background(Palette.canvas)
             .toolbarBackground(Palette.canvas, for: .navigationBar)
             .toolbarBackgroundVisibility(.visible, for: .navigationBar)
-            .navigationTitle("添加彩票")
+            .navigationTitle(draft == nil ? "添加彩票" : "修改彩票")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -258,8 +263,9 @@ struct EntryFlowView: View {
                 hasPrepared = true
                 // 扫描页认出了彩种就先替用户选上 —— 认不出的往往只是号码，
                 // 票头那几个大字一般都认得出来。
+                if let draft { seed(from: draft) }
                 if let detected = reference?.game { game = detected }
-                resetForGame(game)
+                if draft == nil { resetForGame(game) }
                 // 从扫描页改票面类型转过来的，直接落在用户选的那一种上。
                 // `resetForGame` 会把 mode 打回 .manual、把 pickedIssue 清空，
                 // 所以这两样都必须放在它后面。
@@ -621,8 +627,10 @@ struct EntryFlowView: View {
             DisclaimerNote(text: Disclaimer.entry)
                 .padding(.horizontal, 16)
 
-            Button("加入票夹") {
-                if settings.responsibleAcknowledged {
+            Button(draft == nil ? "加入票夹" : "保存修改") {
+                // 修改已有的票不再弹理性购彩 —— 那句提醒是针对「新增一张票」
+                // 这个动作的，改个号码再弹一次只是噪声。
+                if draft != nil || settings.responsibleAcknowledged {
                     save()
                 } else {
                     isResponsibleAlertPresented = true
@@ -635,6 +643,33 @@ struct EntryFlowView: View {
         }
         .padding(.bottom, 14)
         .background(.bar)
+    }
+
+    // MARK: - 修改已有的票
+
+    /// 把一张已存在的票填回工作台。
+    ///
+    /// 顺序有讲究：`game` 必须最先定，`mode` 和 `playMode` 依赖它，
+    /// 而且**绝不能再调 `resetForGame`** —— 那会把刚填进去的全清掉。
+    private func seed(from draft: EntryDraft) {
+        game = draft.game
+        playMode = draft.playMode
+        multiple = draft.multiple
+        if let target = EntryMode.modes(for: draft.game).first(where: { $0.shape == draft.shape }) {
+            mode = target
+        }
+        switch draft.shape {
+        case .single:
+            candidates = draft.lines
+            // 单式票的号码全在候选里，选号盘留空等用户加新的一注。
+            // 数字型玩法的滚轮仍要有初值，否则底栏会显示「票面共 0 注」。
+            resetSelections(for: draft.game, clearCandidates: false)
+        case .system, .dantuo:
+            selections = draft.selections
+            danPicking = true
+        }
+        // 期号照原样绑回去，用户没改就不该变。
+        pickedIssue = drawStore.issuesFollowing(game: draft.game, from: draft.expect, count: 1).first
     }
 
     // MARK: - 动作
@@ -733,14 +768,32 @@ struct EntryFlowView: View {
         }
         let service = RecordService(context: context, drawStore: drawStore)
         do {
-            try service.save(tickets: built,
-                             game: game,
-                             entryKind: mode.kind,
-                             price: unitPrice,
-                             multiple: multiple,
-                             target: target,
-                             source: mode.rawValue)
-            showToast("已保存 \(built.count) 注", symbol: "checkmark.seal.fill", feedback: .success)
+            if let draft {
+                // batchId 和 createdAt 原样留住：改一张票不该让它在票夹里跳位置，
+                // 也不该改变它在统计里的归属日期。
+                try service.replace(batchId: draft.batchId,
+                                    tickets: built,
+                                    game: game,
+                                    entryKind: mode.kind,
+                                    price: unitPrice,
+                                    multiple: multiple,
+                                    target: target,
+                                    source: draft.source,
+                                    createdAt: draft.createdAt)
+                // 改完立刻按当前开奖数据重核一遍，否则票面变了、
+                // 中奖标记还停在改之前那一版。
+                _ = try? service.checkAll()
+                showToast("已保存修改", symbol: "checkmark.seal.fill", feedback: .success)
+            } else {
+                try service.save(tickets: built,
+                                 game: game,
+                                 entryKind: mode.kind,
+                                 price: unitPrice,
+                                 multiple: multiple,
+                                 target: target,
+                                 source: mode.rawValue)
+                showToast("已保存 \(built.count) 注", symbol: "checkmark.seal.fill", feedback: .success)
+            }
             onSaved?()
             dismiss()
         } catch {

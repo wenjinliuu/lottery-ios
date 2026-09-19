@@ -13,6 +13,8 @@ struct WalletView: View {
     @State private var filter: WalletFilter = .all
     @State private var expandedBatches: Set<String> = []
     @State private var isChecking = false
+    /// 正在修改的那张票。
+    @State private var editTarget: EntryDraft?
     /// 渲染快照。记录变化时算一次，之后渲染完全不碰 SwiftData 对象。
     @State private var cards: [TicketCard] = []
     @State private var counts: [WalletFilter: Int] = [:]
@@ -171,6 +173,10 @@ struct WalletView: View {
                 // 所以也给同样的结果提示，别让人以为什么都没发生。
                 await recheck()
             }
+            // 修改用的是录入页那套完整工作台，保存后照常按 RecordsToken 重排。
+            .sheet(item: $editTarget) { draft in
+                EntryFlowView(draft: draft)
+            }
             .task(id: RecordsToken(records)) { rebuild() }
             .onChange(of: filter) { _, _ in applyFilter() }
             // 进票夹时**有条件地**重排：第一次进来、或者离开够久了才重排。
@@ -205,6 +211,7 @@ struct WalletView: View {
             onToggle: { toggle(item.id) },
             onDelete: { delete(item) },
             onCelebrate: { celebrate() },
+            onEdit: { editTarget = EntryDraft.load(batchId: item.id, context: context) },
             draw: drawStore.draw(for: item.game, expect: item.expect)
         )
     }
@@ -447,6 +454,7 @@ struct WalletAllTicketsView: View {
 
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.modelContext) private var context
+    @State private var editTarget: EntryDraft?
     @State private var status: WalletFilter = .all
     @State private var game: GameKey?
     /// 和首屏一样：滚到过就算看过，离开这一页时统一写库。
@@ -484,6 +492,7 @@ struct WalletAllTicketsView: View {
                         },
                         onDelete: { onDelete(item) },
                         onCelebrate: onCelebrate,
+                        onEdit: { editTarget = EntryDraft.load(batchId: item.id, context: context) },
                         draw: drawStore.draw(for: item.game, expect: item.expect)
                     )
                     .onAppear {
@@ -496,6 +505,9 @@ struct WalletAllTicketsView: View {
             .padding(.bottom, 40)
         }
         .background(Palette.canvas)
+        .sheet(item: $editTarget) { draft in
+            EntryFlowView(draft: draft)
+        }
         .navigationTitle("全部票据")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { status = initialFilter }

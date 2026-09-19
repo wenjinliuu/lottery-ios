@@ -130,6 +130,30 @@ jobs:
             -authenticationKeyIssuerID "$ISSUER_ID" \
             | xcbeautify --renderer github-actions
 
+      # 归档不签名、导出时才签，entitlement 到底有没有进到最终二进制里
+      # 光看构建日志是看不出来的 —— 上一版 iCloud 拿不到容器，
+      # 排查时第一个要排除的就是「包里压根没这条权限」。
+      - name: Verify iCloud entitlement in signed app
+        if: always()
+        run: |
+          APP=$(find build/export -maxdepth 3 -name '*.app' -print -quit)
+          if [ -z "$APP" ]; then
+            IPA=$(find build/export -maxdepth 2 -name '*.ipa' -print -quit)
+            [ -n "$IPA" ] || { echo "没找到导出产物，跳过"; exit 0; }
+            rm -rf build/unzipped && mkdir -p build/unzipped
+            unzip -q "$IPA" -d build/unzipped
+            APP=$(find build/unzipped/Payload -maxdepth 1 -name '*.app' -print -quit)
+          fi
+          echo "检查 $APP"
+          codesign -d --entitlements :- "$APP" 2>/dev/null > build/entitlements.txt || true
+          cat build/entitlements.txt
+          if grep -q "ubiquity-container-identifiers" build/entitlements.txt; then
+            echo "✅ iCloud entitlement 已进入签名后的二进制"
+          else
+            echo "❌ 签名后的二进制里没有 ubiquity-container-identifiers —— iCloud 一定用不了"
+            exit 1
+          fi
+
       - name: Upload dSYMs as artifact
         if: always()
         uses: actions/upload-artifact@v4

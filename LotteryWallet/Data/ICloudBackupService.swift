@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 /// iCloud 备份。
 ///
@@ -33,22 +34,54 @@ struct ICloudBackupService: Sendable {
     }
 
     enum Failure: LocalizedError {
-        /// 没登录 iCloud（或整个 iCloud 云盘被关掉了）。
+        /// 设备没登录 iCloud 账户。
         case notSignedIn
-        /// 登录了，但这个 App 的容器还没就绪。
-        case containerNotReady
+        /// 登录了，但这个包**根本没带 iCloud 权限** —— 构建/签名的问题，用户改不了。
+        case entitlementMissing
+        /// 权限有、账户也登了，但拿不到容器。基本都是 iCloud 云盘被关掉了。
+        case driveUnavailable
         case noBackupYet
 
         var errorDescription: String? {
             switch self {
             case .notSignedIn:
-                "还没登录 iCloud。请在系统「设置 → Apple 账户 → iCloud → iCloud 云盘」里打开，再回来试一次。"
-            case .containerNotReady:
-                "iCloud 正在准备这个 App 的存储空间，通常几秒就好。请稍等一下再试一次。"
+                "这台设备还没登录 iCloud 账户。请到系统「设置」最上方登录 Apple 账户后再试。"
+            case .entitlementMissing:
+                "这个版本的安装包没有带上 iCloud 权限，属于打包问题，重试也不会好。请把这句话反馈给开发者。"
+            case .driveUnavailable:
+                "拿不到 iCloud 存储空间。请检查系统「设置 → Apple 账户 → iCloud → iCloud 云盘」是否打开，"
+                + "并在下面的 App 列表里确认「对个号」是开着的。"
             case .noBackupYet:
                 "iCloud 上还没有备份。先做一次备份再恢复。"
             }
         }
+    }
+
+    // MARK: - 诊断
+
+    /// 这个包里到底有没有 iCloud 权限。
+    ///
+    /// **加这一条是因为上一版查不出问题在哪。** 「容器拿不到」至少有三种原因：
+    /// 没登录账户、iCloud 云盘关着、包本身没带 entitlement。前两种用户能自己解决，
+    /// 第三种用户怎么试都没用 —— 而上一版把它们混成了一句「正在准备，请稍等」，
+    /// 于是用户只能一直重试。
+    ///
+    /// CI 是「归档不签名、导出时再签」，entitlement 到底有没有进到最终二进制里
+    /// 只有在真机上问运行时才知道，所以这里直接读自己的签名。
+    static func declaredContainers() -> [String] {
+        guard let task = SecTaskCreateFromSelf(nil) else { return [] }
+        let key = "com.apple.developer.ubiquity-container-identifiers" as CFString
+        return (SecTaskCopyValueForEntitlement(task, key, nil) as? [String]) ?? []
+    }
+
+    /// 给「管理备份」页显示的一行人话诊断。
+    static func diagnosticSummary() -> String {
+        let containers = declaredContainers()
+        let entitlement = containers.isEmpty ? "缺失" : containers.joined(separator: ", ")
+        let account = isSignedIn() ? "已登录" : "未登录"
+        let container = FileManager.default.url(forUbiquityContainerIdentifier: containerID) != nil
+            ? "可用" : "拿不到"
+        return "权限：\(entitlement)\n账户：\(account)\n容器：\(container)"
     }
 
     // MARK: - 可用性
@@ -82,11 +115,12 @@ struct ICloudBackupService: Sendable {
 
     /// iCloud 现在能不能用。
     ///
-    /// 返回 nil 表示可用；返回错误表示不可用，且**说得清是哪一种**不可用 ——
-    /// 「没登录」和「容器还没就绪」给用户的下一步动作完全不同。
+    /// 返回 nil 表示可用。三种失败**分得清清楚楚**，因为它们的解决办法完全不同：
+    /// 包没带权限是开发者的问题，没登录和云盘关着是用户能自己解决的。
     static func availability() -> Failure? {
+        guard !declaredContainers().isEmpty else { return .entitlementMissing }
         guard isSignedIn() else { return .notSignedIn }
-        return containerURL() == nil ? .containerNotReady : nil
+        return containerURL() == nil ? .driveUnavailable : nil
     }
 
     /// 容器里的 `Documents` 目录。
@@ -95,7 +129,7 @@ struct ICloudBackupService: Sendable {
     /// 所以整个类型都设计成在后台线程用，调用方拿到结果再回主线程更新界面。
     private static func documentsURL() throws -> URL {
         guard let container = containerURL() else {
-            throw isSignedIn() ? Failure.containerNotReady : Failure.notSignedIn
+            throw availability() ?? Failure.driveUnavailable
         }
         let documents = container.appendingPathComponent("Documents", isDirectory: true)
         if !FileManager.default.fileExists(atPath: documents.path) {

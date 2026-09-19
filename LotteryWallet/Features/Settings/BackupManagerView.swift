@@ -24,6 +24,7 @@ struct BackupManagerView: View {
     @State private var busyLabel = ""
     @State private var restoreTarget: ICloudBackupService.BackupFile?
     @State private var deleteTarget: ICloudBackupService.BackupFile?
+    @State private var diagnostic = ""
 
     var body: some View {
         List {
@@ -63,6 +64,23 @@ struct BackupManagerView: View {
                 if !files.isEmpty {
                     Text("向左滑可以删除。删除只影响 iCloud 上的文件，本机记录不受影响。")
                 }
+            }
+
+            // iCloud 用不了的时候，这三行说清卡在哪一环。
+            //
+            // 「权限」缺失 = 安装包的问题，用户怎么试都没用；
+            // 「账户」未登录 = 去系统设置登录；
+            // 「容器」拿不到但前两项都正常 = iCloud 云盘被关掉了。
+            // 上一版把这三种混成一句「正在准备，请稍等」，于是只能一直重试。
+            Section {
+                Text(diagnostic.isEmpty ? "正在检测…" : diagnostic)
+                    .font(.footnote.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            } header: {
+                Text("诊断")
+            } footer: {
+                Text("iCloud 用不了时，把这三行发给开发者最省事。")
             }
         }
         .navigationTitle("管理备份")
@@ -149,6 +167,7 @@ struct BackupManagerView: View {
     private func reload() async {
         isLoading = true
         defer { isLoading = false }
+        diagnostic = await Task.detached { ICloudBackupService.diagnosticSummary() }.value
         do {
             files = try await Task.detached { try ICloudBackupService.list() }.value
             loadError = nil

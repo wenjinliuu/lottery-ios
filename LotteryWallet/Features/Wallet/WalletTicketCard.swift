@@ -11,6 +11,8 @@ struct WalletTicketCard: View {
     let isExpanded: Bool
     var onToggle: () -> Void
     var onDelete: () -> Void
+    /// 长按「修改」。打开的是录入页那套完整工作台。
+    var onEdit: (() -> Void)? = nil
     /// 点开一张已中奖的票时放烟花。
     var onCelebrate: (() -> Void)?
     /// 这张票绑定期次的开奖号码，同样由外部提前取好。
@@ -80,6 +82,9 @@ struct WalletTicketCard: View {
             if isCollapsible { onToggle() }
         }
         .contextMenu {
+            if let onEdit {
+                Button("修改", systemImage: "square.and.pencil", action: onEdit)
+            }
             Button("复制号码", systemImage: "doc.on.doc") {
                 UIPasteboard.general.string = card.copyText
                 showToast("号码已复制", symbol: "doc.on.doc", feedback: .success)
