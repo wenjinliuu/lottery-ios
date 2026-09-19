@@ -210,8 +210,8 @@ struct WalletView: View {
             isExpanded: expandedBatches.contains(item.id),
             onToggle: { toggle(item.id) },
             onDelete: { delete(item) },
-            onCelebrate: { celebrate() },
             onEdit: { editTarget = EntryDraft.load(batchId: item.id, context: context) },
+            onCelebrate: { celebrate() },
             draw: drawStore.draw(for: item.game, expect: item.expect)
         )
     }
@@ -491,8 +491,8 @@ struct WalletAllTicketsView: View {
                             }
                         },
                         onDelete: { onDelete(item) },
-                        onCelebrate: onCelebrate,
                         onEdit: { editTarget = EntryDraft.load(batchId: item.id, context: context) },
+                        onCelebrate: onCelebrate,
                         draw: drawStore.draw(for: item.game, expect: item.expect)
                     )
                     .onAppear {
