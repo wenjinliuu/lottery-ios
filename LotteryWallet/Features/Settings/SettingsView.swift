@@ -1,23 +1,15 @@
 import SwiftUI
 import SwiftData
-import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.modelContext) private var context
     @Environment(ToastCenter.self) private var showToast
-    @Environment(CelebrationCenter.self) private var celebrate
     @Query private var records: [TicketRecord]
 
-    @State private var isExporting = false
-    @State private var isImporting = false
-    @State private var exportDocument: BackupDocument?
     @State private var isClearConfirmPresented = false
     @State private var isRefreshing = false
-    @State private var isBusy = false
-    @State private var busyLabel = ""
-    @State private var isICloudRestoreConfirmPresented = false
 
     var body: some View {
         @Bindable var settings = settings
@@ -83,6 +75,12 @@ struct SettingsView: View {
                     Text("开奖数据来自公开仓库 lottery-data-repo，应用只读取、不上传任何内容。")
                 }
 
+                // 备份**只有一个入口**。
+                //
+                // 之前这件事散在六个地方（导出、导入、iCloud 开关、上次备份、
+                // 立即备份、从 iCloud 恢复），语义还各不相同。用户说不清自己
+                // 的数据在哪儿，我们自己排查时也要在三处各看一遍。
+                // 现在全部收进「备份与恢复」，见 `BackupView`。
                 Section {
                     LabeledContent {
                         Text("\(records.count) 条")
@@ -92,12 +90,10 @@ struct SettingsView: View {
                         row("tray.full.fill", .orange, "本机记录")
                     }
 
-                    Button { export() } label: {
-                        row("square.and.arrow.up.fill", .blue, "导出备份")
-                    }
-
-                    Button { isImporting = true } label: {
-                        row("square.and.arrow.down.fill", .green, "导入备份")
+                    NavigationLink {
+                        BackupView()
+                    } label: {
+                        row("externaldrive.fill.badge.icloud", .blue, "备份与恢复")
                     }
 
                     Button(role: .destructive) {
@@ -106,49 +102,9 @@ struct SettingsView: View {
                         row("trash.fill", .red, "清空全部记录", tint: .red)
                     }
                 } header: {
-                    Text("数据备份")
+                    Text("数据")
                 } footer: {
                     Text(backupFooter)
-                }
-
-                Section {
-                    Toggle(isOn: Binding(get: { settings.iCloudBackupEnabled },
-                                         set: { toggleICloud($0) })) {
-                        row("icloud.fill", .cyan, "iCloud 备份")
-                    }
-
-                    if settings.iCloudBackupEnabled {
-                        LabeledContent {
-                            Text(settings.lastICloudBackupAt.map { DateText.friendly(DateText.day($0)) } ?? "尚未备份")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        } label: {
-                            row("clock.arrow.circlepath", .gray, "上次备份")
-                        }
-
-                        Button { backupToICloud(announce: true) } label: {
-                            row("arrow.up.to.line", .blue, "立即备份")
-                        }
-
-                        Button { isICloudRestoreConfirmPresented = true } label: {
-                            row("arrow.down.to.line", .green, "从 iCloud 恢复")
-                        }
-                    }
-
-                    // **这一行不跟着开关走。**
-                    //
-                    // 之前它藏在开关里面，于是恰恰在开关打不开的时候，
-                    // 用来查「为什么打不开」的诊断也跟着消失了 —— 用户
-                    // 在设置里翻遍了也找不到入口。查故障的入口必须永远在。
-                    NavigationLink {
-                        BackupManagerView()
-                    } label: {
-                        row("folder.fill", .indigo, "管理备份")
-                    }
-                } header: {
-                    Text("iCloud")
-                } footer: {
-                    Text("打开后，每次退到后台时会把一份备份写进你自己的 iCloud 云盘（「文件」App 里的「对个号」文件夹）。备份只存在你的 iCloud 账户里，开发者无法访问。关掉开关不会删除已经备份的文件。\n\n开关打不开时，进「管理备份」能看到卡在哪一环。")
                 }
 
                 Section {
@@ -191,37 +147,11 @@ struct SettingsView: View {
             // 导航栏不要自己糊底色，交给系统的 scroll edge effect。
             // 理由见 `HomeView` 里同一处那段注释。
             .navigationTitle("设置")
-            .disabled(isBusy)
-            .overlay { if isBusy { busyOverlay } }
-            .fileExporter(
-                isPresented: $isExporting,
-                document: exportDocument,
-                contentType: .json,
-                defaultFilename: BackupService.suggestedFileName()
-            ) { result in
-                switch result {
-                case .success:
-                    settings.lastBackupAt = Date()
-                    showToast("备份已保存", symbol: "square.and.arrow.up", feedback: .success)
-                case .failure:
-                    showToast("导出取消或失败", symbol: "exclamationmark.triangle", feedback: .error)
-                }
-            }
-            .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
-                handleImport(result)
-            }
-            .confirmationDialog("从 iCloud 恢复？", isPresented: $isICloudRestoreConfirmPresented,
-                                titleVisibility: .visible) {
-                Button("恢复") { restoreFromICloud() }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("会把 iCloud 上那份备份里的记录合并进来。已有的同一条记录会被备份里的版本覆盖，本机多出来的记录不会被删掉。")
-            }
             .confirmationDialog("清空全部记录？", isPresented: $isClearConfirmPresented, titleVisibility: .visible) {
                 Button("清空", role: .destructive) { clearAll() }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("\(records.count) 条记录会被永久删除。建议先导出备份。")
+                Text("\(records.count) 条记录会被永久删除。建议先去「备份与恢复」存一份。")
             }
         }
     }
@@ -234,32 +164,12 @@ struct SettingsView: View {
         }
     }
 
-    private var busyOverlay: some View {
-        ZStack {
-            // 12% 的黑在深色模式下几乎看不出来，用材质两种模式都能压住底下的内容
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .ignoresSafeArea()
-            VStack(spacing: 12) {
-                ProgressView()
-                Text(busyLabel)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(24)
-            .background(Palette.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: .black.opacity(0.15), radius: 16, y: 6)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(busyLabel)
-    }
-
     private var backupFooter: String {
         guard let days = settings.daysSinceBackup else {
-            return "记录只保存在本机。换设备前请先导出备份。"
+            return "记录保存在这台设备上。进「备份与恢复」存一份，换设备时才带得走。"
         }
         if days >= 7 {
-            return "上次备份是 \(days) 天前，建议重新导出一次。"
+            return "上次备份是 \(days) 天前，建议再存一份。"
         }
         return "上次备份：\(days) 天前。"
     }
@@ -276,121 +186,6 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - iCloud
-
-    /// 打开开关时先确认 iCloud 真的能用，再立刻备份一次。
-    ///
-    /// 不先探一下的话，用户没登录 iCloud 也能把开关拨开，然后一直以为自己
-    /// 有备份 —— 直到换手机那天才发现什么都没有。
-    private func toggleICloud(_ isOn: Bool) {
-        guard isOn else {
-            settings.iCloudBackupEnabled = false
-            return
-        }
-        Task {
-            // 这一串会阻塞（首次还会重试等容器就绪），不能放主线程。
-            let failure = await Task.detached { ICloudBackupService.availability() }.value
-            if let failure {
-                // 说清是哪一种不可用 —— 「没登录」和「容器还没就绪」
-                // 给用户的下一步动作完全不同。
-                showToast(failure.localizedDescription, symbol: "icloud.slash", feedback: .error)
-                return
-            }
-            settings.iCloudBackupEnabled = true
-            backupToICloud(announce: true)
-        }
-    }
-
-    /// 写一份到 iCloud。退到后台时也会调这个（见 `RootView`），那种情况不弹提示。
-    private func backupToICloud(announce: Bool) {
-        let service = BackupService(context: context)
-        guard let data = try? service.exportData(records: records) else {
-            if announce { showToast("生成备份失败", symbol: "exclamationmark.triangle", feedback: .error) }
-            return
-        }
-        Task {
-            do {
-                try await Task.detached { try ICloudBackupService.write(data) }.value
-                settings.lastICloudBackupAt = Date()
-                if announce { showToast("已备份到 iCloud", symbol: "icloud.and.arrow.up", feedback: .success) }
-            } catch {
-                if announce {
-                    showToast(error.localizedDescription, symbol: "icloud.slash", feedback: .error)
-                }
-            }
-        }
-    }
-
-    /// 从 iCloud 恢复。走的是和「导入备份」完全相同的那条路，只是数据来源不同。
-    private func restoreFromICloud() {
-        Task {
-            isBusy = true
-            busyLabel = "正在从 iCloud 读取…"
-            defer { isBusy = false }
-            do {
-                let data = try await Task.detached { try ICloudBackupService.read() }.value
-                busyLabel = "正在导入记录…"
-                let outcome = try BackupService(context: context).importData(data)
-                await Task.yield()
-
-                busyLabel = "正在核对开奖…"
-                await drawStore.loadAllHistories()
-                let service = RecordService(context: context, drawStore: drawStore)
-                let checked = try? service.checkAll()
-                if let checked, checked.won > 0 { celebrate() }
-                showToast("已恢复 \(outcome.inserted + outcome.updated) 条记录",
-                          symbol: "icloud.and.arrow.down", feedback: .success)
-            } catch {
-                showToast(error.localizedDescription, symbol: "icloud.slash", feedback: .error)
-            }
-        }
-    }
-
-    private func export() {
-        let service = BackupService(context: context)
-        guard let data = try? service.exportData(records: records) else {
-            showToast("生成备份失败", symbol: "exclamationmark.triangle", feedback: .error)
-            return
-        }
-        exportDocument = BackupDocument(data: data)
-        isExporting = true
-    }
-
-    /// 导入分两步：先落库，再核对。
-    /// 两步都可能很慢，中间让出主线程刷新一次界面，别让用户看到假死。
-    private func handleImport(_ result: Result<URL, Error>) {
-        guard case .success(let url) = result else {
-            showToast("导入取消", symbol: "xmark.circle")
-            return
-        }
-        Task {
-            isBusy = true
-            busyLabel = "正在导入记录…"
-            defer { isBusy = false }
-
-            let needsRelease = url.startAccessingSecurityScopedResource()
-            defer { if needsRelease { url.stopAccessingSecurityScopedResource() } }
-
-            do {
-                let data = try Data(contentsOf: url)
-                let outcome = try BackupService(context: context).importData(data)
-                await Task.yield()
-
-                busyLabel = "正在核对开奖…"
-                await drawStore.loadAllHistories()
-                let service = RecordService(context: context, drawStore: drawStore)
-                _ = try? service.reconcileInferredTargets()
-                let checked = try? service.checkAll()
-
-                showToast("已导入 \(outcome.inserted + outcome.updated) 条记录", symbol: "square.and.arrow.down", feedback: .success)
-                // 导入一份旧备份常常一次核出好几注中奖，值得放一次烟花
-                if let checked, checked.won > 0 { celebrate() }
-            } catch {
-                showToast(error.localizedDescription, symbol: "exclamationmark.triangle", feedback: .error)
-            }
-        }
-    }
-
     private func clearAll() {
         do {
             try RecordService(context: context, drawStore: drawStore).deleteAll()
@@ -398,25 +193,6 @@ struct SettingsView: View {
         } catch {
             showToast("清空失败", symbol: "exclamationmark.triangle", feedback: .error)
         }
-    }
-}
-
-/// 导出用的文件包装。
-struct BackupDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
-
-    var data: Data
-
-    init(data: Data) {
-        self.data = data
-    }
-
-    init(configuration: ReadConfiguration) throws {
-        data = configuration.file.regularFileContents ?? Data()
-    }
-
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
     }
 }
 

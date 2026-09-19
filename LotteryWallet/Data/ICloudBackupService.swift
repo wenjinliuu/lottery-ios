@@ -12,25 +12,12 @@ import Foundation
 struct ICloudBackupService: Sendable {
     static let containerID = "iCloud.com.wenjinliu.lotterywallet"
 
-    /// 退到后台自动写的那一份，**固定文件名、反复覆盖**。
+    /// 文件名的约定全在 `BackupNaming` 里，这里不再各写一套。
     ///
-    /// 自动备份要是每次都新建文件，用户的 iCloud 里几天就堆出上百个快照 ——
-    /// 那不叫备份，叫垃圾。手动「新建备份」才留带时间戳的快照，由用户自己管。
-    static let autoFileName = "lottery-backup-auto.json"
-    /// 1.2.0 之前写过的名字，恢复时仍然要认。
-    private static let legacyFileName = "lottery-backup.json"
-    private static let manualPrefix = "lottery-backup-"
-
-    /// 云端的一份备份文件。
-    struct BackupFile: Identifiable, Hashable, Sendable {
-        let name: String
-        let modifiedAt: Date
-        let size: Int
-        /// 是不是那份反复覆盖的自动备份。
-        let isAuto: Bool
-
-        var id: String { name }
-    }
+    /// 上一版自动备份是**固定文件名、反复覆盖**（`lottery-backup-auto.json`）。
+    /// 那是个隐患：一次误操作（清库、或者库打不开变成空的）退到后台，
+    /// 唯一那份备份当场被空数据覆盖，历史就再也回不来了。
+    /// 现在自动备份也带时间戳、滚动保留若干份，见 `BackupPolicy`。
 
     enum Failure: LocalizedError {
         /// 设备没登录 iCloud 账户。
@@ -188,7 +175,7 @@ struct ICloudBackupService: Sendable {
     ///
     /// **这个调用会阻塞**，Apple 明确要求不要放在主线程上。
     /// 所以整个类型都设计成在后台线程用，调用方拿到结果再回主线程更新界面。
-    private static func documentsURL() throws -> URL {
+    static func documentsDirectory() throws -> URL {
         guard let container = containerURL() else {
             throw availability() ?? Failure.driveUnavailable
         }
@@ -199,56 +186,14 @@ struct ICloudBackupService: Sendable {
         return documents
     }
 
-    // MARK: - 列表 / 删除
-
-    /// 云端现有的全部备份，按时间倒序。
-    static func list() throws -> [BackupFile] {
-        let documents = try documentsURL()
-        let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
-        let urls = (try? FileManager.default.contentsOfDirectory(at: documents,
-                                                                 includingPropertiesForKeys: keys)) ?? []
-        return urls
-            .filter { $0.lastPathComponent.hasSuffix(".json") }
-            .compactMap { url -> BackupFile? in
-                let values = try? url.resourceValues(forKeys: Set(keys))
-                let name = url.lastPathComponent
-                return BackupFile(name: name,
-                                  modifiedAt: values?.contentModificationDate ?? .distantPast,
-                                  size: values?.fileSize ?? 0,
-                                  isAuto: name == autoFileName || name == legacyFileName)
-            }
-            .sorted { $0.modifiedAt > $1.modifiedAt }
-    }
-
-    static func delete(_ file: BackupFile) throws {
-        let url = try documentsURL().appendingPathComponent(file.name)
-        var coordinatorError: NSError?
-        var deleteError: Error?
-        NSFileCoordinator().coordinate(writingItemAt: url, options: .forDeleting,
-                                       error: &coordinatorError) { target in
-            do { try FileManager.default.removeItem(at: target) } catch { deleteError = error }
-        }
-        if let coordinatorError { throw coordinatorError }
-        if let deleteError { throw deleteError }
-    }
-
     // MARK: - 读写
-
-    /// 手动快照用的文件名，带到秒，同一天备份多次也不会互相覆盖。
-    static func snapshotName(now: Date = Date()) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = DateText.chinaTimeZone
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return "\(manualPrefix)\(formatter.string(from: now)).json"
-    }
 
     /// 写一份备份上去。
     ///
     /// 用 `NSFileCoordinator` 而不是直接 `Data.write` —— 同一个容器可能正被
     /// 系统的同步进程读写，不协调的写入会和它撞上，轻则写坏、重则丢文件。
-    static func write(_ data: Data, named name: String = autoFileName) throws {
-        let url = try documentsURL().appendingPathComponent(name)
+    static func write(_ data: Data, named name: String) throws {
+        let url = try documentsDirectory().appendingPathComponent(name)
         var coordinatorError: NSError?
         var writeError: Error?
         NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing,
@@ -259,21 +204,24 @@ struct ICloudBackupService: Sendable {
         if let writeError { throw writeError }
     }
 
-    /// 读回某一份备份；不指定就读最近的那份。
+    static func deleteFile(named name: String) throws {
+        let url = try documentsDirectory().appendingPathComponent(name)
+        var coordinatorError: NSError?
+        var deleteError: Error?
+        NSFileCoordinator().coordinate(writingItemAt: url, options: .forDeleting,
+                                       error: &coordinatorError) { target in
+            do { try FileManager.default.removeItem(at: target) } catch { deleteError = error }
+        }
+        if let coordinatorError { throw coordinatorError }
+        if let deleteError { throw deleteError }
+    }
+
+    /// 读回某一份备份。
     ///
     /// 文件在 iCloud 上但还没下到本机时，`fileExists` 是 false，
     /// 得先让系统把它拉下来再读，否则换了新手机第一次恢复必然报「没有备份」。
-    static func read(_ file: BackupFile? = nil) throws -> Data {
-        let documents = try documentsURL()
-        let name: String
-        if let file {
-            name = file.name
-        } else if let newest = try list().first {
-            name = newest.name
-        } else {
-            throw Failure.noBackupYet
-        }
-        let url = documents.appendingPathComponent(name)
+    static func readFile(named name: String) throws -> Data {
+        let url = try documentsDirectory().appendingPathComponent(name)
 
         if !FileManager.default.fileExists(atPath: url.path) {
             try? FileManager.default.startDownloadingUbiquitousItem(at: url)
@@ -297,8 +245,4 @@ struct ICloudBackupService: Sendable {
         return result
     }
 
-    /// 最近一份备份的时间，设置页用来显示「上次备份」。
-    static func lastModified() -> Date? {
-        (try? list())?.first?.modifiedAt
-    }
 }

@@ -55,6 +55,12 @@ targets:
         NSCameraUsageDescription: 用于拍摄纸质彩票并在本机识别号码，照片不会离开设备。
         NSPhotoLibraryUsageDescription: 用于从相册选择彩票照片并在本机识别号码，照片不会离开设备。
         ITSAppUsesNonExemptEncryption: false
+        # 让本机备份在「文件」App 里看得见、拷得走。
+        #
+        # 暴露的只有 App 沙盒的 Documents（里面就是 Backups 那个文件夹），
+        # 数据库在 Application Support，不在这儿 —— 不会被用户顺手删掉。
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
         # 让备份文件在「文件」App 里显示成一个有名字的文件夹，

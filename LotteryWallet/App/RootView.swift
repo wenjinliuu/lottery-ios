@@ -9,6 +9,8 @@ struct RootView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(BackupCenter.self) private var backupCenter
+    @Environment(StoreHealth.self) private var storeHealth
 
     /// 票夹角标要的数字：出了结果、用户还没看过的票有几张。
     ///
@@ -125,17 +127,17 @@ struct RootView: View {
         // 认清这一点之后就没有理由自己造轮子了：拖拽、吸附、回弹、
         // 跟手的高度切换，系统这套是渲染服务级别的，而自绘版本每一帧
         // 都要让 SwiftUI 重新过一遍整个扫描页 —— 差距不是调参能补上的。
-        // 退到后台时把备份写进 iCloud。
+        // 退到后台时自动备份一次。
         //
         // 选这个时机而不是「记录一变就写」：录一张 20 注的复式票会连着触发
-        // 二十次写入，而 iCloud 写的是整份 JSON，等于把整个票夹重写二十遍。
+        // 二十次写入，而备份写的是整份 JSON，等于把整个票夹重写二十遍。
         // 退后台是「这一轮操作做完了」的天然分界点。
         //
         // 静默执行：这一刻 App 已经不在前台，弹什么都没人看得见。
         // 真出问题时设置页那行「上次备份」不会往前走，那才是用户看得到的信号。
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .background, settings.iCloudBackupEnabled else { return }
-            backupToICloud()
+            guard phase == .background, settings.autoBackupEnabled else { return }
+            autoBackup()
         }
         .sheet(item: $activeSheet, onDismiss: {
             guard let next = queuedSheet else {
@@ -164,6 +166,16 @@ struct RootView: View {
         // 跟着闪一下。动画只该属于提示条自己，所以挂在它的 overlay 上。
         .environment(toastCenter)
         .environment(celebration)
+        .overlay(alignment: .top) {
+            // 库打不开时顶上来的是个关掉就没的临时库。**必须一直说着**，
+            // 不能只弹一次提示 —— 上一次事故里用户在「一切正常」的界面上
+            // 录入、导入，全部写进了一个活不过这次启动的地方。
+            if !storeHealth.isHealthy {
+                StoreWarningBanner()
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+            }
+        }
         .overlay {
             // 烟花压在所有内容之上、弹窗之下。只有中奖这种罕见时刻才会触发。
             CelebrationView(trigger: celebration.trigger)
@@ -212,13 +224,19 @@ struct RootView: View {
     /// 这一步必须发生在首帧之后。早期版本在 `.task` 里同步跑完全部核对，
     /// 记录一多首帧就画不出来，被系统看门狗当成无响应 —— 表现就是"打不开"。
     /// 静默写一份备份到 iCloud。开关关着时根本不会走到这里。
-    private func backupToICloud() {
+    /// 退到后台时自动备份。
+    ///
+    /// 具体写哪儿、写不写、留几份，全由 `BackupCenter` 决定 —— 这里只负责
+    /// 把「这一轮操作做完了」这个时机告诉它。iCloud 用不了时它会落到本机，
+    /// 不会像上一版那样整个静默失效。
+    private func autoBackup() {
         let descriptor = FetchDescriptor<TicketRecord>()
-        guard let all = try? context.fetch(descriptor),
-              let data = try? BackupService(context: context).exportData(records: all) else { return }
+        guard let all = try? context.fetch(descriptor) else { return }
         Task {
-            guard (try? await Task.detached { try ICloudBackupService.write(data) }.value) != nil else { return }
-            settings.lastICloudBackupAt = Date()
+            await backupCenter.autoBackup(records: all,
+                                          context: context,
+                                          preferring: settings.iCloudBackupEnabled ? .iCloud : .local)
+            if backupCenter.items.first != nil { settings.lastBackupAt = Date() }
         }
     }
 
@@ -322,4 +340,27 @@ final class CelebrationCenter {
     private(set) var trigger = 0
 
     func callAsFunction() { trigger += 1 }
+}
+
+
+/// 数据库不健康时顶部那条常驻警告。
+struct StoreWarningBanner: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+            VStack(alignment: .leading, spacing: 2) {
+                Text("数据库打不开，当前是临时模式")
+                    .font(.footnote.weight(.semibold))
+                Text("现在录入或导入的内容关掉应用就会消失。详情见「设置 → 备份与恢复」。")
+                    .font(.caption2)
+            }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Palette.warning, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+        .accessibilityElement(children: .combine)
+    }
 }

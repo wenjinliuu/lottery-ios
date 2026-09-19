@@ -6,16 +6,34 @@ import Observation
 struct LotteryWalletApp: App {
     @State private var drawStore = DrawStore()
     @State private var settings = AppSettings()
+    /// 数据库的健康状态。建库和它一起产生，见 `ModelStore`。
+    @State private var storeHealth: StoreHealth
+    @State private var backupCenter = BackupCenter()
+    private let container: ModelContainer
+
+    /// **建库不再用 `.modelContainer(for:)`。**
+    ///
+    /// 那一行默认 `cloudKitDatabase: .automatic` —— 只要 App 带着 iCloud
+    /// 权限，本地库就会被自动切成 CloudKit 同步，而 `TicketRecord` 上的
+    /// `@Attribute(.unique)` 是 CloudKit 镜像不支持的。加一个权限就能让库
+    /// 打不开，这种耦合必须断掉。理由全写在 `ModelStore` 里。
+    init() {
+        let health = StoreHealth()
+        container = ModelStore.makeContainer(health: health)
+        _storeHealth = State(initialValue: health)
+    }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(drawStore)
                 .environment(settings)
+                .environment(storeHealth)
+                .environment(backupCenter)
                 .preferredColorScheme(settings.colorScheme)
                 .tint(Color.accentColor)
         }
-        .modelContainer(for: TicketRecord.self)
+        .modelContainer(container)
     }
 }
 
@@ -38,15 +56,18 @@ final class AppSettings {
         didSet { defaults.set(lastBackupAt?.timeIntervalSince1970 ?? 0, forKey: Keys.lastBackup) }
     }
 
-    /// iCloud 备份开关。**默认关闭** —— 数据往哪儿放是用户的选择，
-    /// 不该由我们替他决定，隐私政策也是照着「默认只存本机」写的。
-    var iCloudBackupEnabled: Bool {
-        didSet { defaults.set(iCloudBackupEnabled, forKey: Keys.iCloudBackup) }
+    /// 自动备份。**默认打开，但默认只写本机。**
+    ///
+    /// 写进 App 自己的沙盒不涉及任何隐私取舍，却能挡住这次这种事故；
+    /// 默认关着才是危险的默认值 —— 用户通常在丢了数据之后才会想起它。
+    var autoBackupEnabled: Bool {
+        didSet { defaults.set(autoBackupEnabled, forKey: Keys.autoBackup) }
     }
 
-    /// 上次成功写进 iCloud 的时间。
-    var lastICloudBackupAt: Date? {
-        didSet { defaults.set(lastICloudBackupAt?.timeIntervalSince1970 ?? 0, forKey: Keys.lastICloudBackup) }
+    /// 备份是否同时放一份到 iCloud。**默认关闭** —— 数据出不出这台设备
+    /// 是用户的选择，不该由我们替他决定，隐私政策也是照着这个写的。
+    var iCloudBackupEnabled: Bool {
+        didSet { defaults.set(iCloudBackupEnabled, forKey: Keys.iCloudBackup) }
     }
 
     /// 理性购彩提示是否已确认过。
@@ -82,7 +103,7 @@ final class AppSettings {
         static let seenBackfilled = "lottery.resultSeenBackfilled.v1"
         static let debugVision = "lottery.debugVision"
         static let iCloudBackup = "lottery.iCloudBackup"
-        static let lastICloudBackup = "lottery.lastICloudBackupAt"
+        static let autoBackup = "lottery.autoBackup"
     }
 
     init() {
@@ -94,8 +115,7 @@ final class AppSettings {
         seenBackfilled = defaults.bool(forKey: Keys.seenBackfilled)
         debugVision = defaults.bool(forKey: Keys.debugVision)
         iCloudBackupEnabled = defaults.bool(forKey: Keys.iCloudBackup)
-        let cloudStamp = defaults.double(forKey: Keys.lastICloudBackup)
-        lastICloudBackupAt = cloudStamp > 0 ? Date(timeIntervalSince1970: cloudStamp) : nil
+        autoBackupEnabled = defaults.object(forKey: Keys.autoBackup) as? Bool ?? true
     }
 
     var colorScheme: ColorScheme? {
