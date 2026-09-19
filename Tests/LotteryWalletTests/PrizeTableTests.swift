@@ -100,10 +100,13 @@ final class PrizeTableTests: XCTestCase {
             XCTAssertTrue(row?.hits.contains { $0.0 == "中零" } ?? false, "\(play) 少了「中零」那一档")
         }
 
-        // 表里不能再出现阿拉伯数字的「中N」—— 那正是和后面注数打架的写法
+        // 表里不能再出现阿拉伯数字的「中N」—— 那正是和后面注数打架的写法。
+        //
+        // 注意判据是 **ASCII 数字**，不能只写 `isNumber`：中文数字在 Unicode 里
+        // 同样带 Numeric 属性，`"十".isNumber` 是 true，那样写整条断言恒假。
         for row in PrizeTable.k8Rows {
             for hit in row.hits {
-                XCTAssertFalse(hit.0.contains(where: \.isNumber),
+                XCTAssertFalse(hit.0.contains { $0.isASCII && $0.isNumber },
                                "\(row.play) 的「\(hit.0)」应该用中文数字")
             }
         }
