@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 /// iCloud 备份。
 ///
@@ -66,18 +65,46 @@ struct ICloudBackupService: Sendable {
     /// 第三种用户怎么试都没用 —— 而上一版把它们混成了一句「正在准备，请稍等」，
     /// 于是用户只能一直重试。
     ///
-    /// CI 是「归档不签名、导出时再签」，entitlement 到底有没有进到最终二进制里
-    /// 只有在真机上问运行时才知道，所以这里直接读自己的签名。
+    /// CI 是「归档不签名、导出时再签」，entitlement 有没有进到最终产物里，
+    /// 光看构建日志看不出来，只能在真机上问运行时。
+    ///
+    /// 读的是包里的 `embedded.mobileprovision`（开发、TestFlight、App Store
+    /// 三种分发都带着它）。**不能用 `SecTaskCopyValueForEntitlement`** ——
+    /// 那是 macOS 专有的，iOS SDK 里根本没有这个符号。
     static func declaredContainers() -> [String] {
-        guard let task = SecTaskCreateFromSelf(nil) else { return [] }
-        let key = "com.apple.developer.ubiquity-container-identifiers" as CFString
-        return (SecTaskCopyValueForEntitlement(task, key, nil) as? [String]) ?? []
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url) else { return [] }
+
+        // 描述文件是 CMS 签名包着一份 plist，把中间那段 plist 抠出来解析。
+        guard let plist = extractPlist(from: data),
+              let entitlements = plist["Entitlements"] as? [String: Any] else { return [] }
+        let key = "com.apple.developer.ubiquity-container-identifiers"
+        if let list = entitlements[key] as? [String] { return list }
+        if let single = entitlements[key] as? String { return [single] }
+        return []
     }
 
-    /// 给「管理备份」页显示的一行人话诊断。
+    private static func extractPlist(from data: Data) -> [String: Any]? {
+        guard let start = data.range(of: Data("<?xml".utf8)),
+              let end = data.range(of: Data("</plist>".utf8), options: .backwards) else { return nil }
+        let slice = data[start.lowerBound..<end.upperBound]
+        return try? PropertyListSerialization.propertyList(
+            from: slice, options: [], format: nil) as? [String: Any]
+    }
+
+    /// 给「管理备份」页显示的人话诊断。
+    ///
+    /// 模拟器和某些构建里没有 `embedded.mobileprovision`，那时候「权限」这一行
+    /// 只能说「读不到描述文件」，不代表真的缺 —— 别把它当成故障。
     static func diagnosticSummary() -> String {
+        let hasProfile = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision") != nil
         let containers = declaredContainers()
-        let entitlement = containers.isEmpty ? "缺失" : containers.joined(separator: ", ")
+        let entitlement: String
+        if !containers.isEmpty {
+            entitlement = containers.contains(containerID) ? "有（\(containerID)）" : "有，但容器对不上：\(containers.joined(separator: ", "))"
+        } else {
+            entitlement = hasProfile ? "缺失" : "读不到描述文件（模拟器上正常）"
+        }
         let account = isSignedIn() ? "已登录" : "未登录"
         let container = FileManager.default.url(forUbiquityContainerIdentifier: containerID) != nil
             ? "可用" : "拿不到"
@@ -118,7 +145,10 @@ struct ICloudBackupService: Sendable {
     /// 返回 nil 表示可用。三种失败**分得清清楚楚**，因为它们的解决办法完全不同：
     /// 包没带权限是开发者的问题，没登录和云盘关着是用户能自己解决的。
     static func availability() -> Failure? {
-        guard !declaredContainers().isEmpty else { return .entitlementMissing }
+        // 只有「确实读到了描述文件、但里面没有这个容器」才敢断定是打包问题。
+        // 读不到描述文件（模拟器）时不下结论，继续往下走真实调用。
+        let hasProfile = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision") != nil
+        if hasProfile, !declaredContainers().contains(containerID) { return .entitlementMissing }
         guard isSignedIn() else { return .notSignedIn }
         return containerURL() == nil ? .driveUnavailable : nil
     }
