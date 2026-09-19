@@ -112,6 +112,14 @@ jobs:
       # 正常 Xcode 归档一样。导出那一步会连签名带 entitlements 整个重做，
       # ad-hoc 这个签名本身活不过导出，只有 entitlements 会被继承下去。
       #
+      # 这一版（构建 59）的导出结果印证了上面的推断：签名后二进制里的
+      # entitlements 和本仓库这份 entitlements 文件**一字不差**
+      # （icloud-services 只有 CloudDocuments），而描述文件里是
+      # `icloud-services: *`、还多出 ubiquity-kvstore-identifier、
+      # keychain-access-groups 等等。也就是说导出签名取的是**归档里那个 App
+      # 的 entitlements**，不是描述文件的 —— 那么在加这一步之前，归档里是空的，
+      # 最终二进制自然也是空的。
+      #
       # 失败也不拦流水线：拦了就等于一个包都发不出去，而上一版至少还能发。
       - name: Embed entitlements into archive
         continue-on-error: true
