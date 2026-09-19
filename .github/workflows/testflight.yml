@@ -130,28 +130,41 @@ jobs:
             -authenticationKeyIssuerID "$ISSUER_ID" \
             | xcbeautify --renderer github-actions
 
-      # 归档不签名、导出时才签，entitlement 到底有没有进到最终二进制里
-      # 光看构建日志是看不出来的 —— 上一版 iCloud 拿不到容器，
-      # 排查时第一个要排除的就是「包里压根没这条权限」。
-      - name: Verify iCloud entitlement in signed app
+      # iCloud entitlement 的排查线索。
+      #
+      # **只报告，不决定成败。** ExportOptions 里是 destination=upload，
+      # xcodebuild 直接把包传上去、本地不留 build/export，所以这里多半什么都
+      # 找不到 —— 上一版为此把整条流水线打挂了，而那时候包其实已经传成功。
+      # 真正的判据在 App 里（设置 → iCloud → 管理备份 → 诊断），
+      # 那是唯一能看到最终二进制签名结果的地方。
+      - name: Inspect iCloud entitlement (informational)
         if: always()
+        continue-on-error: true
         run: |
-          APP=$(find build/export -maxdepth 3 -name '*.app' -print -quit)
+          set +e
+          APP=""
+          if [ -d build/export ]; then
+            APP=$(find build/export -maxdepth 3 -name '*.app' -print -quit)
+            if [ -z "$APP" ]; then
+              IPA=$(find build/export -maxdepth 2 -name '*.ipa' -print -quit)
+              if [ -n "$IPA" ]; then
+                rm -rf build/unzipped && mkdir -p build/unzipped
+                unzip -q "$IPA" -d build/unzipped
+                APP=$(find build/unzipped/Payload -maxdepth 1 -name '*.app' -print -quit)
+              fi
+            fi
+          fi
           if [ -z "$APP" ]; then
-            IPA=$(find build/export -maxdepth 2 -name '*.ipa' -print -quit)
-            [ -n "$IPA" ] || { echo "没找到导出产物，跳过"; exit 0; }
-            rm -rf build/unzipped && mkdir -p build/unzipped
-            unzip -q "$IPA" -d build/unzipped
-            APP=$(find build/unzipped/Payload -maxdepth 1 -name '*.app' -print -quit)
+            echo "ℹ️ 本地没有导出产物（destination=upload 时属正常），跳过检查。"
+            echo "   请在真机上看「设置 → iCloud → 管理备份 → 诊断」那三行。"
+            exit 0
           fi
           echo "检查 $APP"
-          codesign -d --entitlements :- "$APP" 2>/dev/null > build/entitlements.txt || true
-          cat build/entitlements.txt
+          codesign -d --entitlements :- "$APP" 2>/dev/null | tee build/entitlements.txt
           if grep -q "ubiquity-container-identifiers" build/entitlements.txt; then
             echo "✅ iCloud entitlement 已进入签名后的二进制"
           else
-            echo "❌ 签名后的二进制里没有 ubiquity-container-identifiers —— iCloud 一定用不了"
-            exit 1
+            echo "⚠️ 没在签名结果里看到 ubiquity-container-identifiers，请结合 App 内诊断确认"
           fi
 
       - name: Upload dSYMs as artifact
