@@ -18,7 +18,7 @@ struct WalletTicketCard: View {
     /// 这张票绑定期次的开奖号码，同样由外部提前取好。
     var draw: Draw?
 
-    @Environment(\.showToast) private var showToast
+    @Environment(ToastCenter.self) private var showToast
     @State private var isDeleteConfirmPresented = false
 
     /// 收起时画几注。5 注以内的票**一律全展开** —— 大多数票就是 1–5 注，

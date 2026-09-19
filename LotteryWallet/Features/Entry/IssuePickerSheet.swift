@@ -179,8 +179,12 @@ struct IssuePickerSheet: View {
             } label: {
                 VStack(spacing: 1) {
                     Text(dayNumber(day))
-                        .font(.system(size: 15, weight: issue != nil ? .semibold : .regular))
+                        // 日历格里的日期也得跟 Dynamic Type 走。写死 15pt 的话，
+                        // 用户把系统字号调大，整页只有这一处纹丝不动。
+                        .scaledFont(15, weight: issue != nil ? .semibold : .regular)
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     // 期号只显示后三位：同一年里前面几位都一样，
                     // 全写出来这一格根本放不下，也没有区分度。
                     Text(issue.map { String($0.issue.suffix(3)) } ?? " ")

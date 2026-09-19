@@ -19,8 +19,8 @@ struct TicketScanView: View {
     @Environment(\.modelContext) private var context
     @Environment(DrawStore.self) private var drawStore
     @Environment(AppSettings.self) private var settings
-    @Environment(\.showToast) private var showToast
-    @Environment(\.celebrate) private var celebrate
+    @Environment(ToastCenter.self) private var showToast
+    @Environment(CelebrationCenter.self) private var celebrate
 
     @State private var stage: Stage = .intro
     @State private var detent: PresentationDetent = .medium
@@ -1336,7 +1336,7 @@ private struct ScanZoneEditor: View {
     var image: UIImage?
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.showToast) private var showToast
+    @Environment(ToastCenter.self) private var showToast
     @State private var selection = SectionSelection()
     @State private var danPicking = true
 
@@ -1400,7 +1400,7 @@ private struct ScanLineEditor: View {
     var image: UIImage?
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.showToast) private var showToast
+    @Environment(ToastCenter.self) private var showToast
     @State private var selections: [SectionKey: SectionSelection] = [:]
 
     /// 问号没补完就不能点「完成」。

@@ -29,8 +29,16 @@ struct RootView: View {
     /// 不塞进 `RootSheet` 里是因为那是个 `String` 原始值的枚举，
     /// 它同时充当 sheet 的 id —— 挂上一张图会把 id 搞脏。
     @State private var entryReference: EntryReference?
-    @State private var toast: ToastMessage?
-    @State private var celebrationTrigger = 0
+    /// 提示条和烟花挂在**引用类型**上，不是挂在环境里的闭包上。
+    ///
+    /// 上一版是 `.environment(\.showToast, ShowToastAction { ... })` —— 闭包
+    /// 没法比较，根视图每过一次 body 就换出一个新的 `ShowToastAction`，
+    /// 于是**所有读这个环境值的页面**（票夹、扫描、录入、设置）都被判定为
+    /// 环境变了，跟着重算一遍。而它们其实只是想要一个「弹提示」的入口。
+    /// 换成 `@Observable` 的引用类型后，注入的对象身份不变，读它的页面
+    /// 只在真正用到的属性变了才重算。
+    @State private var toastCenter = ToastCenter()
+    @State private var celebration = CelebrationCenter()
     /// 点开抽屉那一刻的屏幕快照，见 `ScreenBackdrop`。
     @State private var backdrop: UIView?
 
@@ -154,19 +162,17 @@ struct RootView: View {
         // withAnimation 开的是一个全局事务，整棵视图树在这一帧里的所有变化
         // 都会被卷进同一段动画 —— 表现就是弹个提示，底下的整票预览卡片
         // 跟着闪一下。动画只该属于提示条自己，所以挂在它的 overlay 上。
-        .environment(\.showToast, ShowToastAction { message in
-            toast = message
-        })
-        .environment(\.celebrate, CelebrateAction { celebrationTrigger += 1 })
+        .environment(toastCenter)
+        .environment(celebration)
         .overlay {
             // 烟花压在所有内容之上、弹窗之下。只有中奖这种罕见时刻才会触发。
-            CelebrationView(trigger: celebrationTrigger)
+            CelebrationView(trigger: celebration.trigger)
         }
         .overlay(alignment: .bottom) {
             // 动画只作用在这一小棵子树上：把 `.animation(value:)` 挂在容器上，
             // 提示条的进出照样有动画，而底下的票面预览、方格图不会被卷进来重画。
             ZStack(alignment: .bottom) {
-                if let toast {
+                if let toast = toastCenter.current {
                     ToastBanner(message: toast)
                         // 悬浮标签栏大约 50pt 高，96 是为了压在它上面留一段空隙。
                         // 左右也要留边，长文案（比如导入失败的系统报错）不能顶到屏幕边缘。
@@ -182,16 +188,16 @@ struct RootView: View {
                             } catch {
                                 return
                             }
-                            self.toast = nil
+                            toastCenter.current = nil
                         }
                 }
             }
-            .animation(.spring(duration: 0.36, bounce: 0.18), value: toast?.id)
+            .animation(.spring(duration: 0.36, bounce: 0.18), value: toastCenter.current?.id)
         }
         // 震动由提示自己声明，见 `ToastMessage.feedback`。
         // 原来一律 `.success`：点号码球被拒时，选号盘那边已经震过一次，
         // 提示又补一记重的，慢半拍到手上，像是点了两下。
-        .sensoryFeedback(trigger: toast?.id) { _, _ in toast?.feedback }
+        .sensoryFeedback(trigger: toastCenter.current?.id) { _, _ in toastCenter.current?.feedback }
         .task {
             // 弹抽屉时不要把背后染灰 —— 那套行为在这里恢复得不跟手，
             // 设置页「外观」那一行的图标甚至根本恢复不回来。见 TintDimming。
@@ -236,7 +242,7 @@ struct RootView: View {
         await Task.yield()
         // 冷启动自动核对出中奖，也应该看到烟花 —— 这正是用户最想被告知的一刻
         if let outcome = try? service.checkAll(), outcome.won > 0 {
-            celebrationTrigger += 1
+            celebration()
         }
     }
 }
@@ -287,42 +293,33 @@ struct ToastBanner: View {
 }
 
 /// 让任意子视图弹提示，不必层层传闭包。
-struct ShowToastAction {
-    let handler: (ToastMessage) -> Void
+///
+/// 写成 `@Observable` 的引用类型而不是塞进 `EnvironmentKey` 的闭包：
+/// 闭包不可比较，每次重建都会让所有读它的页面跟着失效。引用类型注入一次
+/// 身份就固定了，页面只在 `current` 真的变了的时候才重算。
+///
+/// `callAsFunction` 让调用点写法和以前一模一样：`showToast("已保存")`。
+@MainActor
+@Observable
+final class ToastCenter {
+    /// 当前显示的那一条。nil 表示没有提示。
+    var current: ToastMessage?
 
     func callAsFunction(_ text: String,
                         symbol: String = "checkmark.circle.fill",
                         feedback: SensoryFeedback? = nil) {
-        handler(ToastMessage(text: text, symbol: symbol, feedback: feedback))
-    }
-}
-
-private struct ShowToastKey: EnvironmentKey {
-    static let defaultValue = ShowToastAction { _ in }
-}
-
-extension EnvironmentValues {
-    var showToast: ShowToastAction {
-        get { self[ShowToastKey.self] }
-        set { self[ShowToastKey.self] = newValue }
+        current = ToastMessage(text: text, symbol: symbol, feedback: feedback)
     }
 }
 
 // MARK: - 庆祝
 
-/// 放一次中奖烟花。和 `showToast` 一样挂在环境里，页面不必层层传闭包。
-struct CelebrateAction {
-    let handler: () -> Void
-    func callAsFunction() { handler() }
-}
+/// 放一次中奖烟花。和 `ToastCenter` 同一套理由，同一套用法：`celebrate()`。
+@MainActor
+@Observable
+final class CelebrationCenter {
+    /// 每加一次放一轮烟花。`CelebrationView` 盯的就是它。
+    private(set) var trigger = 0
 
-private struct CelebrateKey: EnvironmentKey {
-    static let defaultValue = CelebrateAction {}
-}
-
-extension EnvironmentValues {
-    var celebrate: CelebrateAction {
-        get { self[CelebrateKey.self] }
-        set { self[CelebrateKey.self] = newValue }
-    }
+    func callAsFunction() { trigger += 1 }
 }

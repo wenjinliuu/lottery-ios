@@ -6,8 +6,8 @@ struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.modelContext) private var context
-    @Environment(\.showToast) private var showToast
-    @Environment(\.celebrate) private var celebrate
+    @Environment(ToastCenter.self) private var showToast
+    @Environment(CelebrationCenter.self) private var celebrate
     @Query private var records: [TicketRecord]
 
     @State private var isExporting = false

@@ -44,6 +44,10 @@ struct HomeView: View {
     @State private var todayGames: Set<GameKey> = []
     @State private var pendingGames: [GameKey] = []
     @State private var carouselGames: [GameKey] = GameKey.ordered
+    /// 量出来的可用宽度。量到之前用起手值，见 `HomeLayout.fallbackScreenWidth`。
+    @State private var measuredWidth: CGFloat?
+
+    private var screenWidth: CGFloat { measuredWidth ?? HomeLayout.fallbackScreenWidth }
 
     var body: some View {
         NavigationStack {
@@ -59,6 +63,16 @@ struct HomeView: View {
                 .padding(.bottom, 120)
             }
             .background(Palette.canvas)
+            // 量宽度放在 `background` 里：背景不参与布局，量它不会把
+            // `GeometryReader` 的贪心尺寸带进内容，也动不到导航栏那套
+            // 大标题/滚动渐变的行为。量到之后经环境值往下传。
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { measuredWidth = proxy.size.width }
+                        .onChange(of: proxy.size.width) { _, width in measuredWidth = width }
+                }
+            )
             // **导航栏这里什么都不要加。**
             //
             // 试过两版，两版都是退步：
@@ -88,6 +102,7 @@ struct HomeView: View {
             .task(id: RecordsToken(records)) { recompute() }
             .task(id: drawStore.scheduleToken) { refreshSchedule() }
             .onChange(of: range) { _, _ in recomputeSeries() }
+            .environment(\.screenWidth, screenWidth)
         }
     }
 
@@ -228,7 +243,7 @@ struct HomeView: View {
             .animation(.easeInOut(duration: 0.45), value: pageIndex)
             // 八张卡一个高度。跟着当前页的内容变高变矮是很难受的：
             // 页面下半截会跟着上下跳，眼睛每翻一页都要重新找位置。
-            .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: HomeLayout.screenWidth))
+            .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: screenWidth))
             .accessibilityHint("左右滑动查看其他彩种的最新开奖")
             // 手一碰就停自动轮播。轮播抢走用户正在看的那张卡是很讨厌的事。
             .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in
@@ -416,14 +431,34 @@ enum HomeLayout {
     static let pagePadding: CGFloat = 16
     static let carouselPagePadding: CGFloat = 5
 
-    static var screenWidth: CGFloat {
+    /// 首屏第一帧用的宽度，**只是个起手值**。
+    ///
+    /// 真正的宽度由 `HomeView` 量出来，经 `\.screenWidth` 传给卡片
+    /// （见下面的环境值）。这里留一个起手值是为了第一帧就画对高度 ——
+    /// 量宽度要等一次布局，那一帧用默认值画会让卡片肉眼可见地弹一下。
+    ///
+    /// `keyWindow` 在分屏/多窗口下未必是自己那一个，所以它只配当起手值，
+    /// 不配当数据源。
+    static var fallbackScreenWidth: CGFloat {
         UIApplication.shared.connectedScenes
             .compactMap { ($0 as? UIWindowScene)?.keyWindow?.bounds.width }
             .first ?? 393
     }
+}
 
-    static var drawCardInnerWidth: CGFloat {
-        screenWidth - pagePadding * 2 - carouselPagePadding * 2 - DrawCardMetrics.horizontalPadding * 2
+/// 首页量出来的可用宽度。
+///
+/// 开奖卡片的高度依赖自身宽度，而高度必须在 `GeometryReader` **外面**算好
+/// （高度依赖自身宽度会成布局环）。所以宽度在首页量一次往下传，
+/// 卡片自己不再去问系统要窗口宽度。
+private struct ScreenWidthKey: EnvironmentKey {
+    static var defaultValue: CGFloat { HomeLayout.fallbackScreenWidth }
+}
+
+extension EnvironmentValues {
+    var screenWidth: CGFloat {
+        get { self[ScreenWidthKey.self] }
+        set { self[ScreenWidthKey.self] = newValue }
     }
 }
 
@@ -903,6 +938,10 @@ enum DrawCardMetrics {
 /// 卡片里三段各归各位：**标题永远在最上面**（八张卡翻过去标题不会跳），
 /// 号码在剩余空间里居中，奖项贴底。
 struct DrawCard: View {
+    /// 首页量好的宽度。卡片自己不去问系统要窗口宽度 —— 那在分屏/多窗口下
+    /// 拿到的未必是自己这一个窗口。
+    @Environment(\.screenWidth) private var screenWidth
+
     let game: GameKey
     let draw: Draw?
     /// 这个彩种今天开奖。原来「今日开奖」是页面顶部单独一行标签，
@@ -921,7 +960,7 @@ struct DrawCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, DrawCardMetrics.verticalPadding)
         .padding(.horizontal, DrawCardMetrics.horizontalPadding)
-        .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: HomeLayout.screenWidth))
+        .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: screenWidth))
         .background(
             RoundedRectangle(cornerRadius: DrawCardMetrics.cornerRadius, style: .continuous)
                 .fill(Palette.card)
@@ -935,7 +974,7 @@ struct DrawCard: View {
     @ViewBuilder
     private var numbersRow: some View {
         if let draw {
-            let inner = DrawCardMetrics.innerWidth(screenWidth: HomeLayout.screenWidth)
+            let inner = DrawCardMetrics.innerWidth(screenWidth: screenWidth)
             DrawNumbersView(draw: draw, size: DrawCardMetrics.ballSize(for: draw, width: inner))
                 .frame(width: inner, alignment: .leading)
         } else {

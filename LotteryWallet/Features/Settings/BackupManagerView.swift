@@ -14,8 +14,8 @@ struct BackupManagerView: View {
     @Environment(\.modelContext) private var context
     @Environment(DrawStore.self) private var drawStore
     @Environment(AppSettings.self) private var settings
-    @Environment(\.showToast) private var showToast
-    @Environment(\.celebrate) private var celebrate
+    @Environment(ToastCenter.self) private var showToast
+    @Environment(CelebrationCenter.self) private var celebrate
     @Query private var records: [TicketRecord]
 
     @State private var files: [ICloudBackupService.BackupFile] = []

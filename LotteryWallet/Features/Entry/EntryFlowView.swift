@@ -43,7 +43,7 @@ struct EntryFlowView: View {
     @Environment(\.modelContext) private var context
     @Environment(DrawStore.self) private var drawStore
     @Environment(AppSettings.self) private var settings
-    @Environment(\.showToast) private var showToast
+    @Environment(ToastCenter.self) private var showToast
 
     @State private var game: GameKey = .ssq
     @State private var mode: EntryMode = .manual

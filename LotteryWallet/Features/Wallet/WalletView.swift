@@ -6,8 +6,8 @@ struct WalletView: View {
 
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.modelContext) private var context
-    @Environment(\.showToast) private var showToast
-    @Environment(\.celebrate) private var celebrate
+    @Environment(ToastCenter.self) private var showToast
+    @Environment(CelebrationCenter.self) private var celebrate
     @Query(sort: \TicketRecord.createdAt, order: .reverse) private var records: [TicketRecord]
 
     @State private var filter: WalletFilter = .all
