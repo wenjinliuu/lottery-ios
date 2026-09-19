@@ -133,7 +133,7 @@ struct EntryFlowView: View {
         if let shape = reference?.shape {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 12, weight: .semibold))
+                    .scaledFont(12, weight: .semibold)
                     .foregroundStyle(game.accent.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("已切换为\(shape.label)")

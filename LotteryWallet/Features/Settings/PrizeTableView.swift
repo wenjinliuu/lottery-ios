@@ -36,6 +36,7 @@ struct PrizeTableView: View {
         let table = PrizeTable.table(for: item)
         return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if item == .k8 { k8Card }
                 ForEach(table.groups) { group in
                     VStack(alignment: .leading, spacing: 0) {
                         if let title = group.title {
@@ -61,6 +62,56 @@ struct PrizeTableView: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 40)
+        }
+    }
+
+    /// 快乐8：一个玩法一行，「中N 金额」成对横排。
+    ///
+    /// 十个玩法各自铺一张卡要滚三屏，而这张表就是用来「一眼扫到自己那档」的。
+    /// 压成十行之后整个表一屏多一点就看完了，和官方那张对照表的密度一致。
+    private var k8Card: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(PrizeTable.k8Rows.enumerated()), id: \.element.play) { index, row in
+                if index > 0 { Divider().padding(.vertical, 7) }
+                HStack(alignment: .top, spacing: 10) {
+                    Text(row.play)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(GameKey.k8.accent.accentColor)
+                        .frame(width: 34, alignment: .leading)
+                    // 每行最多四档，多的折到下一行。
+                    //
+                    // 固定分行而不是自适应换行：最长的「选十」也只有七档，
+                    // 4+3 两行在最窄的机型上也放得下，而且每一行的列位固定，
+                    // 十个玩法竖着扫下来是对齐的 —— 表格要的就是这个。
+                    VStack(alignment: .leading, spacing: 5) {
+                        ForEach(Array(Self.chunked(row.hits, size: 4).enumerated()), id: \.offset) { _, line in
+                            HStack(spacing: 6) {
+                                ForEach(Array(line.enumerated()), id: \.element.0) { _, hit in
+                                    HStack(spacing: 3) {
+                                        Text(hit.0)
+                                            .foregroundStyle(.secondary)
+                                        Text(hit.1)
+                                            .fontWeight(.semibold)
+                                            .monospacedDigit()
+                                    }
+                                    .font(.caption2)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
+                                    .background(GameKey.k8.tint.opacity(0.10), in: Capsule())
+                                }
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .contentCard()
+    }
+
+    private static func chunked(_ items: [(String, String)], size: Int) -> [[(String, String)]] {
+        stride(from: 0, to: items.count, by: size).map {
+            Array(items[$0..<min($0 + size, items.count)])
         }
     }
 
@@ -95,7 +146,7 @@ struct PrizeTableView: View {
                 }
                 if let note = tier.note {
                     Text(note)
-                        .font(.system(size: 10))
+                        .scaledFont(10)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -185,13 +236,26 @@ struct PrizeTableView: View {
     @ViewBuilder
     private func footnote(_ text: String, icon: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Image(systemName: icon).font(.system(size: 10))
+            Image(systemName: icon).scaledFont(10)
             Text(text)
-                .font(.system(size: 11))
+                .scaledFont(11)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .foregroundStyle(.tertiary)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 4)
     }
+}
+
+// MARK: - Preview
+//
+// 这一页的排版全靠肉眼：八个彩种的球、金额列在窄屏会不会挤、
+// 快乐8 那张压缩表折行对不对。有了 Preview 就不用每次等 TestFlight。
+#Preview("奖级对照表") {
+    NavigationStack { PrizeTableView() }
+}
+
+#Preview("奖级对照表 · 最大字号") {
+    NavigationStack { PrizeTableView() }
+        .environment(\.dynamicTypeSize, .accessibility3)
 }

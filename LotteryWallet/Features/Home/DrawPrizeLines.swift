@@ -34,7 +34,7 @@ struct DrawPrizeLines: View {
         HStack(spacing: 6) {
             // 快乐8 没有「一等奖」这个名字，用排名区分：金额最高的那行挂奖杯。
             Image(systemName: isTopPrize(entry, rank: rank) ? "trophy.fill" : "rosette")
-                .font(.system(size: 10))
+                .scaledFont(10)
                 .foregroundStyle(game.tint)
             Text("\(prizeLabel(entry)) \(entry.winningCount) 注")
                 .font(.caption2)
@@ -57,9 +57,45 @@ struct DrawPrizeLines: View {
         game == .k8 ? rank == 0 : entry.prizeName.contains("一等奖")
     }
 
-    /// 快乐8 的奖级名照抄票面（「选十中9」），其余彩种收成「一等奖 / 二等奖」。
+    /// 快乐8 的奖级名照抄票面，其余彩种收成「一等奖 / 二等奖」。
+    ///
+    /// 快乐8 的名字里带数字（「选十中10」），紧接着后面又是「\(注数) 注」，
+    /// 两串数字挨在一起读起来是糊的（「选十中10 11 注」）。
+    /// 把「中」后面那个数字换成中文，数字就只剩注数一处，一眼分得开。
     private func prizeLabel(_ entry: PrizeEntry) -> String {
-        if game == .k8 { return entry.prizeName }
-        return entry.prizeName.contains("一等奖") ? "一等奖" : "二等奖"
+        guard game == .k8 else {
+            return entry.prizeName.contains("一等奖") ? "一等奖" : "二等奖"
+        }
+        return Self.chineseHits(in: entry.prizeName)
+    }
+
+    /// 把奖级名里「中」后面的阿拉伯数字换成中文。
+    ///
+    /// 数据源两种写法都出现过（「选十中10」「选10中10」），所以「选」后面的
+    /// 数字也一并归一，最终统一成「选十中十」。
+    static func chineseHits(in name: String) -> String {
+        var result = ""
+        var index = name.startIndex
+        while index < name.endIndex {
+            let character = name[index]
+            result.append(character)
+            guard character == "中" || character == "选" else {
+                index = name.index(after: index)
+                continue
+            }
+            var cursor = name.index(after: index)
+            var digits = ""
+            while cursor < name.endIndex, name[cursor].isNumber {
+                digits.append(name[cursor])
+                cursor = name.index(after: cursor)
+            }
+            if let value = Int(digits), (0...10).contains(value) {
+                result.append(ChineseNumber.text(value))
+                index = cursor
+            } else {
+                index = name.index(after: index)
+            }
+        }
+        return result
     }
 }

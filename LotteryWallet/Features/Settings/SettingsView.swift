@@ -133,6 +133,12 @@ struct SettingsView: View {
                         Button { isICloudRestoreConfirmPresented = true } label: {
                             row("arrow.down.to.line", .green, "从 iCloud 恢复")
                         }
+
+                        NavigationLink {
+                            BackupManagerView()
+                        } label: {
+                            row("folder.fill", .indigo, "管理备份")
+                        }
                     }
                 } header: {
                     Text("iCloud")
@@ -277,11 +283,12 @@ struct SettingsView: View {
             return
         }
         Task {
-            // `url(forUbiquityContainerIdentifier:)` 会阻塞，不能放主线程。
-            let available = await Task.detached { ICloudBackupService.isAvailable() }.value
-            guard available else {
-                showToast("iCloud 不可用，请先在系统设置里登录 iCloud",
-                          symbol: "icloud.slash", feedback: .error)
+            // 这一串会阻塞（首次还会重试等容器就绪），不能放主线程。
+            let failure = await Task.detached { ICloudBackupService.availability() }.value
+            if let failure {
+                // 说清是哪一种不可用 —— 「没登录」和「容器还没就绪」
+                // 给用户的下一步动作完全不同。
+                showToast(failure.localizedDescription, symbol: "icloud.slash", feedback: .error)
                 return
             }
             settings.iCloudBackupEnabled = true

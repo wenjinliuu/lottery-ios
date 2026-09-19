@@ -44,6 +44,8 @@ targets:
       path: LotteryWallet/Resources/Info.plist
       properties:
         CFBundleDisplayName: 对个号
+        # 声明开发语言。没有这一条时 App Store 对语言的标注是靠猜的。
+        CFBundleDevelopmentRegion: zh-Hans
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen:

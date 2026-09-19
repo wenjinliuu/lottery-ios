@@ -40,10 +40,10 @@ struct DisclaimerNote: View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             if let icon {
                 Image(systemName: icon)
-                    .font(.system(size: 9))
+                    .scaledFont(9)
             }
             Text(text)
-                .font(.system(size: 10))
+                .scaledFont(10)
                 .multilineTextAlignment(alignment == .center ? .center : .leading)
             if alignment == .center { Spacer(minLength: 0) }
         }
@@ -61,7 +61,7 @@ struct DisclaimerBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
+                .scaledFont(12, weight: .semibold)
                 .foregroundStyle(Palette.warning)
             Text(text)
                 .font(.caption)

@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import Charts
 import UIKit
 
 /// 记录集合的变化指纹。
@@ -243,7 +242,7 @@ struct HomeView: View {
             // 抓错、延迟、口径不一致都可能发生，而彩票是真金白银的事。
             // 放在设置页里没人会看到 —— 它只在人正盯着开奖号的时候才有意义。
             Text(Disclaimer.draw)
-                .font(.system(size: 10))
+                .scaledFont(10)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 2)
@@ -559,7 +558,11 @@ struct ProfitHeatmap: View {
                             // 一列就是一周。整列可点，弹一个很小的浮层说这一周
                             // 花了多少、中了多少、中奖率多少 —— 方格图本身只有
                             // 颜色，具体数字总得有地方看。
-                            .contentShape(Rectangle())
+                            //
+                            // 格子只有 9pt 宽，整列的命中区也就 9pt，远低于 HIG
+                            // 的 28pt 下限。用负 inset 把命中区向两侧撑开，
+                            // **视觉一点没变**，只是手指更容易点中。
+                            .contentShape(Rectangle().inset(by: -(28 - cell) / 2))
                             .overlay {
                                 if selectedWeek == index {
                                     RoundedRectangle(cornerRadius: 4, style: .continuous)
@@ -585,7 +588,7 @@ struct ProfitHeatmap: View {
                     HStack(alignment: .top, spacing: gap) {
                         ForEach(Array(grid.monthLabels.enumerated()), id: \.offset) { _, label in
                             Text(label)
-                                .font(.system(size: 9))
+                                .scaledFont(9)
                                 .foregroundStyle(.secondary)
                                 .fixedSize()
                                 .frame(width: cell, alignment: .leading)
@@ -686,7 +689,7 @@ struct ProfitHeatmap: View {
     private var topBar: some View {
         HStack(spacing: 6) {
             Text("支")
-                .font(.system(size: 10))
+                .scaledFont(10)
                 .foregroundStyle(.secondary)
             ForEach([1.0, 0.55, 0.25], id: \.self) { level in
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -702,12 +705,12 @@ struct ProfitHeatmap: View {
                     .frame(width: 9, height: 9)
             }
             Text("收")
-                .font(.system(size: 10))
+                .scaledFont(10)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
             if let best = days.filter({ $0.count > 0 }).max(by: { $0.net < $1.net }), best.net > 0 {
                 Text("最好的一天 \(MoneyText.format(best.net))")
-                    .font(.system(size: 10))
+                    .scaledFont(10)
                     .foregroundStyle(Palette.profit)
                     .lineLimit(1)
             }
@@ -957,7 +960,7 @@ struct DrawCard: View {
 
             if opensToday {
                 Text("今日开奖")
-                    .font(.system(size: 10, weight: .bold))
+                    .scaledFont(10, weight: .bold)
                     .foregroundStyle(Palette.live)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)

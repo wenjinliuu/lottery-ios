@@ -192,3 +192,40 @@ extension RecordStatus {
         }
     }
 }
+
+// MARK: - 跟随 Dynamic Type 的小字号
+
+/// 固定视觉尺寸、但跟着系统字号一起缩放的小字。
+///
+/// `.font(.system(size: 10))` 写死之后**完全不随 Dynamic Type 变化** ——
+/// 用户把字号调到最大，免责声明、奖级行、图例这些本来就最小的字还是 10pt，
+/// 是 HIG 无障碍那一关的硬失败。
+///
+/// 但直接换成 `.caption2` 会改变默认字号下的观感（这些位置的字号是按票面
+/// 排版调过的）。`@ScaledMetric` 两头都占：默认字号下**和原来一模一样**，
+/// 系统字号变大时按 `.caption2` 的比例跟着长。
+private struct ScaledFontModifier: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    private let weight: Font.Weight
+    private let design: Font.Design
+
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design) {
+        _size = ScaledMetric(wrappedValue: size, relativeTo: .caption2)
+        self.weight = weight
+        self.design = design
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size, weight: weight, design: design))
+    }
+}
+
+extension View {
+    /// 见 `ScaledFontModifier`：默认字号下等同 `.font(.system(size:))`，
+    /// 但会跟随 Dynamic Type 缩放。
+    func scaledFont(_ size: CGFloat,
+                    weight: Font.Weight = .regular,
+                    design: Font.Design = .default) -> some View {
+        modifier(ScaledFontModifier(size: size, weight: weight, design: design))
+    }
+}

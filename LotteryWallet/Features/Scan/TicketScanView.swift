@@ -925,7 +925,7 @@ struct TicketScanView: View {
         let capsule = HStack(spacing: 3) {
             Text(headLabel(value))
             if EntryMode.modes(for: value.game).count > 1 {
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+                Image(systemName: "chevron.down").scaledFont(8, weight: .bold)
             }
         }
         .font(.caption2.weight(.bold))

@@ -74,25 +74,50 @@ final class PrizeTableTests: XCTestCase {
         XCTAssertEqual(ways(.qxc, "六等奖"), 3)
     }
 
-    /// 每个彩种都要有数据来源与免责脚注可读，八个一个都不能漏。
+    /// 每个彩种都要有内容和脚注，八个一个都不能漏。
+    ///
+    /// 快乐8 走 `k8Rows` 单独排版（十个玩法压成十行，不铺成十个分组），
+    /// 所以它的 `groups` 是空的，单独判。
     func testEveryGameHasATable() {
         for game in GameKey.ordered {
             let table = PrizeTable.table(for: game)
+            XCTAssertNotNil(table.note, "\(game.label) 缺少说明脚注")
+            guard game != .k8 else { continue }
             XCTAssertFalse(table.groups.isEmpty, "\(game.label) 没有奖级表")
             XCTAssertFalse(table.groups.flatMap(\.tiers).isEmpty, "\(game.label) 的奖级表是空的")
-            XCTAssertNotNil(table.note, "\(game.label) 缺少说明脚注")
+        }
+        XCTAssertFalse(PrizeTable.k8Rows.isEmpty, "快乐8 没有奖级表")
+    }
+
+    /// 快乐8 十个玩法都要在，且奖级名一律用中文数字。
+    func testK8CoversEveryPlayMode() {
+        let plays = PrizeTable.k8Rows.map(\.play)
+        XCTAssertEqual(plays, ["选十", "选九", "选八", "选七", "选六", "选五", "选四", "选三", "选二", "选一"])
+
+        // 选十到选七都设了「中零」这一档，这是快乐8 最容易被漏掉的规则
+        for play in ["选十", "选九", "选八", "选七"] {
+            let row = PrizeTable.k8Rows.first { $0.play == play }
+            XCTAssertTrue(row?.hits.contains { $0.0 == "中零" } ?? false, "\(play) 少了「中零」那一档")
+        }
+
+        // 表里不能再出现阿拉伯数字的「中N」—— 那正是和后面注数打架的写法
+        for row in PrizeTable.k8Rows {
+            for hit in row.hits {
+                XCTAssertFalse(hit.0.contains(where: \.isNumber),
+                               "\(row.play) 的「\(hit.0)」应该用中文数字")
+            }
         }
     }
 
-    /// 快乐8 按「选几」分组，十个玩法都要在。
-    func testK8CoversEveryPlayMode() {
-        let titles = PrizeTable.table(for: .k8).groups.compactMap(\.title)
-        XCTAssertEqual(titles, ["选十", "选九", "选八", "选七", "选六", "选五", "选四", "选三", "选二", "选一"])
-        // 选十到选七都设了「中 0」这一档，这是快乐8 最容易被漏掉的规则
-        for title in ["选十", "选九", "选八", "选七"] {
-            let group = PrizeTable.table(for: .k8).groups.first { $0.title == title }
-            XCTAssertTrue(group?.tiers.contains { $0.name == "中 0" } ?? false,
-                          "\(title) 少了「中 0」那一档")
-        }
+    /// 开奖卡上的快乐8 奖级名要把数字换成中文，免得和后面的注数糊在一起。
+    func testK8PrizeLabelUsesChineseDigits() {
+        XCTAssertEqual(DrawPrizeLines.chineseHits(in: "选十中10"), "选十中十")
+        XCTAssertEqual(DrawPrizeLines.chineseHits(in: "选10中10"), "选十中十")
+        XCTAssertEqual(DrawPrizeLines.chineseHits(in: "选8中0"), "选八中零")
+        XCTAssertEqual(DrawPrizeLines.chineseHits(in: "选七中5"), "选七中五")
+        // 已经是中文的原样不动
+        XCTAssertEqual(DrawPrizeLines.chineseHits(in: "选九中九"), "选九中九")
+        // 超出 0...10 的数字不动（不该出现，但别把它改坏）
+        XCTAssertEqual(DrawPrizeLines.chineseHits(in: "选十中12"), "选十中12")
     }
 }

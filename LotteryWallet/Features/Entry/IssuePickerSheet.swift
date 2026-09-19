@@ -184,7 +184,7 @@ struct IssuePickerSheet: View {
                     // 期号只显示后三位：同一年里前面几位都一样，
                     // 全写出来这一格根本放不下，也没有区分度。
                     Text(issue.map { String($0.issue.suffix(3)) } ?? " ")
-                        .font(.system(size: 9))
+                        .scaledFont(9)
                         .monospacedDigit()
                         .opacity(0.75)
                 }
