@@ -92,6 +92,21 @@ struct ICloudBackupService: Sendable {
             from: slice, options: [], format: nil) as? [String: Any]
     }
 
+    /// 系统按**二进制里真正带着的** entitlement 给出的默认容器。
+    ///
+    /// 传 nil 问的是 entitlement 里排第一的那个容器，所以这一问能分开两件
+    /// 描述文件看不出来的事：
+    ///
+    /// - 默认容器拿得到、指定 ID 拿不到 → 容器标识符写错了，路径里就写着对的那个；
+    /// - 默认容器也拿不到 → 要么最终二进制压根没带 entitlement（描述文件里有
+    ///   不代表签进去了 —— CI 是归档不签名、导出再签），要么 iCloud 云盘关着。
+    ///
+    /// 描述文件只能证明「Apple 那边允许」，证明不了「这个包签进去了」，
+    /// 上一版的诊断就卡在这个盲区上。
+    static func defaultContainerURL() -> URL? {
+        FileManager.default.url(forUbiquityContainerIdentifier: nil)
+    }
+
     /// 给「管理备份」页显示的人话诊断。
     ///
     /// 模拟器和某些构建里没有 `embedded.mobileprovision`，那时候「权限」这一行
@@ -108,7 +123,23 @@ struct ICloudBackupService: Sendable {
         let account = isSignedIn() ? "已登录" : "未登录"
         let container = FileManager.default.url(forUbiquityContainerIdentifier: containerID) != nil
             ? "可用" : "拿不到"
-        return "权限：\(entitlement)\n账户：\(account)\n容器：\(container)"
+        // 目录名就是系统认的容器标识符（`iCloud.a.b.c` 会写成 `iCloud~a~b~c`），
+        // 和我们写死的那个一比就知道是不是写错了。
+        let fallback: String
+        if let url = defaultContainerURL() {
+            fallback = "可用（\(url.lastPathComponent)）"
+        } else {
+            fallback = "拿不到"
+        }
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        return """
+        权限：\(entitlement)
+        账户：\(account)
+        容器：\(container)
+        默认容器：\(fallback)
+        版本：\(version) (\(build))
+        """
     }
 
     // MARK: - 可用性

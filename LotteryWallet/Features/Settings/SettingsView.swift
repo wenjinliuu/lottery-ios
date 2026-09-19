@@ -133,17 +133,22 @@ struct SettingsView: View {
                         Button { isICloudRestoreConfirmPresented = true } label: {
                             row("arrow.down.to.line", .green, "从 iCloud 恢复")
                         }
+                    }
 
-                        NavigationLink {
-                            BackupManagerView()
-                        } label: {
-                            row("folder.fill", .indigo, "管理备份")
-                        }
+                    // **这一行不跟着开关走。**
+                    //
+                    // 之前它藏在开关里面，于是恰恰在开关打不开的时候，
+                    // 用来查「为什么打不开」的诊断也跟着消失了 —— 用户
+                    // 在设置里翻遍了也找不到入口。查故障的入口必须永远在。
+                    NavigationLink {
+                        BackupManagerView()
+                    } label: {
+                        row("folder.fill", .indigo, "管理备份")
                     }
                 } header: {
                     Text("iCloud")
                 } footer: {
-                    Text("打开后，每次退到后台时会把一份备份写进你自己的 iCloud 云盘（「文件」App 里的「对个号」文件夹）。备份只存在你的 iCloud 账户里，开发者无法访问。关掉开关不会删除已经备份的文件。")
+                    Text("打开后，每次退到后台时会把一份备份写进你自己的 iCloud 云盘（「文件」App 里的「对个号」文件夹）。备份只存在你的 iCloud 账户里，开发者无法访问。关掉开关不会删除已经备份的文件。\n\n开关打不开时，进「管理备份」能看到卡在哪一环。")
                 }
 
                 Section {

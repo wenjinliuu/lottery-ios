@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 /// iCloud 备份管理。
 ///
@@ -77,10 +78,18 @@ struct BackupManagerView: View {
                     .font(.footnote.monospaced())
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
+
+                Button {
+                    UIPasteboard.general.string = diagnostic
+                    showToast("已复制诊断信息", symbol: "doc.on.doc", feedback: .success)
+                } label: {
+                    Label("复制诊断信息", systemImage: "doc.on.doc")
+                }
+                .disabled(diagnostic.isEmpty)
             } header: {
                 Text("诊断")
             } footer: {
-                Text("iCloud 用不了时，把这三行发给开发者最省事。")
+                Text("iCloud 用不了时，把这几行发给开发者最省事。")
             }
         }
         .navigationTitle("管理备份")
