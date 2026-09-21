@@ -210,6 +210,10 @@ struct RootView: View {
         // 导入恢复的老票没有命中标记，补标记之前得先把那几年的开奖号取回来
         await drawStore.loadArchives(service.archivesNeedingMatchRepair())
         await Task.yield()
+        // bootstrap 只带来每个彩种的最新一期。盯着更早期号的票还核对不了，
+        // 这时候才去补那几个彩种的最近 30 期 —— 通常一两个，不是八个。
+        await drawStore.ensureRecentDraws(for: service.gamesAwaitingDraws())
+        await Task.yield()
         // 冷启动自动核对出中奖，也应该看到烟花 —— 这正是用户最想被告知的一刻
         if let outcome = try? service.checkAll(), outcome.won > 0 {
             celebrationTrigger += 1

@@ -51,15 +51,17 @@ struct SettingsView: View {
                     }
 
                     LabeledContent {
-                        Text(drawStore.calendar == nil ? "未获取" : "正常")
+                        Text(drawStore.schedules.isEmpty ? "未获取" : "正常")
                             .font(.footnote)
-                            .foregroundStyle(drawStore.calendar == nil ? Palette.warning : Color.secondary)
+                            .foregroundStyle(drawStore.schedules.isEmpty ? Palette.warning : Color.secondary)
                     } label: {
-                        row("calendar", .red, "开奖日历")
+                        row("calendar", .red, "开奖日程")
                     }
 
                     LabeledContent {
-                        Text("\(drawStore.loadedHistoryGames.count)/\(GameKey.ordered.count)")
+                        // 往期是按需加载的，这里显示的是「已经取过几个彩种」，
+                        // 不是「应该取满八个」——  没打开过的彩种本来就不该取。
+                        Text("\(loadedRecentCount) 个彩种")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } label: {
@@ -202,13 +204,19 @@ struct SettingsView: View {
         return "上次备份：\(days) 天前。"
     }
 
+    /// 已经取过最近开奖的彩种数量。
+    private var loadedRecentCount: Int {
+        drawStore.recentStates.values.filter { $0 == .loaded }.count
+    }
+
     // MARK: - 动作
 
     private func refreshData() {
         Task {
             isRefreshing = true
             await drawStore.refresh()
-            await drawStore.loadAllHistories()
+            // 只刷新用户已经看过的那几个彩种，不顺手把没看过的也拉下来。
+            await drawStore.refreshLoadedRecents()
             isRefreshing = false
             showToast("数据状态已更新")
         }
@@ -245,8 +253,11 @@ struct SettingsView: View {
                 await Task.yield()
 
                 busyLabel = "正在核对开奖…"
-                await drawStore.loadAllHistories()
                 let service = RecordService(context: context, drawStore: drawStore)
+                // 导进来的老票绑的是几个月甚至几年前的期号，按需补那几年，
+                // 再补一次还差的彩种最近 30 期。两步都只取真正要用的。
+                await drawStore.loadArchives(service.archivesNeedingMatchRepair())
+                await drawStore.ensureRecentDraws(for: service.gamesAwaitingDraws())
                 _ = try? service.reconcileInferredTargets()
                 let checked = try? service.checkAll()
 

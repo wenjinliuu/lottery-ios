@@ -398,8 +398,9 @@ struct WalletView: View {
     private func recheck(silent: Bool = false) async {
         isChecking = true
         defer { isChecking = false }
-        await drawStore.loadAllHistories()
         let service = RecordService(context: context, drawStore: drawStore)
+        // 只补还核对不了的那几个彩种，不是八个都拉一遍。
+        await drawStore.ensureRecentDraws(for: service.gamesAwaitingDraws())
         guard let outcome = try? service.checkAll(records) else {
             if !silent { showToast("核对失败", symbol: "exclamationmark.triangle", feedback: .error) }
             return
