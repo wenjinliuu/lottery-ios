@@ -20,42 +20,94 @@ struct ChinaClock: Sendable {
         return ChinaClock(date: date, clock: clock, weekday: (parts.weekday ?? 1) - 1)
     }
 
-    /// 东八区的当前年份。整年往期按它取 `by-year/{game}/{year}.json`。
+    /// 东八区的当前年份。按年取往期和日历都以它为准。
     static func year(_ reference: Date = Date()) -> Int {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = DateText.chinaTimeZone
         return calendar.component(.year, from: reference)
     }
+
+    /// 东八区的当前月份。只在「要不要顺带取下一年日历」这一处用。
+    static func month(_ reference: Date = Date()) -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = DateText.chinaTimeZone
+        return calendar.component(.month, from: reference)
+    }
 }
 
-/// 开奖数据的全局状态：最新一期、往期、日历、仓库健康。
+/// 一块数据的加载状态。
+///
+/// **不能只有一个全局 `isLoading`。** 上一版就是那样：往期页在拉数据，
+/// 首页跟着一起转圈；某个彩种拉失败，整个 App 都显示「加载失败」。
+/// 每个端点各记各的，页面才能只为自己那一块负责。
+enum LoadState: Equatable, Sendable {
+    case idle
+    case loading
+    case loaded
+    case failed(String)
+
+    var isLoading: Bool { self == .loading }
+    /// 试过了没有。区分「还没轮到它」和「试过但没有数据」。
+    var hasTried: Bool { self != .idle }
+    var hasFailed: Bool { if case .failed = self { return true }; return false }
+    /// 失败原因。没失败就是 nil，页面可以直接拿它当「有没有错要显示」用。
+    var failureText: String? { if case .failed(let text) = self { return text }; return nil }
+}
+
+/// 开奖数据的全局状态。
+///
+/// ## 渐进式加载
+///
+/// 冷启动**只请求 `/v2/bootstrap` 一个端点**（八个彩种的最新一期 + 开奖
+/// 日程 + 下一期推算，7KB 左右）。其余一律等到用户真的要看才取：
+///
+/// | 用户动作 | 请求 |
+/// | --- | --- |
+/// | 打开 App | `/v2/bootstrap` |
+/// | 进往期开奖、翻到某个彩种 | `/v2/draws/{type}`（最近 30 期） |
+/// | 点「查看今年全部」 | `/v2/by-year/{type}/{今年}` |
+/// | 点「加载 20XX 年」 | `/v2/by-year/{type}/{那一年}`，一次只一年 |
+/// | 进录入页选期号 | `/v2/calendar/{今年}` |
+///
+/// 上一版冷启动一口气发 13 个请求（latest、calendar、health、两年日历、
+/// 八个彩种的往期），其中 `health` 拉回来后**没有任何界面读过**。
 @MainActor
 @Observable
 final class DrawStore {
-    private(set) var draws: [Draw] = []
-    private(set) var calendar: DrawCalendar?
-    private(set) var health: RepoHealth?
-    private(set) var latestUpdatedAt: String = ""
-    private(set) var isLoading = false
-    private(set) var loadFailed = false
-    /// **拉到了数据**的彩种。跳过重复拉取看这个。
-    private(set) var loadedHistoryGames: Set<GameKey> = []
-    /// **尝试过**的彩种，不管成没成。往期页拿它区分「还在加载」和「确实没有」。
-    private(set) var attemptedHistoryGames: Set<GameKey> = []
-    /// 已经把**整年**往期拉下来的彩种。
-    ///
-    /// 默认只拉 `draws/{game}.json` 的近 50 期 —— 那是往期页第一屏要的量，
-    /// 拉整年等于一上来就下载十倍的数据、解一遍、再全量渲染，
-    /// 而绝大多数人翻不到第 50 期。用户点了「查看整年」才按需补。
-    private(set) var loadedYearGames: Set<GameKey> = []
-    /// 整年拉取失败的彩种，用来把按钮从「加载中」退回可重试。
-    private(set) var yearLoadFailedGames: Set<GameKey> = []
-    private(set) var loadingYearGames: Set<GameKey> = []
-    /// 整年开奖日历，按年缓存。文件是静态的，一年只需要取一次。
-    private(set) var yearCalendars: [Int: DrawCalendarYear] = [:]
-    private var loadedArchives: Set<ArchiveKey> = []
 
-    struct ArchiveKey: Hashable { let game: GameKey; let year: Int }
+    // MARK: - 数据
+
+    private(set) var draws: [Draw] = []
+    /// 各彩种的开奖日程。V2 把它从每条开奖记录里挪了出来，一个彩种一份。
+    private(set) var schedules: [GameKey: DrawSchedule] = [:]
+    private(set) var latestUpdatedAt: String = ""
+    /// 年度开奖日历，按年存。
+    private(set) var yearCalendars: [Int: DrawCalendarYear] = [:]
+
+    // MARK: - 状态（四组，互不干扰）
+
+    private(set) var bootstrapState: LoadState = .idle
+    private(set) var recentStates: [GameKey: LoadState] = [:]
+    private(set) var yearStates: [GameKey: [Int: LoadState]] = [:]
+    private(set) var calendarStates: [Int: LoadState] = [:]
+    /// 服务端给的「这个彩种真实存在的最早年份」（`by-year` 的 `earliest_year`）。
+    ///
+    /// 有它就按它来，**不再靠猜**。
+    private(set) var earliestYears: [GameKey: Int] = [:]
+    /// 靠猜得出的「再往前没有了」：只在服务端**没给** `earliest_year` 时用
+    /// （迁移前生成的 GitHub 镜像没有这个字段）。
+    private(set) var exhaustedHistory: Set<GameKey> = []
+    /// 最近一次成功取数的来源，只用于诊断。
+    private(set) var lastSource: LotteryDataSource?
+    /// 数据源体检结果。**只有用户打开「开奖数据」详情页才会有值。**
+    private(set) var health: DataSourceHealth?
+    private(set) var healthState: LoadState = .idle
+
+    /// 服务端没给 `earliest_year` 时的兜底下限，防止无限往前探。
+    /// 只在读旧镜像时才会用到。
+    static let fallbackEarliestYear = 2003
+
+    // MARK: - 索引
 
     /// 按彩种+期号建索引。核对成百上千条记录时，每条都去线性扫全部开奖
     /// 是 O(记录 × 开奖)，几百条就能让主线程停住。
@@ -63,84 +115,295 @@ final class DrawStore {
     private var latestByGame: [GameKey: Draw] = [:]
     private var drawsByGame: [GameKey: [Draw]] = [:]
 
-    private let client: LotteryDataClient
+    private let repository: LotteryRepository
 
-    init(client: LotteryDataClient = .shared) {
-        self.client = client
+    init(repository: LotteryRepository = .shared) {
+        self.repository = repository
     }
 
-    // MARK: - 加载
+    // MARK: - 冷启动
 
-    /// 冷启动：先拿最新一期把首页点亮，再后台补齐各彩种近 50 期。
+    /// 冷启动。**只取 bootstrap，一个端点。**
+    ///
+    /// 先用磁盘上那份把界面点亮，再去刷新 —— 有缓存的情况下用户看到的是
+    /// 瞬间出现的开奖号，而不是一圈转半秒的菊花。
     func bootstrap() async {
+        if let cached = await repository.cached(.bootstrap, as: LotteryV2.Bootstrap.self) {
+            applyBootstrap(cached.value, source: cached.source, updatedAt: cached.savedAt)
+        }
         await refresh()
-        await loadYearCalendars()
-        await loadAllHistories()
     }
 
-    func refresh() async {
-        isLoading = true
-        defer { isLoading = false }
-
-        let client = self.client
-        let latestTask = Task { try? await client.fetchLatest() }
-        let calendarTask = Task { try? await client.fetchCalendar() }
-        let healthTask = Task { try? await client.fetchHealth() }
-        let latest = await latestTask.value
-        calendar = await calendarTask.value
-        health = await healthTask.value
-        if let latest {
-            latestUpdatedAt = latest.updatedAt
-            merge(latest.draws)
-            loadFailed = false
-        } else {
-            loadFailed = draws.isEmpty
+    /// 刷新 bootstrap。下拉刷新和「刷新开奖数据」走这里。
+    func refresh(force: Bool = true) async {
+        bootstrapState = .loading
+        do {
+            let loaded = try await repository.load(.bootstrap,
+                                                   as: LotteryV2.Bootstrap.self,
+                                                   forceRefresh: force)
+            applyBootstrap(loaded.value, source: loaded.source, updatedAt: loaded.savedAt)
+            bootstrapState = .loaded
+        } catch {
+            bootstrapState = .failed(message(for: error))
         }
     }
 
-    /// 整年开奖日历。跨年那几天要同时拿到今年和明年，否则 12 月 31 日
-    /// 之后就找不到"下一期"了。
-    func loadYearCalendars(_ now: Date = Date()) async {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = DateText.chinaTimeZone
-        let year = calendar.component(.year, from: now)
-        let client = self.client
-        for candidate in [year, year + 1] where yearCalendars[candidate] == nil {
-            // 明年的文件通常要到 12 月才生成，取不到是正常情况，静默跳过。
-            if let payload = try? await client.fetchDrawCalendar(year: candidate) {
-                yearCalendars[candidate] = payload
+    private func applyBootstrap(_ payload: LotteryV2.Bootstrap,
+                                source: LotteryDataSource,
+                                updatedAt: Date) {
+        let result = LotteryV2Mapper.bootstrap(payload)
+        schedules = result.schedules
+        latestUpdatedAt = result.generatedAt.isEmpty ? DateText.day(updatedAt) : result.generatedAt
+        lastSource = source
+        merge(result.latest)
+    }
+
+    // MARK: - 最近 30 期（按彩种、按需）
+
+    /// 进入某个彩种的往期页时调用。**只请求这一个彩种。**
+    func loadRecent(for game: GameKey, force: Bool = false) async {
+        if !force, recentStates[game] == .loaded { return }
+        if recentStates[game] == .loading { return }
+        recentStates[game] = .loading
+        do {
+            let loaded = try await repository.load(.recentDraws(game),
+                                                   as: LotteryV2.DrawsPayload.self,
+                                                   forceRefresh: force)
+            lastSource = loaded.source
+            merge(LotteryV2Mapper.draws(loaded.value.draws, game: game))
+            recentStates[game] = .loaded
+        } catch {
+            recentStates[game] = .failed(message(for: error))
+        }
+    }
+
+    /// 用户点「重试」：状态清干净再来一次。
+    func reloadRecent(for game: GameKey) async {
+        recentStates[game] = .idle
+        await loadRecent(for: game, force: true)
+    }
+
+    /// 把这几个彩种的最近 30 期补齐。
+    ///
+    /// **只给真正需要的彩种用**，典型场景是启动自动核对时发现有票的目标期号
+    /// 不在 bootstrap 的最新一期里。绝不拿它去把八个彩种一次拉满 ——
+    /// 那正是上一版冷启动最贵的那一步。
+    func ensureRecentDraws(for games: Set<GameKey>) async {
+        // 顺序取。这条路上通常只有一两个彩种，并行省不下什么，
+        // 而 `DrawStore` 是 MainActor 隔离的，扔进 TaskGroup 只会换来一堆
+        // 跨隔离域的捕获问题。同端点的去重在 `LotteryRepository` 那一层。
+        for game in games where recentStates[game] != .loaded && recentStates[game] != .loading {
+            await loadRecent(for: game)
+        }
+    }
+
+    /// 把**已经加载过的**彩种重新取一遍。
+    ///
+    /// 「刷新开奖数据」「重新核对」用。刷的是用户已经看过的那些，
+    /// 不会顺手把没看过的七个也拉下来。
+    func refreshLoadedRecents() async {
+        for game in recentStates.filter({ $0.value == .loaded }).map(\.key) {
+            await loadRecent(for: game, force: true)
+        }
+    }
+
+    // MARK: - 按年往期（一次一年）
+
+    /// 某个彩种已经加载过的年份，新的在前。
+    func loadedYears(for game: GameKey) -> [Int] {
+        (yearStates[game] ?? [:]).filter { $0.value == .loaded }.keys.sorted(by: >)
+    }
+
+    func yearState(for game: GameKey, year: Int) -> LoadState {
+        yearStates[game]?[year] ?? .idle
+    }
+
+    func isLoadingAnyYear(_ game: GameKey) -> Bool {
+        (yearStates[game] ?? [:]).values.contains { $0.isLoading }
+    }
+
+    /// 下一次「加载更早」该取哪一年。今年还没取就是今年，
+    /// 否则是已取到的最早那年再往前一年。
+    ///
+    /// 下限优先用服务端给的 `earliest_year`。**它在的时候不看「空年份」那条
+    /// 猜测** —— 中间某一年恰好没有数据（某彩种停办过一年）是可能的，
+    /// 拿它当终点会把更早的历史整个藏起来。只有读到没有这个字段的旧镜像时，
+    /// 才退回「空年份即到头」加一个硬下限。
+    func nextYearToLoad(for game: GameKey, now: Date = Date()) -> Int? {
+        let current = ChinaClock.year(now)
+        let floor = earliestYears[game] ?? Self.fallbackEarliestYear
+        if earliestYears[game] == nil, exhaustedHistory.contains(game) { return nil }
+        guard let earliest = loadedYears(for: game).min() else {
+            return current >= floor ? current : nil
+        }
+        let candidate = earliest - 1
+        return candidate >= floor ? candidate : nil
+    }
+
+    func hasMoreHistory(for game: GameKey, now: Date = Date()) -> Bool {
+        nextYearToLoad(for: game, now: now) != nil
+    }
+
+    /// 加载某个彩种的某一年。**同一彩种同一年不会请求两次。**
+    func loadYear(for game: GameKey, year: Int) async {
+        let state = yearState(for: game, year: year)
+        if state == .loaded || state == .loading { return }
+        yearStates[game, default: [:]][year] = .loading
+        do {
+            let loaded = try await repository.load(.yearDraws(game, year), as: LotteryV2.YearPayload.self)
+            lastSource = loaded.source
+            let converted = LotteryV2Mapper.draws(loaded.value.draws, game: game)
+            merge(converted)
+            yearStates[game, default: [:]][year] = .loaded
+            if let earliest = Int(loaded.value.earliestYear.text) {
+                // 服务端直接告诉了我们边界，那就不需要猜。
+                earliestYears[game] = earliest
+            } else if converted.isEmpty {
+                // 旧镜像没有 `earliest_year`，只能沿用「这一年空了就算到头」。
+                exhaustedHistory.insert(game)
             }
+        } catch {
+            yearStates[game, default: [:]][year] = .failed(message(for: error))
         }
+    }
+
+    /// 用户点「查看今年全部」或「加载更早」。一次只推进一年。
+    func loadOlderHistory(for game: GameKey, now: Date = Date()) async {
+        guard let year = nextYearToLoad(for: game, now: now) else { return }
+        await loadYear(for: game, year: year)
     }
 
     /// 按需补齐某几年的整年开奖记录。
     ///
-    /// 补核对导入的老票要用：那些票绑定的期号可能是好几个月前的，
-    /// 不在最近 50 期里，光靠 `draws/{game}.json` 永远查不到对应开奖号。
+    /// 补核对导入的老票要用：那些票绑定的期号可能是好几年前的，
+    /// 不在最近 30 期里，光靠 `/v2/draws/{type}` 永远查不到对应开奖号。
     func loadArchives(_ wanted: [GameKey: Set<Int>]) async {
         let pending = wanted.flatMap { game, years in
-            years.filter { !loadedArchives.contains(ArchiveKey(game: game, year: $0)) }
-                .map { (game, $0) }
+            years.filter { yearState(for: game, year: $0) == .idle }.map { (game, $0) }
         }
-        guard !pending.isEmpty else { return }
-        let client = self.client
-        let results = await withTaskGroup(of: (GameKey, Int, [Draw]?).self) { group in
-            for (game, year) in pending {
-                group.addTask { (game, year, try? await client.fetchYearDraws(for: game, year: year)) }
-            }
-            var collected: [(GameKey, Int, [Draw]?)] = []
-            for await item in group { collected.append(item) }
-            return collected
+        for (game, year) in pending {
+            await loadYear(for: game, year: year)
         }
-        var merged: [Draw] = []
-        for (game, year, draws) in results {
-            // 只有真的拿到了才记成已加载。一次网络抖动就把这一年永久拉黑的话，
-            // 补命中标记那条路整个会话都不会再有第二次机会。
-            guard let draws, !draws.isEmpty else { continue }
-            loadedArchives.insert(ArchiveKey(game: game, year: year))
-            merged.append(contentsOf: draws)
+    }
+
+    // MARK: - 年度日历（按年、按需）
+
+    /// 加载某一年的开奖日历。
+    func loadCalendar(year: Int) async {
+        let state = calendarStates[year] ?? .idle
+        if state == .loaded || state == .loading { return }
+        calendarStates[year] = .loading
+        do {
+            let loaded = try await repository.load(.calendar(year), as: LotteryV2.CalendarPayload.self)
+            lastSource = loaded.source
+            yearCalendars[year] = LotteryV2Mapper.calendarYear(loaded.value, year: year)
+            calendarStates[year] = .loaded
+        } catch {
+            calendarStates[year] = .failed(message(for: error))
         }
-        if !merged.isEmpty { merge(merged) }
+    }
+
+    /// 录入页、扫描页要选期号时调用。
+    ///
+    /// **默认只取当年。** 只有到了 12 月才顺带取下一年 —— 跨年那几天
+    /// 「下一期」会落到明年 001，那时候确实需要明年的日历；
+    /// 而在三月份把明年整年拉下来纯属浪费（这份文件 200KB 出头）。
+    func loadYearCalendars(_ now: Date = Date()) async {
+        let year = ChinaClock.year(now)
+        await loadCalendar(year: year)
+        if ChinaClock.month(now) == 12 {
+            await loadCalendar(year: year + 1)
+        }
+    }
+
+    // MARK: - 数据源体检
+
+    /// 问一次数据源「你那边现在正不正常」。
+    ///
+    /// **只能从「设置 → 开奖数据」这一个地方调，绝不进冷启动。**
+    /// 上一版每次启动都拉一次 health，而拉回来的东西从头到尾没有界面读过。
+    func loadHealth(force: Bool = false) async {
+        if !force, healthState == .loaded { return }
+        if healthState == .loading { return }
+        healthState = .loading
+        do {
+            health = try LotteryV2Mapper.health(await repository.health())
+            healthState = .loaded
+        } catch {
+            health = nil
+            healthState = .failed(message(for: error))
+        }
+    }
+
+    // MARK: - 合并与索引
+
+    /// 去重后按开奖时间倒序，顺带重建索引。
+    private func merge(_ incoming: [Draw]) {
+        guard !incoming.isEmpty else { return }
+        var map = Dictionary(draws.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for draw in incoming where !draw.expect.isEmpty {
+            map[draw.id] = draw
+        }
+        draws = map.values.sorted(by: Self.newerFirst)
+        rebuildIndex()
+    }
+
+    private func rebuildIndex() {
+        var byGame: [GameKey: [Draw]] = [:]
+        var index: [GameKey: [String: Draw]] = [:]
+        for draw in draws {
+            byGame[draw.gameKey, default: []].append(draw)
+            index[draw.gameKey, default: [:]][draw.expect] = draw
+        }
+        drawsByGame = byGame
+        drawIndex = index
+        // draws 已按时间倒序，每个彩种的第一条就是最新一期
+        latestByGame = byGame.compactMapValues(\.first)
+    }
+
+    static func newerFirst(_ lhs: Draw, _ rhs: Draw) -> Bool {
+        if lhs.openDate != rhs.openDate { return lhs.openDate > rhs.openDate }
+        return lhs.expect > rhs.expect
+    }
+
+    private func message(for error: Error) -> String {
+        (error as? LotteryDataError)?.errorDescription ?? error.localizedDescription
+    }
+
+    // MARK: - 查询
+
+    /// 开奖日程（今日开奖、轮播顺序、待更新）的变化指纹。
+    /// 这几项算一次要过一遍八个彩种，页面拿它当 `task(id:)`，避免放进 body 每帧重算。
+    var scheduleToken: String {
+        // 必须带上时间维度。「今日开奖」「尚未更新」「轮播顺序」算的都是
+        // **此刻**的状态，可 App 挂在后台一整夜再回到前台时，数据一个字节没变，
+        // 光靠数据指纹这几项就永远停在昨天。按小时分桶，跨过开奖时刻或午夜
+        // 都会换一个 token。
+        let now = ChinaClock.now()
+        return "\(latestUpdatedAt)|\(schedules.count)|\(draws.count)|\(now.date)|\(now.clock.prefix(2))"
+    }
+
+    func draws(for game: GameKey) -> [Draw] {
+        drawsByGame[game] ?? []
+    }
+
+    func latestDraw(for game: GameKey) -> Draw? {
+        latestByGame[game]
+    }
+
+    func draw(for game: GameKey, expect: String) -> Draw? {
+        drawIndex[game]?[expect]
+    }
+
+    /// 记录对应的开奖期。优先按绑定期号走索引，其次取购买日之后最早的一期。
+    func draw(matching record: TicketRecord) -> Draw? {
+        if !record.targetExpect.isEmpty {
+            return drawIndex[record.game]?[record.targetExpect]
+        }
+        let createdDay = DateText.day(record.createdAt)
+        return draws(for: record.game)
+            .filter { $0.openDate.isEmpty || $0.openDate >= createdDay }
+            .min { ($0.openDate, $0.expect) < ($1.openDate, $1.expect) }
     }
 
     /// 某个彩种在日历里的全部期次，按开奖日期升序。
@@ -172,140 +435,9 @@ final class DrawStore {
         return nil
     }
 
-    func loadHistory(for game: GameKey) async {
-        guard !loadedHistoryGames.contains(game) else { return }
-        let history = try? await client.fetchHistory(for: game)
-        // 「拉过了」和「拉到了」是两回事，得分开记。
-        //
-        // 往期页要靠「拉过了」区分「还在转圈」和「确实没有数据」，不然失败时
-        // 那一页永远停在加载中，连重试按钮都露不出来。
-        // 但跳过重复拉取只能看「拉到了」—— 否则一次离线启动就把整个会话的
-        // 往期加载永久关掉：下拉刷新和「重新核对」都走 loadAllHistories，
-        // 它会因为「拉过了」直接空转返回。
-        attemptedHistoryGames.insert(game)
-        if let history, !history.isEmpty {
-            merge(history)
-            loadedHistoryGames.insert(game)
-        }
-    }
-
-    /// 按需补齐某个彩种的整年往期。
-    ///
-    /// 仓库里 `draws/{game}.json` 只有最近 50 期，`by-year/{game}/{year}.json`
-    /// 才是整年。两份格式一模一样，`merge` 按期号去重，所以直接叠上去即可。
-    func loadYearHistory(for game: GameKey, year: Int = ChinaClock.year()) async {
-        guard !loadedYearGames.contains(game), !loadingYearGames.contains(game) else { return }
-        loadingYearGames.insert(game)
-        defer { loadingYearGames.remove(game) }
-        guard let yearDraws = try? await client.fetchYearDraws(for: game, year: year),
-              !yearDraws.isEmpty else {
-            yearLoadFailedGames.insert(game)
-            return
-        }
-        yearLoadFailedGames.remove(game)
-        merge(yearDraws)
-        loadedYearGames.insert(game)
-    }
-
-    func isLoadingYear(_ game: GameKey) -> Bool { loadingYearGames.contains(game) }
-    func hasLoadedYear(_ game: GameKey) -> Bool { loadedYearGames.contains(game) }
-    func yearLoadFailed(_ game: GameKey) -> Bool { yearLoadFailedGames.contains(game) }
-
-    /// 用户点「重试」：清掉标记再拉一次。
-    func reloadHistory(for game: GameKey) async {
-        loadedHistoryGames.remove(game)
-        attemptedHistoryGames.remove(game)
-        await loadHistory(for: game)
-    }
-
-    /// 八个彩种的近 50 期并行拉取，电子票才能直接显示对应开奖号。
-    func loadAllHistories() async {
-        let games = GameKey.ordered.filter { !loadedHistoryGames.contains($0) }
-        guard !games.isEmpty else { return }
-        let client = self.client
-        let results = await withTaskGroup(of: (GameKey, [Draw]?).self) { group -> [(GameKey, [Draw]?)] in
-            for game in games {
-                group.addTask { (game, try? await client.fetchHistory(for: game)) }
-            }
-            var collected: [(GameKey, [Draw]?)] = []
-            for await item in group { collected.append(item) }
-            return collected
-        }
-        for (game, history) in results {
-            attemptedHistoryGames.insert(game)
-            guard let history, !history.isEmpty else { continue }
-            merge(history)
-            loadedHistoryGames.insert(game)
-        }
-    }
-
-    /// 去重后按开奖时间倒序，逻辑同 web 版 `dedupeDraws`，顺带重建索引。
-    private func merge(_ incoming: [Draw]) {
-        var map = Dictionary(draws.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for draw in incoming where !draw.expect.isEmpty {
-            map[draw.id] = draw
-        }
-        draws = map.values.sorted(by: Self.newerFirst)
-        rebuildIndex()
-    }
-
-    private func rebuildIndex() {
-        var byGame: [GameKey: [Draw]] = [:]
-        var index: [GameKey: [String: Draw]] = [:]
-        for draw in draws {
-            byGame[draw.gameKey, default: []].append(draw)
-            index[draw.gameKey, default: [:]][draw.expect] = draw
-        }
-        drawsByGame = byGame
-        drawIndex = index
-        // draws 已按时间倒序，每个彩种的第一条就是最新一期
-        latestByGame = byGame.compactMapValues(\.first)
-    }
-
-    static func newerFirst(_ lhs: Draw, _ rhs: Draw) -> Bool {
-        if lhs.openDate != rhs.openDate { return lhs.openDate > rhs.openDate }
-        return lhs.expect > rhs.expect
-    }
-
-    // MARK: - 查询
-
-    /// 开奖日程（今日开奖、轮播顺序、待更新）的变化指纹。
-    /// 这几项算一次要过一遍八个彩种，页面拿它当 `task(id:)`，避免放进 body 每帧重算。
-    var scheduleToken: String {
-        // 必须带上时间维度。「今日开奖」「尚未更新」「轮播顺序」算的都是
-        // **此刻**的状态，可 App 挂在后台一整夜再回到前台时，数据一个字节没变，
-        // 光靠数据指纹这几项就永远停在昨天。按小时分桶，跨过开奖时刻或午夜
-        // 都会换一个 token。
-        let now = ChinaClock.now()
-        return "\(latestUpdatedAt)|\(calendar == nil ? 0 : 1)|\(draws.count)|\(now.date)|\(now.clock.prefix(2))"
-    }
-
-    func draws(for game: GameKey) -> [Draw] {
-        drawsByGame[game] ?? []
-    }
-
-    func latestDraw(for game: GameKey) -> Draw? {
-        latestByGame[game]
-    }
-
-    func draw(for game: GameKey, expect: String) -> Draw? {
-        drawIndex[game]?[expect]
-    }
-
-    /// 记录对应的开奖期。优先按绑定期号走索引，其次取购买日之后最早的一期。
-    func draw(matching record: TicketRecord) -> Draw? {
-        if !record.targetExpect.isEmpty {
-            return drawIndex[record.game]?[record.targetExpect]
-        }
-        let createdDay = DateText.day(record.createdAt)
-        return draws(for: record.game)
-            .filter { $0.openDate.isEmpty || $0.openDate >= createdDay }
-            .min { ($0.openDate, $0.expect) < ($1.openDate, $1.expect) }
-    }
-
     // MARK: - 今日开奖
 
-    /// 没拿到日历时的兜底周表，0 为周日。
+    /// 没拿到日程时的兜底周表，0 为周日。
     private static let fallbackWeekdays: [GameKey: [Int]] = [
         .ssq: [0, 2, 4], .dlt: [1, 3, 6], .qlc: [1, 3, 5], .qxc: [2, 5, 0],
         .fc3d: [0, 1, 2, 3, 4, 5, 6], .pl3: [0, 1, 2, 3, 4, 5, 6],
@@ -314,10 +446,11 @@ final class DrawStore {
 
     func todayOpenGames(_ now: ChinaClock = .now()) -> [GameKey] {
         GameKey.ordered.filter { game in
-            if let weekdays = calendar?.entry(for: game)?.drawWeekdays {
-                return weekdays.contains(now.weekday)
+            if let schedule = schedules[game], !schedule.weekdays.isEmpty {
+                return schedule.opensToday(now)
             }
-            if calendar?.lotteries != nil { return false }
+            // 日程拿到了、但这个彩种没给周表 —— 那就是真没有，不要瞎猜。
+            if !schedules.isEmpty { return false }
             return Self.fallbackWeekdays[game]?.contains(now.weekday) ?? false
         }
     }
@@ -342,60 +475,45 @@ final class DrawStore {
     /// 今天已过开奖时刻但号码还没更新的彩种。
     func pendingDrawUpdates(_ now: ChinaClock = .now()) -> [GameKey] {
         GameKey.ordered.filter { game in
-            guard let entry = calendar?.entry(for: game),
-                  let weekdays = entry.drawWeekdays, weekdays.contains(now.weekday),
-                  let drawTime = entry.drawTime, drawTime.count >= 5 else { return false }
-            let clock = String(drawTime.prefix(5))
-            guard now.clock >= clock else { return false }
+            guard let schedule = schedules[game],
+                  schedule.opensToday(now),
+                  schedule.drawTimePassed(now) else { return false }
             return latestDraw(for: game)?.openDate != now.date
         }
     }
 
     // MARK: - 下一期
 
-    /// 下一期的元信息：日历优先，其次用最新一期里携带的预测。
+    /// 下一期的元信息。**只看 `bootstrap.schedule`**。
+    ///
+    /// V1 的时候这份信息是跟着每条开奖记录走的（`Draw.nextExpect` 之类），
+    /// 所以要先拿到最新一期才知道下一期。V2 把它单独拎了出来，
+    /// 这里也就不再从开奖记录里翻。
     func nextDrawMetadata(for game: GameKey) -> DrawTarget? {
-        let latest = latestDraw(for: game)
-        let entry = calendar?.entry(for: game)
-        guard latest != nil || entry != nil else { return nil }
-
-        let statusText = entry?.nextStatus ?? latest?.nextStatus.rawValue ?? "unavailable"
-        let confirmed = entry.map { $0.nextConfirmed != false } ?? (latest?.nextStatus == .confirmed)
-        var status = NextDrawStatus(rawValue: statusText) ?? .unavailable
-        if status == .confirmed && !confirmed { status = .inferred }
-
-        let openTime = entry?.nextOpenTime ?? latest?.nextOpenTime ?? ""
-        let openDateFallback = openTime.isEmpty ? "" : String(openTime.prefix(10))
-        func pick(_ primary: String?, _ fallback: String?...) -> String {
-            for value in [primary] + fallback {
-                if let value, !value.isEmpty { return value }
-            }
-            return ""
-        }
-
+        guard let schedule = schedules[game], let next = schedule.next else { return nil }
         return DrawTarget(
-            expect: pick(entry?.nextIssue.text, latest?.nextExpect),
-            openDate: pick(entry?.nextDrawDate, latest?.nextOpenDate, openDateFallback),
-            openTime: openTime,
-            buyEndTime: pick(entry?.nextBuyEndTime, latest?.nextBuyEndTime),
-            sourceDrawId: latest?.id ?? "",
-            status: status,
-            source: pick(entry?.nextSource, latest?.nextSource, "none"),
-            basisIssue: pick(entry?.nextBasisIssue.text, latest?.nextBasisIssue, latest?.expect),
-            resolutionReason: pick(entry?.nextResolutionReason, latest?.nextResolutionReason)
+            expect: next.issue,
+            openDate: next.date.isEmpty ? String(next.openTime.prefix(10)) : next.date,
+            openTime: next.openTime,
+            buyEndTime: next.buyEndTime,
+            sourceDrawId: latestDraw(for: game)?.id ?? "",
+            status: next.status,
+            source: next.source.isEmpty ? "none" : next.source,
+            basisIssue: next.basisIssue.isEmpty ? (latestDraw(for: game)?.expect ?? "") : next.basisIssue,
+            resolutionReason: ""
         )
     }
 
     /// 录入票据时可以绑定的期次。
     ///
-    /// 判断顺序刻意把整年日历放在最前面：仓库的 `latest.json` 只带"下一期"，
-    /// 一旦当期停售、开奖号又还没更新，它就只能回一句"没有可绑定的期次"，
+    /// 判断顺序刻意把整年日历放在最前面：`bootstrap.schedule` 只带"下一期"，
+    /// 一旦当期停售、开奖号又还没更新，它就只能回一句"本期已截止"，
     /// 用户在录入页看到的是一个不能保存的死界面。而整年日历里每一期都带
     /// `sale_close_time`，只要顺着往后找第一期还没停售的，永远能给出一个
     /// 可以绑定的期次 —— 过了今天的截止时间就自动落到下一期。
     func nextDrawTarget(for game: GameKey, now: Date = Date()) -> DrawTarget {
         if let fromCalendar = calendarTarget(for: game, now: now) {
-            // 仓库的下期预测和日历指向同一期时，用仓库那份 —— 它带着
+            // 日程的下期推算和日历指向同一期时，用日程那份 —— 它带着
             // confirmed / inferred 状态和推导依据，信息更全。
             if let remote = remoteNextTarget(for: game, now: now),
                remote.isAvailable, remote.expect == fromCalendar.expect {
@@ -406,12 +524,12 @@ final class DrawStore {
         return remoteNextTarget(for: game, now: now) ?? .unavailable("暂无下期开奖数据，请稍后刷新")
     }
 
-    /// 只看仓库 `latest.json` / `calendar.json` 的下期推算，日历兜底之前的老逻辑。
+    /// 只看 `bootstrap.schedule.next` 的下期推算，日历兜底之前的那一层。
     private func remoteNextTarget(for game: GameKey, now: Date) -> DrawTarget? {
         guard var target = nextDrawMetadata(for: game) else { return nil }
         guard !target.expect.isEmpty, !target.openTime.isEmpty, !target.buyEndTime.isEmpty else {
             target.isAvailable = false
-            target.message = "开奖仓库尚未生成下期预测，请稍后刷新"
+            target.message = "开奖数据源尚未生成下期预测，请稍后刷新"
             return target
         }
         guard let openAt = DateText.parse(target.openTime), let buyEndAt = DateText.parse(target.buyEndTime) else {

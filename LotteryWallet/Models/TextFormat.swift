@@ -145,4 +145,17 @@ enum DateText {
 
     /// 东八区的"今天"，用于判断今日开奖安排。
     static func chinaToday(_ now: Date = Date()) -> String { day(now) }
+
+    /// `"2026-01-01"` 是星期几，**0 为周日**。
+    ///
+    /// V2 的年度日历条目里没有 `weekday` 字段（V1 有），只能自己算。
+    /// 返回值刻意和 `ChinaClock.weekday` 用同一套编号 —— 两套编号混用过一次
+    /// 的代价是「今日开奖」整体错开一天，而且当天看不出来。
+    static func weekday(of raw: String) -> Int? {
+        guard let date = parse(raw) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = chinaTimeZone
+        // Calendar 的 weekday 是 1...7（周日为 1）。
+        return calendar.component(.weekday, from: date) - 1
+    }
 }

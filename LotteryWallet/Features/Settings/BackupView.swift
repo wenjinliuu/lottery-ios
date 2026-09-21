@@ -28,6 +28,7 @@ struct BackupView: View {
     @State private var restoreTarget: BackupItem?
     @State private var deleteTarget: BackupItem?
     @State private var isImporting = false
+    @State private var isClearConfirmPresented = false
 
     var body: some View {
         @Bindable var settings = settings
@@ -85,6 +86,24 @@ struct BackupView: View {
                 Text(listFooter)
             }
 
+            // 清空全部记录放在这一页，紧挨着备份列表。
+            //
+            // 它是**备份的反面**：唯一一个会让数据永久消失的按钮。放在设置页
+            // 的列表里，用户点它的时候看不到自己有没有备份；放在这儿，
+            // 上面那几行就是他的后路，点之前一眼看得见。
+            Section {
+                Button(role: .destructive) {
+                    isClearConfirmPresented = true
+                } label: {
+                    row("trash.fill", .red, "清空全部记录")
+                }
+                .disabled(isBusy || records.isEmpty)
+            } footer: {
+                Text(records.isEmpty
+                     ? "现在没有记录。"
+                     : "会把这台设备上的 \(records.count) 条记录全部删除。上面列出的备份不受影响，清空之后仍然可以从它们恢复。")
+            }
+
             // 诊断**不藏**。上一版把它放在一个只有 iCloud 开关打开才出现的
             // 子页里，于是恰恰在开关打不开的时候，用来查原因的东西也不见了。
             Section {
@@ -118,6 +137,13 @@ struct BackupView: View {
             Button("取消", role: .cancel) {}
         } message: { item in
             Text("会把这份备份里的记录合并进来：同一条记录以备份为准，本机多出来的不会被删掉。\n\n恢复前会先把当前状态存成一份「恢复前快照」，后悔了可以退回去。\n\n备份时间：\(DateText.friendly(DateText.day(item.modifiedAt)))")
+        }
+        .confirmationDialog("清空全部记录？", isPresented: $isClearConfirmPresented,
+                            titleVisibility: .visible) {
+            Button("清空", role: .destructive) { clearAll() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("\(records.count) 条记录会被永久删除，无法撤销。建议先在上面「立即备份」存一份。")
         }
         .confirmationDialog("删除这份备份？", isPresented: .init(
             get: { deleteTarget != nil },
@@ -285,6 +311,17 @@ struct BackupView: View {
         }
     }
 
+    /// 清空全部记录。**不自动备份** —— 用户点的是「清空」，
+    /// 替他决定先存一份是越权；上面那一行文案已经把后路说清楚了。
+    private func clearAll() {
+        do {
+            try RecordService(context: context, drawStore: drawStore).deleteAll()
+            showToast("已清空全部记录", symbol: "trash", feedback: .success)
+        } catch {
+            showToast("清空失败", symbol: "exclamationmark.triangle", feedback: .error)
+        }
+    }
+
     private func delete(_ item: BackupItem) {
         Task {
             do {
@@ -343,8 +380,12 @@ struct BackupView: View {
     private func finishImport(_ outcome: (inserted: Int, updated: Int)) async {
         busyLabel = "正在核对开奖…"
         await Task.yield()
-        await drawStore.loadAllHistories()
         let service = RecordService(context: context, drawStore: drawStore)
+        // 恢复进来的老票绑的是几个月甚至几年前的期号，按需补那几年，
+        // 再补一次还差的彩种最近 30 期。两步都只取真正要用的 ——
+        // 不再像上一版那样把八个彩种一次拉满。
+        await drawStore.loadArchives(service.archivesNeedingMatchRepair())
+        await drawStore.ensureRecentDraws(for: service.gamesAwaitingDraws())
         _ = try? service.reconcileInferredTargets()
         let checked = try? service.checkAll()
         await center.reload()

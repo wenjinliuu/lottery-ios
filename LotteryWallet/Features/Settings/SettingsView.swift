@@ -4,12 +4,8 @@ import SwiftData
 struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(DrawStore.self) private var drawStore
-    @Environment(\.modelContext) private var context
-    @Environment(ToastCenter.self) private var showToast
     @Query private var records: [TicketRecord]
 
-    @State private var isClearConfirmPresented = false
-    @State private var isRefreshing = false
 
     var body: some View {
         @Bindable var settings = settings
@@ -34,54 +30,30 @@ struct SettingsView: View {
                     }
                 }
 
+                // 数据只有**一组**，三行。
+                //
+                // 原来是分开的两组：「数据状态」（开奖数据、开奖日历、往期缓存、
+                // 刷新）和「数据」（本机记录、备份）。可是在用户心里它们是同一
+                // 件事 —— 我的数据现在什么样、怎么带走、怎么清掉。分成两组只是
+                // 因为它们是分两次做出来的。
+                //
+                // 每一行只留一句话，细节都在各自的详情页里：
+                // 开奖数据的来源和日历进 `DrawDataView`，备份和清空进 `BackupView`。
                 Section {
-                    LabeledContent {
-                        Text(drawStore.latestUpdatedAt.isEmpty ? "暂无" : DateText.friendly(drawStore.latestUpdatedAt))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    NavigationLink {
+                        DrawDataView()
                     } label: {
-                        row("arrow.down.circle.fill", .blue, "开奖数据")
-                    }
-
-                    LabeledContent {
-                        Text(drawStore.calendar == nil ? "未获取" : "正常")
-                            .font(.footnote)
-                            .foregroundStyle(drawStore.calendar == nil ? Palette.warning : Color.secondary)
-                    } label: {
-                        row("calendar", .red, "开奖日历")
-                    }
-
-                    LabeledContent {
-                        Text("\(drawStore.loadedHistoryGames.count)/\(GameKey.ordered.count)")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } label: {
-                        row("externaldrive.fill", .gray, "往期缓存")
-                    }
-
-                    Button {
-                        refreshData()
-                    } label: {
-                        HStack {
-                            row("arrow.clockwise", .teal, "刷新开奖数据")
-                            Spacer()
-                            if isRefreshing { ProgressView() }
+                        LabeledContent {
+                            // 日常要判断的就这一件事：数据是不是新的。
+                            Text(drawStore.latestUpdatedAt.isEmpty
+                                 ? "暂无" : DateText.friendly(drawStore.latestUpdatedAt))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } label: {
+                            row("arrow.down.circle.fill", .blue, "开奖数据")
                         }
                     }
-                    .disabled(isRefreshing)
-                } header: {
-                    Text("数据状态")
-                } footer: {
-                    Text("开奖数据来自公开仓库 lottery-data-repo，应用只读取、不上传任何内容。")
-                }
 
-                // 备份**只有一个入口**。
-                //
-                // 之前这件事散在六个地方（导出、导入、iCloud 开关、上次备份、
-                // 立即备份、从 iCloud 恢复），语义还各不相同。用户说不清自己
-                // 的数据在哪儿，我们自己排查时也要在三处各看一遍。
-                // 现在全部收进「备份与恢复」，见 `BackupView`。
-                Section {
                     LabeledContent {
                         Text("\(records.count) 条")
                             .font(.footnote)
@@ -90,16 +62,12 @@ struct SettingsView: View {
                         row("tray.full.fill", .orange, "本机记录")
                     }
 
+                    // 清空全部记录也在这里面。它是**备份的反面**，
+                    // 和备份放在一起，点之前一眼就能看到旁边那份备份在不在。
                     NavigationLink {
                         BackupView()
                     } label: {
                         row("externaldrive.fill.badge.icloud", .blue, "备份与恢复")
-                    }
-
-                    Button(role: .destructive) {
-                        isClearConfirmPresented = true
-                    } label: {
-                        row("trash.fill", .red, "清空全部记录", tint: .red)
                     }
                 } header: {
                     Text("数据")
@@ -147,12 +115,6 @@ struct SettingsView: View {
             // 导航栏不要自己糊底色，交给系统的 scroll edge effect。
             // 理由见 `HomeView` 里同一处那段注释。
             .navigationTitle("设置")
-            .confirmationDialog("清空全部记录？", isPresented: $isClearConfirmPresented, titleVisibility: .visible) {
-                Button("清空", role: .destructive) { clearAll() }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("\(records.count) 条记录会被永久删除。建议先去「备份与恢复」存一份。")
-            }
         }
     }
 
@@ -172,27 +134,6 @@ struct SettingsView: View {
             return "上次备份是 \(days) 天前，建议再存一份。"
         }
         return "上次备份：\(days) 天前。"
-    }
-
-    // MARK: - 动作
-
-    private func refreshData() {
-        Task {
-            isRefreshing = true
-            await drawStore.refresh()
-            await drawStore.loadAllHistories()
-            isRefreshing = false
-            showToast("数据状态已更新")
-        }
-    }
-
-    private func clearAll() {
-        do {
-            try RecordService(context: context, drawStore: drawStore).deleteAll()
-            showToast("已清空全部记录", symbol: "trash", feedback: .success)
-        } catch {
-            showToast("清空失败", symbol: "exclamationmark.triangle", feedback: .error)
-        }
     }
 }
 

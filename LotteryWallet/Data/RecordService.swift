@@ -233,6 +233,24 @@ struct RecordService {
     ///
     /// 导入恢复的记录状态是 won / lost，命中标记却是空的。要把标记补回来
     /// 就得先拿到那一期的开奖号，而它多半已经不在最近 50 期里了。
+    /// 还核对不了的票属于哪几个彩种。
+    ///
+    /// 冷启动只取了 `/v2/bootstrap`，手上就是每个彩种的**最新一期**。
+    /// 绝大多数待开奖的票盯的正是最新一期，拿它就核对完了 —— 一个额外请求
+    /// 都不用发。只有目标期号不在手上的（比如昨天买的票今天才打开 App，
+    /// 中间又开过一期），才需要去取那个彩种的最近 30 期。
+    ///
+    /// 通常是一两个彩种。**这就是「冷启动只读 bootstrap」和「启动自动核对」
+    /// 能同时成立的原因** —— 不需要把八个彩种一次拉满。
+    func gamesAwaitingDraws() -> Set<GameKey> {
+        var games: Set<GameKey> = []
+        for record in allRecords() where record.status == .pending || record.status == .prizeFloat {
+            guard drawStore.draw(matching: record) == nil else { continue }
+            games.insert(record.game)
+        }
+        return games
+    }
+
     func archivesNeedingMatchRepair() -> [GameKey: Set<Int>] {
         var wanted: [GameKey: Set<Int>] = [:]
         for record in allRecords() where !record.hasMatches && record.status.isFinal {

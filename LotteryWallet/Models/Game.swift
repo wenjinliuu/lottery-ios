@@ -58,12 +58,8 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     static let rows: [[GameKey]] = [[.ssq, .dlt, .k8, .fc3d], [.pl3, .qlc, .qxc, .pl5]]
     static let ordered: [GameKey] = rows.flatMap { $0 }
 
-    /// 数据仓库里的键名，只有快乐8 不同（kl8）。
-    var remoteKey: String { self == .k8 ? "kl8" : rawValue }
-
-    static func fromRemoteKey(_ key: String) -> GameKey? {
-        key == "kl8" ? .k8 : GameKey(rawValue: key)
-    }
+    // 远端彩种标识（`k8` ↔ `kl8`）在 `LotteryEndpoint.swift` 里，
+    // 和端点路径、缓存键放在一起 —— 那三样东西必须一起改。
 
     var label: String {
         switch self {
