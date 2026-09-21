@@ -135,6 +135,7 @@ struct SettingsView: View {
         }
         return "上次备份：\(days) 天前。"
     }
+}
 
 struct AboutView: View {
     static let privacyURL = URL(string: "https://wenjinliuu.github.io/lottery-ios/")!
