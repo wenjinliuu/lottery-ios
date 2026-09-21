@@ -209,7 +209,37 @@ GET /v2/calendar/{year}
 GET /v2/health
 ```
 
-只用于调试、诊断或设置页。不得作为冷启动前置条件，也不得在每次启动时额外请求。
+V2 的真实响应契约如下。这里为缩略示例；实际 `latest` 对象包含所有支持的彩种键：
+
+```json
+{
+  "schema": "duigehao.lottery.health",
+  "version": 2,
+  "ok": true,
+  "generated_at": "2026-09-21T11:31:00+08:00",
+  "source": "cloudbase_postgresql",
+  "latest": {
+    "ssq": {
+      "issue": "2026100",
+      "date": "2026-09-20"
+    }
+  }
+}
+```
+
+字段约定：
+
+- `schema` 固定为 `duigehao.lottery.health`。
+- `version` 固定为数字 `2`。
+- `ok` 是唯一的健康状态字段，类型为 Boolean。
+- `generated_at` 是本次检查生成时间，ISO-8601、北京时间偏移。
+- `source` 固定为 `cloudbase_postgresql`。
+- `latest` 按远程彩种标识返回最新期号和开奖日期；某个彩种没有记录时，其值可能为 `null`，同时 `ok` 为 `false`。
+- V2 不返回 `status`、`healthy`、`updated_at`、`checked_at` 或 `message`。这些不能作为 V2 DTO 的替代字段。
+
+App 的 V2 DTO 应按上述正式字段解码，不要继续根据 V1 `public_data/health.json` 猜测。若正式必需字段缺失，应记录契约错误，不能静默当作普通“未知”。
+
+health 只用于调试、诊断或设置页，不得作为冷启动前置条件，也不得在每次启动时额外请求。它没有 GitHub V2 兜底文件。
 
 ## 4. 彩种映射
 
