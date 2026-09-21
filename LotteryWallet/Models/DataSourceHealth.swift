@@ -11,21 +11,32 @@ import Foundation
 /// - 它说抓取卡住了 → 后端的问题，App 怎么重试都没用
 ///
 /// 没有它的时候，这两种情况在界面上长得一模一样，只能靠猜。
+///
+/// ## 这里没有「未知」
+///
+/// `isHealthy` 是不可选的 `Bool`。V2 契约里 `ok` 是**唯一**的健康状态字段，
+/// 而且是必需的；拿不到它就说明这份响应根本不符合契约，那种情况走
+/// `LotteryDataError.contractViolation`，不会变成一个「状态未知」的
+/// `DataSourceHealth`。
+///
+/// 这条区分是有代价换来的：上一版为了兼容一份猜出来的 schema，把
+/// `isHealthy` 写成 `Bool?`，于是「数据源没给」和「我们字段认错了」
+/// 在界面上是同一个「未知」，谁也查不出来。
 struct DataSourceHealth: Sendable, Hashable {
-    /// 数据源自报正不正常。`nil` = 它没给这个字段，只能看时间自己判断。
-    let isHealthy: Bool?
-    /// 数据源给的一句话，原样显示，不翻译 —— 翻译会把排查线索翻没。
-    let message: String
-    /// 数据源最后一次更新数据的时刻。
-    let updatedAt: String
-    /// 体检报告里带到了几个彩种。
-    let gameCount: Int
+    /// 数据源自报正不正常。契约里 `ok` 是唯一的健康状态字段。
+    let isHealthy: Bool
+    /// 本次检查的生成时间，ISO-8601 带北京时间偏移。
+    let generatedAt: String
+    /// 数据从哪儿来，契约里固定是 `cloudbase_postgresql`。
+    let source: String
+    /// `latest` 里正常给出了期号的彩种数。
+    let reportedGames: Int
+    /// `latest` 里是 `null` 的彩种（远端标识）。
+    ///
+    /// 契约写明：某个彩种没有记录时它的值为 `null`，同时 `ok` 为 `false`。
+    /// 所以 `ok == false` 时这里基本就是原因，直接显示出来比一句
+    /// 「异常」有用得多。
+    let missingGames: [String]
 
-    var label: String {
-        switch isHealthy {
-        case true: "正常"
-        case false: "异常"
-        case nil: updatedAt.isEmpty ? "未知" : "已响应"
-        }
-    }
+    var label: String { isHealthy ? "正常" : "异常" }
 }

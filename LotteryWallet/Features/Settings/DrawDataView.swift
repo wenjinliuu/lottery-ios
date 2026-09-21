@@ -42,16 +42,24 @@ struct DrawDataView: View {
                     healthValue
                 }
                 if let health = drawStore.health {
-                    if !health.updatedAt.isEmpty {
-                        LabeledContent("数据源更新于") {
-                            Text(DateText.friendly(health.updatedAt)).foregroundStyle(.secondary)
-                        }
+                    LabeledContent("检查于") {
+                        Text(DateText.friendly(health.generatedAt)).foregroundStyle(.secondary)
                     }
-                    if !health.message.isEmpty {
-                        LabeledContent("说明") {
-                            Text(health.message)
+                    LabeledContent("后端存储") {
+                        Text(health.source).foregroundStyle(.secondary)
+                    }
+                    LabeledContent("有记录的彩种") {
+                        Text("\(health.reportedGames)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    if !health.missingGames.isEmpty {
+                        // 契约写明：某个彩种没有记录时它的值是 null，同时 ok 为 false。
+                        // 所以这一行基本就是「异常」的原因，比那两个字有用得多。
+                        LabeledContent("缺记录") {
+                            Text(health.missingGames.joined(separator: "、"))
                                 .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Palette.warning)
                                 .multilineTextAlignment(.trailing)
                         }
                     }
@@ -109,15 +117,20 @@ struct DrawDataView: View {
         case .idle, .loading:
             ProgressView()
         case .loaded:
-            Text(drawStore.health?.label ?? "未知")
-                .foregroundStyle(drawStore.health?.isHealthy == false ? Palette.warning : Color.secondary)
+            if let health = drawStore.health {
+                Text(health.label)
+                    .foregroundStyle(health.isHealthy ? Color.secondary : Palette.warning)
+            }
         case .failed(let reason):
-            // 查不到本身就是一条信息：多半是主数据源现在不通
-            // （这一项不走 GitHub 兜底，问的就是它自己）。
+            // 查不到本身就是一条信息，而且**要说清是哪一种**：
+            // 网络不通（这一项不走 GitHub 兜底，问的就是主数据源自己），
+            // 还是响应不符合约定格式 —— 后者是服务端契约变了，重试没有用。
+            // 这里绝不退化成一句「未知」。
             Text(reason)
                 .font(.footnote)
                 .foregroundStyle(Palette.warning)
                 .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
         }
     }
 

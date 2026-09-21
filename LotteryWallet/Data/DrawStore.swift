@@ -327,7 +327,7 @@ final class DrawStore {
         if healthState == .loading { return }
         healthState = .loading
         do {
-            health = LotteryV2Mapper.health(try await repository.health())
+            health = try LotteryV2Mapper.health(await repository.health())
             healthState = .loaded
         } catch {
             health = nil

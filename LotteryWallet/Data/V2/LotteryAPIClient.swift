@@ -100,6 +100,13 @@ enum LotteryDataError: LocalizedError {
     case empty
     case decoding(String)
     case noData
+    /// 响应解出来了，但**不符合约定的契约**（必需字段缺失、固定值对不上）。
+    ///
+    /// 和 `decoding` 分开是有意的：解码失败是「读不懂」，契约违例是
+    /// 「读懂了，但不是说好的那个东西」。后者不能被当成普通的
+    /// 「暂时没数据」咽下去 —— 咽下去就成了一个永远显示「未知」的界面，
+    /// 而没有人知道该去查服务端还是查客户端。
+    case contractViolation(endpoint: String, problems: [String])
 
     var errorDescription: String? {
         switch self {
@@ -120,6 +127,8 @@ enum LotteryDataError: LocalizedError {
     var diagnostic: String {
         switch self {
         case .decoding(let detail): "解码失败：\(detail)"
+        case .contractViolation(let endpoint, let problems):
+            "契约违例 \(endpoint)：\(problems.joined(separator: "; "))"
         default: errorDescription ?? "未知错误"
         }
     }

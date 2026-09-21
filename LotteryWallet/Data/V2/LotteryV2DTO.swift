@@ -236,39 +236,60 @@ extension LotteryV2 {
     /// 它说正常就是 App 这边的事（缓存没刷、请求失败），它说抓取卡住了就是
     /// 后端的事，App 怎么重试都没用。
     ///
-    /// **绝不进冷启动。** 文档 §3.5 明确要求，而上一版恰恰违反了这条：
-    /// 每次启动都拉一次 `health.json`，拉回来却没有任何界面读过。
-    /// 现在只有用户打开「设置 → 开奖数据」时才请求一次。
+    /// **绝不进冷启动**，也没有 GitHub 兜底文件（文档 §3.5）。
+    /// 只有用户打开「设置 → 开奖数据」时才请求一次。
     ///
-    /// 字段写得很宽，因为**没有一份可信的 schema**：文档没给，
-    /// GitHub 上也没有 `public_data/v2/health.json`（404，V2 镜像缺这一个）。
-    /// 唯一能参考的是 V1 的 `public_data/health.json`，它用的是
-    /// `ok` / `message` / `updated_at`。所以这里 `ok` 和 `status`、
-    /// `updated_at` 和 `generated_at` 两套都认，哪套来了用哪套。
+    /// ## 字段按正式契约写，不再猜
+    ///
+    /// 曾经这里是「`ok` 和 `status` 两套都认、`updated_at` 和 `generated_at`
+    /// 两套都认」—— 那是在文档还没给 schema 时照着 V1 的
+    /// `public_data/health.json` 猜的。**V2 明确不返回 `status`、`healthy`、
+    /// `updated_at`、`checked_at`、`message`**，所以那些替代字段全部去掉了。
+    ///
+    /// 留着猜测的害处不是解码失败，而是**解码成功但没意义**：认不出的键被
+    /// 忽略、缺失的键是 nil，界面于是永远显示「未知」，而你分不清那是数据源
+    /// 真的没给，还是我们字段写错了。现在必需字段缺一个就报契约错误。
     struct Health: Decodable, Sendable {
+        var schema: String?
+        var version: Int?
+        /// **唯一的健康状态字段。**
         var ok: Bool?
-        var status: String?
-        var message: String?
-        var updatedAt: String?
         var generatedAt: String?
-        var results: [HealthResult]?
+        var source: String?
+        /// 按远端彩种标识给的最新一期。某个彩种没有记录时值是 `null`，
+        /// 同时 `ok` 为 `false` —— 所以这里必须能装下 `null`。
+        var latest: [String: LatestIssue]?
 
         enum CodingKeys: String, CodingKey {
-            case ok, status, message, results
-            case updatedAt = "updated_at"
+            case schema, version, ok, source, latest
             case generatedAt = "generated_at"
         }
+
+        /// 契约规定的固定值。
+        static let expectedSchema = "duigehao.lottery.health"
+        static let expectedVersion = 2
     }
 
-    struct HealthResult: Decodable, Sendable {
-        var lotteryType: String?
-        var issue: FlexibleText?
-        var drawDate: String?
+    /// `latest` 里的一项。**可能整个是 `null`。**
+    ///
+    /// 没有写成 `[String: LatestIssue?]` —— 字典里装 Optional 依赖
+    /// `Optional` 的 Decodable 合成，那条路在不同 Swift 版本上表现不一致，
+    /// 踩中了就是整份 health 解码失败。自己吃掉 `null`：解出来是个空壳，
+    /// `isMissing` 为真，语义一点不丢。
+    struct LatestIssue: Decodable, Sendable {
+        var issue: FlexibleText? = nil
+        var date: String? = nil
 
-        enum CodingKeys: String, CodingKey {
-            case issue
-            case lotteryType = "lottery_type"
-            case drawDate = "draw_date"
+        enum CodingKeys: String, CodingKey { case issue, date }
+
+        init(from decoder: Decoder) throws {
+            if let single = try? decoder.singleValueContainer(), single.decodeNil() { return }
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            issue = try container.decodeIfPresent(FlexibleText.self, forKey: .issue)
+            date = try container.decodeIfPresent(String.self, forKey: .date)
         }
+
+        /// `null`，或者给了对象但没有期号 —— 都算「这个彩种没有记录」。
+        var isMissing: Bool { (issue?.value ?? "").isEmpty }
     }
 }

@@ -225,6 +225,56 @@ enum LotteryV2Fixtures {
         """.utf8)
     }
 
+    // MARK: - 数据源体检
+
+    static var health: Data { Data(healthJSON.utf8) }
+
+    /// 正式 V2 契约（文档 §3.5）：`schema` / `version` / `ok` /
+    /// `generated_at` / `source` / `latest` 六项都是必需的。
+    static let healthJSON = """
+    {
+      "schema": "duigehao.lottery.health",
+      "version": 2,
+      "ok": true,
+      "generated_at": "2026-09-21T11:31:00+08:00",
+      "source": "cloudbase_postgresql",
+      "latest": {
+        "ssq": {"issue": "2026109", "date": "2026-09-20"},
+        "kl8": {"issue": "2026253", "date": "2026-09-20"}
+      }
+    }
+    """
+
+    /// 某个彩种没有记录：它的值是 `null`，同时 `ok` 为 `false`。
+    static let unhealthyJSON = """
+    {
+      "schema": "duigehao.lottery.health",
+      "version": 2,
+      "ok": false,
+      "generated_at": "2026-09-21T11:31:00+08:00",
+      "source": "cloudbase_postgresql",
+      "latest": {
+        "ssq": {"issue": "2026109", "date": "2026-09-20"},
+        "qlc": null
+      }
+    }
+    """
+
+    /// V1 `public_data/health.json` 的形状。
+    ///
+    /// **V2 明确不返回这些字段。** 留着它当兼容项，代价是解码「成功」却没有
+    /// 任何意义 —— 界面永远显示「未知」，而没人分得清是数据源没给还是
+    /// 我们字段写错了。所以这一份现在必须被判成契约违例。
+    static let legacyHealthJSON = """
+    {
+      "schema": "random_draw_agent_public_data_health",
+      "version": 1,
+      "ok": true,
+      "updated_at": "2026-09-21T00:52:29.144+08:00",
+      "message": "exported_from_cloudbase"
+    }
+    """
+
     /// 空到不能再空的一份 bootstrap：字段能省的全省了。
     /// 服务端省略空值是常态，这种响应不能把解码打挂。
     static let sparseBootstrapJSON = """

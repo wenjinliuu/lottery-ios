@@ -132,21 +132,53 @@ enum LotteryV2Mapper {
 
     // MARK: - 数据源体检
 
-    /// `ok` 和 `status` 两套字段哪套来了用哪套 —— 见 `LotteryV2.Health`
-    /// 里为什么不能假定只有一种。
-    static func health(_ item: LotteryV2.Health) -> DataSourceHealth {
-        let healthy: Bool?
-        if let ok = item.ok {
-            healthy = ok
-        } else if let status = item.status?.lowercased() {
-            healthy = ["ok", "healthy", "up", "pass", "success"].contains(status)
+    /// 按 V2 正式契约转换，**必需字段缺一个就抛契约违例**。
+    ///
+    /// 不再认 V1 的 `status` / `updated_at` / `message` —— 契约明确写了
+    /// V2 不返回这些。留着它们当替代品的害处不是解码失败，而是
+    /// **解码成功但没意义**：界面显示「未知」，而没人分得清那是数据源没给
+    /// 还是我们字段写错了。
+    ///
+    /// `schema` 和 `version` 也校验：它们是契约里的固定值，对不上就说明
+    /// 打到的根本不是这个接口，或者契约已经变了 —— 两种都该当场说出来，
+    /// 而不是继续按老结构去读一份新东西。
+    static func health(_ item: LotteryV2.Health) throws -> DataSourceHealth {
+        var problems: [String] = []
+
+        if let schema = item.schema {
+            if schema != LotteryV2.Health.expectedSchema {
+                problems.append("schema 应为 \(LotteryV2.Health.expectedSchema)，实际是 \(schema)")
+            }
         } else {
-            healthy = nil
+            problems.append("缺少 schema")
         }
-        return DataSourceHealth(isHealthy: healthy,
-                                message: item.message ?? "",
-                                updatedAt: item.updatedAt ?? item.generatedAt ?? "",
-                                gameCount: item.results?.count ?? 0)
+
+        if let version = item.version {
+            if version != LotteryV2.Health.expectedVersion {
+                problems.append("version 应为 \(LotteryV2.Health.expectedVersion)，实际是 \(version)")
+            }
+        } else {
+            problems.append("缺少 version")
+        }
+
+        if item.ok == nil { problems.append("缺少 ok") }
+        if (item.generatedAt ?? "").isEmpty { problems.append("缺少 generated_at") }
+        if (item.source ?? "").isEmpty { problems.append("缺少 source") }
+        if item.latest == nil { problems.append("缺少 latest") }
+
+        guard problems.isEmpty, let ok = item.ok else {
+            throw LotteryDataError.contractViolation(endpoint: "/v2/health", problems: problems)
+        }
+
+        // `latest` 里值为 null 的彩种就是「这个彩种没有记录」，
+        // 契约说这时候 ok 会是 false —— 把它们列出来，比一句「异常」有用。
+        let latest = item.latest ?? [:]
+        let missing = latest.filter(\.value.isMissing).keys.sorted()
+        return DataSourceHealth(isHealthy: ok,
+                                generatedAt: item.generatedAt ?? "",
+                                source: item.source ?? "",
+                                reportedGames: latest.count - missing.count,
+                                missingGames: missing)
     }
 
     // MARK: - 年度日历

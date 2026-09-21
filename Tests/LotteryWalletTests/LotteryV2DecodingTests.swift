@@ -218,47 +218,105 @@ final class LotteryV2DecodingTests: XCTestCase {
 
     // MARK: - 数据源体检
 
-    /// V1 的 `health.json` 用 `ok` + `updated_at`，实测就长这样。
-    func testHealthAcceptsOkBool() throws {
-        let json = """
-        {"schema":"random_draw_agent_public_data_health","version":1,
-         "ok":true,"updated_at":"2026-09-21T00:52:29.144+08:00",
-         "message":"exported_from_cloudbase",
-         "results":[{"lottery_type":"ssq","issue":"2026109","draw_date":"2026-09-20"},
-                    {"lottery_type":"kl8","issue":"2026253","draw_date":"2026-09-20"}]}
-        """
-        let health = LotteryV2Mapper.health(try decode(LotteryV2.Health.self, Data(json.utf8)))
-        XCTAssertEqual(health.isHealthy, true)
+    /// 契约违例必须**抛出来并说清缺了什么**，不能变成一个「状态未知」的结果。
+    private func expectContractViolation(_ json: String,
+                                         mentioning fragment: String,
+                                         file: StaticString = #filePath,
+                                         line: UInt = #line) throws {
+        let dto = try decode(LotteryV2.Health.self, Data(json.utf8))
+        XCTAssertThrowsError(try LotteryV2Mapper.health(dto), file: file, line: line) { error in
+            guard case LotteryDataError.contractViolation(_, let problems) = error else {
+                return XCTFail("应该是契约违例，实际是 \(error)", file: file, line: line)
+            }
+            XCTAssertTrue(problems.contains { $0.contains(fragment) },
+                          "契约违例里应该提到「\(fragment)」，实际是 \(problems)",
+                          file: file, line: line)
+        }
+    }
+
+    func testHealthDecodesFormalContract() throws {
+        let health = try LotteryV2Mapper.health(
+            try decode(LotteryV2.Health.self, LotteryV2Fixtures.health))
+
+        XCTAssertTrue(health.isHealthy)
         XCTAssertEqual(health.label, "正常")
-        XCTAssertEqual(health.message, "exported_from_cloudbase")
-        XCTAssertEqual(health.gameCount, 2)
+        XCTAssertEqual(health.generatedAt, "2026-09-21T11:31:00+08:00")
+        XCTAssertEqual(health.source, "cloudbase_postgresql")
+        XCTAssertEqual(health.reportedGames, 2)
+        XCTAssertTrue(health.missingGames.isEmpty)
     }
 
-    /// 文档没给 `/v2/health` 的 schema，GitHub 的 V2 镜像里也没有这个文件，
-    /// 所以另一种常见写法（`status` 字符串 + `generated_at`）也必须认。
-    func testHealthAcceptsStatusString() throws {
-        let json = """
-        {"status":"ok","generated_at":"2026-09-21T00:00:00+08:00","message":"fine"}
-        """
-        let health = LotteryV2Mapper.health(try decode(LotteryV2.Health.self, Data(json.utf8)))
-        XCTAssertEqual(health.isHealthy, true)
-        XCTAssertEqual(health.updatedAt, "2026-09-21T00:00:00+08:00")
-    }
+    /// 某个彩种没有记录时它的值是 `null`，同时 `ok` 为 `false`。
+    /// 把缺的那几个列出来 —— 那基本就是「异常」的原因。
+    func testHealthListsGamesWithoutRecords() throws {
+        let health = try LotteryV2Mapper.health(
+            try decode(LotteryV2.Health.self, Data(LotteryV2Fixtures.unhealthyJSON.utf8)))
 
-    func testHealthReportsNotOk() throws {
-        let json = """
-        {"ok": false, "message": "scrape stalled"}
-        """
-        let health = LotteryV2Mapper.health(try decode(LotteryV2.Health.self, Data(json.utf8)))
-        XCTAssertEqual(health.isHealthy, false)
+        XCTAssertFalse(health.isHealthy)
         XCTAssertEqual(health.label, "异常")
+        XCTAssertEqual(health.missingGames, ["qlc"])
+        XCTAssertEqual(health.reportedGames, 1)
     }
 
-    /// 两套字段都没有时不许瞎猜「正常」——  那会把故障说成健康。
-    func testHealthWithoutAnyFlagIsUnknown() throws {
-        let health = LotteryV2Mapper.health(try decode(LotteryV2.Health.self, Data("{}".utf8)))
-        XCTAssertNil(health.isHealthy)
-        XCTAssertEqual(health.label, "未知")
+    /// **这条是这次改动的核心。**
+    ///
+    /// V1 那份 `health.json` 用的是 `status` / `updated_at` / `message`，
+    /// V2 明确不返回它们。上一版把两套字段都当兼容项收下，于是读到一份
+    /// 不符合 V2 契约的东西也「解码成功」，界面显示「未知」，而没人分得清
+    /// 是数据源没给还是我们字段写错了。现在它必须当场报出来。
+    func testLegacyV1HealthIsRejectedNotSilentlyUnknown() throws {
+        try expectContractViolation(LotteryV2Fixtures.legacyHealthJSON, mentioning: "schema")
+    }
+
+    func testMissingOkIsAContractViolation() throws {
+        try expectContractViolation("""
+        {"schema": "duigehao.lottery.health", "version": 2,
+         "generated_at": "2026-09-21T11:31:00+08:00",
+         "source": "cloudbase_postgresql", "latest": {}}
+        """, mentioning: "ok")
+    }
+
+    func testMissingGeneratedAtIsAContractViolation() throws {
+        try expectContractViolation("""
+        {"schema": "duigehao.lottery.health", "version": 2, "ok": true,
+         "source": "cloudbase_postgresql", "latest": {}}
+        """, mentioning: "generated_at")
+    }
+
+    func testMissingSourceIsAContractViolation() throws {
+        try expectContractViolation("""
+        {"schema": "duigehao.lottery.health", "version": 2, "ok": true,
+         "generated_at": "2026-09-21T11:31:00+08:00", "latest": {}}
+        """, mentioning: "source")
+    }
+
+    func testMissingLatestIsAContractViolation() throws {
+        try expectContractViolation("""
+        {"schema": "duigehao.lottery.health", "version": 2, "ok": true,
+         "generated_at": "2026-09-21T11:31:00+08:00", "source": "cloudbase_postgresql"}
+        """, mentioning: "latest")
+    }
+
+    /// `schema` 和 `version` 是契约里的固定值。对不上就说明打到的不是这个
+    /// 接口，或者契约变了 —— 两种都该当场说出来，而不是照老结构去读新东西。
+    func testWrongVersionIsAContractViolation() throws {
+        try expectContractViolation("""
+        {"schema": "duigehao.lottery.health", "version": 3, "ok": true,
+         "generated_at": "2026-09-21T11:31:00+08:00",
+         "source": "cloudbase_postgresql", "latest": {}}
+        """, mentioning: "version")
+    }
+
+    /// 一次报全，不是报一个就停 —— 排查时最想知道的是「到底差多少」。
+    func testAllMissingFieldsAreReportedTogether() throws {
+        let dto = try decode(LotteryV2.Health.self, Data("{}".utf8))
+        XCTAssertThrowsError(try LotteryV2Mapper.health(dto)) { error in
+            guard case LotteryDataError.contractViolation(let endpoint, let problems) = error else {
+                return XCTFail("应该是契约违例，实际是 \(error)")
+            }
+            XCTAssertEqual(endpoint, "/v2/health")
+            XCTAssertEqual(problems.count, 6, "六个必需字段都该被点名：\(problems)")
+        }
     }
 
     func testJoinDateTimeLeavesCompleteValuesAlone() {

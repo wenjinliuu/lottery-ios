@@ -258,9 +258,7 @@ final class ProgressiveLoadingTests: XCTestCase {
     /// health **只有用户打开「开奖数据」详情页才请求**，而且只打 CloudBase。
     func testHealthIsOnDemandAndCloudBaseOnly() async {
         StubURLProtocol.stub("v2/bootstrap", body: LotteryV2Fixtures.bootstrap)
-        StubURLProtocol.stub("v2/health", body: Data("""
-        {"ok": true, "updated_at": "2026-09-21T00:00:00+08:00", "message": "ok"}
-        """.utf8))
+        StubURLProtocol.stub("v2/health", body: LotteryV2Fixtures.health)
         let store = makeStore()
 
         await store.bootstrap()
@@ -276,7 +274,7 @@ final class ProgressiveLoadingTests: XCTestCase {
 
     /// 已经查过就不重复查，除非明确要求。
     func testHealthIsNotRefetched() async {
-        StubURLProtocol.stub("v2/health", body: Data("{\"ok\": true}".utf8))
+        StubURLProtocol.stub("v2/health", body: LotteryV2Fixtures.health)
         let store = makeStore()
         await store.loadHealth()
         await store.loadHealth()
@@ -284,6 +282,22 @@ final class ProgressiveLoadingTests: XCTestCase {
 
         await store.loadHealth(force: true)
         XCTAssertEqual(StubURLProtocol.count("v2/health"), 2)
+    }
+
+    /// 响应不符合契约时，界面上要看到**具体缺了什么**，而不是一句「未知」。
+    func testHealthContractViolationSurfacesTheReason() async {
+        StubURLProtocol.stub("v2/bootstrap", body: LotteryV2Fixtures.bootstrap)
+        // V1 那份 health.json 的形状：schema / version 都不对
+        StubURLProtocol.stub("v2/health", body: Data(LotteryV2Fixtures.legacyHealthJSON.utf8))
+        let store = makeStore()
+        await store.bootstrap()
+        await store.loadHealth()
+
+        XCTAssertNil(store.health, "不符合契约就不该产出一个「状态未知」的结果")
+        let reason = store.healthState.failureText
+        XCTAssertTrue(reason?.contains("schema") ?? false,
+                      "失败原因要说清是哪一项对不上，实际是 \(String(describing: reason))")
+        XCTAssertEqual(store.bootstrapState, .loaded, "诊断项出问题不该影响开奖数据")
     }
 
     /// 查不到 health 不能影响别的东西 —— 它只是个诊断项。
