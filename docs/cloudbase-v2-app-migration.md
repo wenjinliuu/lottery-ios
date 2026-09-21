@@ -70,7 +70,6 @@ GET /v2/bootstrap
     "ssq": {
       "issue": "2026100",
       "date": "2026-09-20",
-      "time": "21:15",
       "numbers": {},
       "pool": "optional",
       "sales": "optional",
@@ -99,7 +98,7 @@ GET /v2/bootstrap
 }
 ```
 
-JSON 会省略空值和空字段。Swift DTO 必须对 `time`、`pool`、`sales`、`prizes`、`fetched_at` 等字段使用 Optional 或安全默认值。
+JSON 会省略空值和空字段。Swift DTO 必须对 `time`、`pool`、`sales`、`prizes`、`fetched_at` 等字段使用 Optional 或安全默认值。当前八个彩种的 `latest.*.time` 均会被省略；常规开奖时刻从 `schedule.{lottery_type}.draw_time` 读取，不要依赖 `latest.time`。
 
 `schedule.next` 可能只是日历推算结果：
 
@@ -117,7 +116,7 @@ GET /v2/draws/{lottery_type}
 
 ```json
 {
-  "schema": "duigehao.lottery.draws",
+  "schema": "duigehao.lottery.recent",
   "version": 2,
   "lottery_type": "ssq",
   "generated_at": "ISO-8601",
@@ -160,14 +159,19 @@ GET /v2/by-year/{lottery_type}/{year}
 
 ```json
 {
-  "schema": "duigehao.lottery.by-year",
+  "schema": "duigehao.lottery.year",
   "version": 2,
   "lottery_type": "ssq",
   "year": 2026,
+  "earliest_year": 2026,
   "generated_at": "ISO-8601",
   "draws": []
 }
 ```
+
+V2 的 `year` 和 `earliest_year` 统一为 JSON 数字。客户端可以保留数字/字符串双类型兼容，以兼容迁移前已经生成的镜像，但新契约以数字为准。
+
+`earliest_year` 表示当前彩种在数据源中真实存在的最早年份。即使请求的某个中间年份返回空数组，也不要立刻判定所有更早历史都不存在；应结合 `earliest_year` 决定是否继续。
 
 ### 3.4 年度开奖日历
 
@@ -194,6 +198,8 @@ GET /v2/calendar/{year}
 ```
 
 年度日历用于具体日期、期号、节假日、休市和调整日期判断。普通星期规则可读 `bootstrap.schedule.weekdays`。
+
+日历是扁平 `entries` 数组，不提供 `weekday`。`draw_time` 和 `sale_close_time` 只有时刻、不包含日期；比较停售或开奖时刻前，必须先与同一条记录的 `date` 按 `Asia/Shanghai` 时区组合。
 
 不要重新引入已经删除的“下期信息及开奖星期同步函数”。
 
@@ -246,6 +252,8 @@ https://raw.githubusercontent.com/wenjinliuu/lottery-data-repo/main/public_data/
 | `/v2/calendar/{year}` | `/public_data/v2/calendar/{year}.json` |
 
 CloudBase 和 GitHub V2 必须复用同一套 DTO、Decoder 和转换层。
+
+`/v2/health` 刻意没有 GitHub 对应文件，也不要创建 `public_data/v2/health.json`。health 检查的是 CloudBase 自身状态，切换到 GitHub 后已经失去原本语义；它只能用于诊断，不能进入 App 的正常 fallback 链或冷启动门槛。
 
 迁移完成后，不再把以下旧文件作为生产数据源：
 
