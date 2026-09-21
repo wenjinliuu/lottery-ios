@@ -34,8 +34,10 @@ final class LotteryEndpointTests: XCTestCase {
         XCTAssertEqual(LotteryEndpoint.yearDraws(.k8, 2026).cloudBasePath, "v2/by-year/kl8/2026")
         XCTAssertEqual(LotteryEndpoint.recentDraws(.k8).cacheKey, "v2-draws-kl8")
         XCTAssertEqual(GameKey.fromAPIKey("kl8"), .k8)
-        // 反过来也要认得：远端不会发 "k8"，但别把它解析成别的东西
-        XCTAssertNil(GameKey.fromAPIKey("k8"))
+        // 本地那个写法也照收。远端不会发 "k8"，但万一发了，认出来比拒掉好 ——
+        // 拒掉的后果是快乐8 整个没有数据，而收下没有任何坏处。
+        // `DrawCalendarYear.entry(for:)` 也是同一套宽进策略。
+        XCTAssertEqual(GameKey.fromAPIKey("k8"), .k8)
     }
 
     /// 除了快乐8，其余七个彩种两边同名。
