@@ -6,6 +6,8 @@ struct SettingsView: View {
     @Environment(DrawStore.self) private var drawStore
     @Query private var records: [TicketRecord]
 
+    @State private var isRefreshing = false
+
 
     var body: some View {
         @Bindable var settings = settings
@@ -62,6 +64,22 @@ struct SettingsView: View {
                         row("tray.full.fill", .orange, "本机记录")
                     }
 
+                    // 刷新摆在**设置主页**，不在开奖数据详情页里。
+                    //
+                    // 这是唯一一个「想到就要用」的动作：用户发现号码没更新，
+                    // 第一反应是找个地方点一下刷新，而不是先进详情页看时间戳。
+                    // 藏在二级页里等于把最常用的那一下多挡了一层。
+                    Button {
+                        refresh()
+                    } label: {
+                        LabeledContent {
+                            if isRefreshing { ProgressView() }
+                        } label: {
+                            row("arrow.clockwise.circle.fill", .teal, "刷新开奖数据")
+                        }
+                    }
+                    .disabled(isRefreshing)
+
                     // 清空全部记录也在这里面。它是**备份的反面**，
                     // 和备份放在一起，点之前一眼就能看到旁边那份备份在不在。
                     NavigationLink {
@@ -115,6 +133,17 @@ struct SettingsView: View {
             // 导航栏不要自己糊底色，交给系统的 scroll edge effect。
             // 理由见 `HomeView` 里同一处那段注释。
             .navigationTitle("设置")
+        }
+    }
+
+    /// 重新取各彩种的最新一期与开奖日程，并刷新**已经看过的**那些彩种的往期。
+    /// 没打开过的彩种不会顺带下载 —— 那正是这次迁移省掉的部分。
+    private func refresh() {
+        Task {
+            isRefreshing = true
+            defer { isRefreshing = false }
+            await drawStore.refresh()
+            await drawStore.refreshLoadedRecents()
         }
     }
 

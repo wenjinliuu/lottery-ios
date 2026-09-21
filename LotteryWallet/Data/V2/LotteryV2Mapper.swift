@@ -75,15 +75,26 @@ enum LotteryV2Mapper {
 
     struct BootstrapResult: Sendable {
         var generatedAt: String
+        /// 数据源最后一次**抓到完整开奖数据**的时间。
+        ///
+        /// 取各彩种 `fetched_at` 里最晚的一条。和 `generatedAt` 是两回事：
+        /// 后者是「这份 bootstrap 文件什么时候拼出来的」，每次导出都会变，
+        /// 哪怕一个号码都没抓到也照样更新；前者是「后端什么时候真的把
+        /// 号码球和金额落库了」。用户问「数据是不是新的」，问的是后者。
+        var fetchedAt: String
         var latest: [Draw]
         var schedules: [GameKey: DrawSchedule]
     }
 
     static func bootstrap(_ payload: LotteryV2.Bootstrap) -> BootstrapResult {
         var latest: [Draw] = []
+        var fetchedAt = ""
         for (key, item) in payload.latest ?? [:] {
             guard let game = GameKey.fromAPIKey(key), let converted = draw(item, game: game) else { continue }
             latest.append(converted)
+            // ISO-8601 同偏移量下按字符串比大小就是按时间比，不用解析。
+            // 八个彩种的 fetched_at 都是 `+08:00`，由契约保证。
+            if let stamp = item.fetchedAt, stamp > fetchedAt { fetchedAt = stamp }
         }
         var schedules: [GameKey: DrawSchedule] = [:]
         for (key, item) in payload.schedule ?? [:] {
@@ -91,6 +102,7 @@ enum LotteryV2Mapper {
             schedules[game] = schedule(item, game: game)
         }
         return BootstrapResult(generatedAt: payload.generatedAt ?? "",
+                               fetchedAt: fetchedAt,
                                latest: latest,
                                schedules: schedules)
     }

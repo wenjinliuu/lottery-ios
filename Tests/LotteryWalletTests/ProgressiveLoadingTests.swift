@@ -255,7 +255,12 @@ final class ProgressiveLoadingTests: XCTestCase {
 
     // MARK: - 数据源体检
 
-    /// health **只有用户打开「开奖数据」详情页才请求**，而且只打 CloudBase。
+    /// health **只在显式调用时才请求**，而且只打 CloudBase。
+    ///
+    /// 界面上目前没有入口（「数据源状态」那一组已按用户要求去掉了），
+    /// 但这一层保留着：它是唯一能发现「CloudBase 响应不再符合 V2 契约」
+    /// 的探针 —— 别的端点走三级降级，GitHub 兜底会把主数据源的问题盖住，
+    /// 只有 health 不兜底。要重新露出来时接上 `loadHealth()` 即可。
     func testHealthIsOnDemandAndCloudBaseOnly() async {
         StubURLProtocol.stub("v2/bootstrap", body: LotteryV2Fixtures.bootstrap)
         StubURLProtocol.stub("v2/health", body: LotteryV2Fixtures.health)

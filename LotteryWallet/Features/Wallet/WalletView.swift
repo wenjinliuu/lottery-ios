@@ -211,7 +211,6 @@ struct WalletView: View {
             onToggle: { toggle(item.id) },
             onDelete: { delete(item) },
             onEdit: { editTarget = EntryDraft.load(batchId: item.id, context: context) },
-            onCelebrate: { celebrate() },
             draw: drawStore.draw(for: item.game, expect: item.expect)
         )
     }
@@ -226,8 +225,7 @@ struct WalletView: View {
                 cards: cards,
                 initialFilter: filter,
                 expandedBatches: $expandedBatches,
-                onDelete: delete,
-                onCelebrate: { celebrate() }
+                onDelete: delete
             )
         } label: {
             HStack(spacing: 6) {
@@ -451,7 +449,6 @@ struct WalletAllTicketsView: View {
     var initialFilter: WalletFilter = .all
     @Binding var expandedBatches: Set<String>
     let onDelete: (TicketCard) -> Void
-    var onCelebrate: (() -> Void)?
 
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.modelContext) private var context
@@ -493,7 +490,6 @@ struct WalletAllTicketsView: View {
                         },
                         onDelete: { onDelete(item) },
                         onEdit: { editTarget = EntryDraft.load(batchId: item.id, context: context) },
-                        onCelebrate: onCelebrate,
                         draw: drawStore.draw(for: item.game, expect: item.expect)
                     )
                     .onAppear {

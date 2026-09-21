@@ -81,6 +81,14 @@ final class DrawStore {
     /// 各彩种的开奖日程。V2 把它从每条开奖记录里挪了出来，一个彩种一份。
     private(set) var schedules: [GameKey: DrawSchedule] = [:]
     private(set) var latestUpdatedAt: String = ""
+    /// 数据源最后一次**抓到完整开奖数据**的时间（各彩种 `fetched_at` 的最大值）。
+    ///
+    /// 和 `latestUpdatedAt` 分开存，因为它们回答的是两个不同的问题：
+    /// `latestUpdatedAt` 是「这份数据文件什么时候拼出来的」——每次导出都变，
+    /// 哪怕后端一个号码都没抓到；`sourceFetchedAt` 是「后端什么时候真的把
+    /// 号码球和金额落进库里」。开奖号迟迟不更新的时候，能分清是谁没动的
+    /// 只有后者。
+    private(set) var sourceFetchedAt: String = ""
     /// 年度开奖日历，按年存。
     private(set) var yearCalendars: [Int: DrawCalendarYear] = [:]
 
@@ -154,6 +162,7 @@ final class DrawStore {
         let result = LotteryV2Mapper.bootstrap(payload)
         schedules = result.schedules
         latestUpdatedAt = result.generatedAt.isEmpty ? DateText.day(updatedAt) : result.generatedAt
+        sourceFetchedAt = result.fetchedAt
         lastSource = source
         merge(result.latest)
     }
@@ -320,8 +329,19 @@ final class DrawStore {
 
     /// 问一次数据源「你那边现在正不正常」。
     ///
-    /// **只能从「设置 → 开奖数据」这一个地方调，绝不进冷启动。**
-    /// 上一版每次启动都拉一次 health，而拉回来的东西从头到尾没有界面读过。
+    /// **绝不进冷启动。** 上一版每次启动都拉一次 health，
+    /// 而拉回来的东西从头到尾没有界面读过。
+    ///
+    /// ## 现在界面上没有入口，为什么还留着
+    ///
+    /// 「数据源状态」那一组已经从设置里去掉了（用户嫌用不到，确实如此：
+    /// 日常要判断的只是数据新不新，那看时间就够了）。这一层留着不是
+    /// 忘了删 —— 它是**唯一能发现「CloudBase 响应不再符合 V2 契约」的探针**。
+    /// 别的端点都走三级降级，CloudBase 一出问题就悄悄回落到 GitHub 镜像，
+    /// 界面上完全看不出来；只有 health 不兜底，问的就是主数据源自己。
+    ///
+    /// 契约校验和它那九条用例也一并留着。哪天需要重新露出来（比如又出现
+    /// 「开奖号怎么不更新」说不清是谁的锅），接上这个方法就行。
     func loadHealth(force: Bool = false) async {
         if !force, healthState == .loaded { return }
         if healthState == .loading { return }

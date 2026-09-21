@@ -168,9 +168,16 @@ struct HomeView: View {
 
             Divider()
 
+            // 中奖率摆在正中间。
+            //
+            // 它和左右两边不是一类数：票面金额、奖金、公益金、已结算都是
+            // 「花了多少 / 回来多少」的流水，中奖率是**结果**。放在中间，
+            // 两边的流水正好把它夹住 —— 左边是投入，右边是产出规模，
+            // 中间是这些投入里有多少变成了中奖。
             HStack(alignment: .top, spacing: 8) {
                 statPair("票面金额", MoneyText.format(series.costTotal))
                 statPair("奖金", MoneyText.format(series.prizeTotal))
+                statPair("中奖率", winRateText, tint: Palette.profit)
                 // 公益金逐条按彩种计提，比例见 `GameKey.welfareRate` ——
                 // 原来固定乘 0.36，八个彩种里五个是错的。
                 statPair("公益金", MoneyText.format(series.welfareTotal))
@@ -180,7 +187,13 @@ struct HomeView: View {
         .contentCard()
     }
 
-    private func statPair(_ title: String, _ value: String) -> some View {
+    /// 一注都还没结算时，中奖率是 0/0 —— 那不是「中奖率 0%」，
+    /// 是「还没有能算的东西」。写成 0% 会让人以为买了都没中。
+    private var winRateText: String {
+        series.settledCount > 0 ? String(format: "%.0f%%", series.winRate) : "—"
+    }
+
+    private func statPair(_ title: String, _ value: String, tint: Color = .primary) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.caption2)
@@ -189,7 +202,9 @@ struct HomeView: View {
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                // 五列之后每列只有 60pt 上下，长金额必须缩得下去。
+                .minimumScaleFactor(0.6)
+                .foregroundStyle(tint)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -264,8 +279,13 @@ struct HomeView: View {
 
             pageDots
         }
+        // 进往期页时**带上正在看的那个彩种**。
+        //
+        // 原来固定从双色球开始：用户明明正盯着快乐8 那张卡点的「更多」，
+        // 进去却是双色球，还得自己再滑回去。轮播每 4 秒换一张，
+        // 「我刚才看的是哪个」是用户唯一带进这一页的上下文，不该丢掉。
         .sheet(isPresented: $isDrawSheetPresented) {
-            DrawHistoryView()
+            DrawHistoryView(initialGame: currentCarouselGame)
         }
     }
 
@@ -286,6 +306,18 @@ struct HomeView: View {
     }
 
     // MARK: - 轮播的环
+
+    /// 轮播上正在显示的那个彩种。
+    ///
+    /// `carouselIndex` 是跟着 `carouselGames` 走的，而 `carouselGames` 会随
+    /// 「今天开哪个彩种」重排，所以这里要防一手越界 —— 重排和读取之间
+    /// 隔着一次 body 求值。
+    private var currentCarouselGame: GameKey {
+        guard carouselGames.indices.contains(carouselIndex) else {
+            return carouselGames.first ?? .ssq
+        }
+        return carouselGames[carouselIndex]
+    }
 
     /// 含哨兵的页码表：`[最后一张的克隆] + 真页 + [第一张的克隆]`。
     private var carouselPages: [Int] {

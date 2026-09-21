@@ -12,7 +12,17 @@ struct DrawHistoryView: View {
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var game: GameKey = .ssq
+    @State private var game: GameKey
+
+    /// 从哪个彩种打开。首页「更多」传的是**用户正盯着的那张轮播卡**，
+    /// 不再固定从双色球开始。
+    ///
+    /// 用 `State(initialValue:)` 而不是 `.onAppear { game = initialGame }`：
+    /// 后者会先按双色球渲染一帧再跳，用户看得见那一下闪，
+    /// 而且会白白触发一次双色球的 `/v2/draws/ssq`。
+    init(initialGame: GameKey = .ssq) {
+        _game = State(initialValue: initialGame)
+    }
 
     var body: some View {
         NavigationStack {
@@ -122,35 +132,47 @@ struct DrawHistoryView: View {
         return "已显示 \(count) 期 · 最早到 \(earliest) 年"
     }
 
-    /// 彩种切换条。
+    /// 彩种切换条：**两行，八个彩种一屏全在**。
+    ///
+    /// 原来是一行横向滚动。八个名字一行放不下，屏幕右边总是截着半个芯片，
+    /// 想选后面几个得先横滑一下 —— 而这一页的主交互本来就是左右滑切彩种，
+    /// 于是同一个方向上有两套滑动：滑上面那条是滚动列表，滑下面是翻页。
+    /// 手指落点差几十点，行为完全不同。
+    ///
+    /// 改成固定两行四列之后没有滚动了：八个都看得见，点哪个是哪个，
+    /// 左右滑动这个手势只剩下面那一种含义。
     ///
     /// 这里刻意**不用玻璃**：本项目的分层原则是玻璃只属于悬浮在内容之上的导航层，
     /// 这排芯片跟着内容一起滚，早期版本给它套 glassPill，选中态的渐变被玻璃糊掉，
     /// 白字压上去也读不清。改成和票夹筛选条一致的实心芯片。
     private var gameTabs: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(GameKey.ordered) { item in
-                    let isOn = game == item
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { game = item }
-                    } label: {
-                        Text(item.label)
-                            .font(.footnote.weight(.bold))
-                            .foregroundStyle(isOn ? item.onTint : Color.primary)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(isOn ? AnyShapeStyle(item.tint) : AnyShapeStyle(Palette.card),
-                                        in: Capsule())
-                            .overlay(Capsule().strokeBorder(isOn ? item.accent.solidStroke : .clear, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+        // 固定四列而不是 `.adaptive`：八个彩种要的是稳定的 2×4，
+        // 自适应会随字号和机型变成 3+3+2 之类，每次进来排布都不一样。
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4),
+                  spacing: 8) {
+            ForEach(GameKey.ordered) { item in
+                let isOn = game == item
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { game = item }
+                } label: {
+                    Text(item.label)
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(isOn ? item.onTint : Color.primary)
+                        .lineLimit(1)
+                        // 「快乐8」和「福彩3D」不等长，等宽格子里必须允许收缩，
+                        // 否则窄机型上长名字会被截成省略号。
+                        .minimumScaleFactor(0.75)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity)
+                        .background(isOn ? AnyShapeStyle(item.tint) : AnyShapeStyle(Palette.card),
+                                    in: Capsule())
+                        .overlay(Capsule().strokeBorder(isOn ? item.accent.solidStroke : .clear, lineWidth: 1))
                 }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
             }
-            .padding(.vertical, 2)
         }
-        .scrollClipDisabled()
         .accessibilityHint("也可以在下方左右滑动切换彩种")
     }
 }

@@ -31,6 +31,29 @@ final class LotteryV2DecodingTests: XCTestCase {
         XCTAssertEqual(ssq.drawValues[.blue], [6])
     }
 
+    /// 「数据源更新时间」取各彩种 `fetched_at` 里**最晚**的一条。
+    ///
+    /// 和 `generated_at` 是两回事：后者是这份文件拼出来的时刻，每次导出都变，
+    /// 哪怕后端一个号码都没抓到；前者是号码和金额真正落库的时刻。
+    /// fixture 里 generated_at 是 09-21 00:52，而最晚的 fetched_at 是
+    /// 09-20 21:44 —— 两个值不一样，正好证明没有拿错。
+    func testBootstrapTakesLatestFetchedAt() throws {
+        let payload = try decode(LotteryV2.Bootstrap.self, LotteryV2Fixtures.bootstrap)
+        let result = LotteryV2Mapper.bootstrap(payload)
+
+        XCTAssertEqual(result.fetchedAt, "2026-09-20T21:44:07.049+08:00")
+        XCTAssertNotEqual(result.fetchedAt, result.generatedAt)
+    }
+
+    /// 服务端省略 `fetched_at` 时给空串，不能崩也不能瞎编一个时间。
+    func testBootstrapWithoutFetchedAtIsEmpty() throws {
+        let payload = try decode(LotteryV2.Bootstrap.self, Data(LotteryV2Fixtures.sparseBootstrapJSON.utf8))
+        let result = LotteryV2Mapper.bootstrap(payload)
+
+        XCTAssertTrue(result.fetchedAt.isEmpty)
+        XCTAssertFalse(result.latest.isEmpty, "前提：这份 fixture 本身是能解出开奖记录的")
+    }
+
     /// 远端叫 `kl8`，App 内部叫 `k8`。两边对不上时的表现是
     /// 「其它七个彩种都好，就快乐8 没有数据」。
     func testBootstrapMapsKL8ToK8() throws {

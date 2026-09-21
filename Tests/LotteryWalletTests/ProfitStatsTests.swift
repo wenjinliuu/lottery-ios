@@ -10,6 +10,54 @@ final class ProfitStatsTests: XCTestCase {
         SettledEntry(day: day, game: game, cost: cost, prize: prize, isWon: prize > 0)
     }
 
+    // MARK: - 中奖率
+
+    /// 中奖率的分母是**已结算注数**，和 `settledCount` 同一个口径。
+    func testWinRateCountsSettledOnly() {
+        let entries = [
+            entry("2026-01-01", cost: 10, prize: 0),
+            entry("2026-01-02", cost: 10, prize: 50),
+            entry("2026-01-03", cost: 10, prize: 5),
+            entry("2026-01-04", cost: 10, prize: 0)
+        ]
+        let series = ProfitStats.series(entries: entries, range: .all)
+        XCTAssertEqual(series.settledCount, 4)
+        XCTAssertEqual(series.wonCount, 2)
+        XCTAssertEqual(series.winRate, 50, accuracy: 0.001)
+    }
+
+    /// 一注都没有时不能除以零，也不该算成 0%。
+    func testWinRateIsZeroWhenNothingSettled() {
+        let series = ProfitStats.series(entries: [], range: .all)
+        XCTAssertEqual(series.settledCount, 0)
+        XCTAssertEqual(series.wonCount, 0)
+        XCTAssertEqual(series.winRate, 0)
+    }
+
+    /// **抽稀不能吃掉中奖注数。**
+    ///
+    /// `days` 在点数超过 `maxChartPoints` 时会被合并，所以中奖注数必须在
+    /// 抽稀之前累加好。写成「从 `series.days` 求和」的话这条会挂 ——
+    /// 这正是这条用例存在的理由。
+    func testWinRateSurvivesDownsampling() {
+        var entries: [SettledEntry] = []
+        var day = DateText.parse("2026-01-01")!
+        // 远多于 maxChartPoints，逼出抽稀
+        for index in 0..<(ProfitStats.maxChartPoints * 3) {
+            entries.append(entry(DateText.day(day), cost: 10, prize: index % 4 == 0 ? 20 : 0))
+            day = Calendar.chinaCalendar.date(byAdding: .day, value: 1, to: day)!
+        }
+        let series = ProfitStats.series(entries: entries, range: .all)
+        // 前提：真的抽稀了。没抽稀这条用例就白测了。
+        XCTAssertLessThan(series.days.count, entries.count)
+        // 总数按**全部**记录算，不受抽稀影响。
+        // `downsample` 是按下标**挑点**、不是合并，被挑掉的那些天整个消失；
+        // 谁要是把 wonCount 改成从 `days` 求和，这里的 135 立刻对不上。
+        XCTAssertEqual(series.settledCount, ProfitStats.maxChartPoints * 3)
+        XCTAssertEqual(series.wonCount, entries.filter(\.isWon).count)
+        XCTAssertEqual(series.winRate, 25, accuracy: 0.001)
+    }
+
     func testCumulativeBalance() {
         let entries = [
             entry("2026-01-01", cost: 10, prize: 0),

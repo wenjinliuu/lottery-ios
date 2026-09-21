@@ -379,6 +379,17 @@ struct TicketCard: Identifiable, Hashable {
     let count: Int
     let cost: Double
     let prize: Double
+    /// 这张票里中了奖的注数。
+    ///
+    /// **必须在建快照时按全部记录数**，不能从 `lines` 里数 —— `lines` 只快照
+    /// 前 `lineLimit` 注，一张 2000 注的复式票数出来的是「前 50 注里中了几注」。
+    let wonCount: Int
+    /// 中了但奖金还没公布的注数（一等奖那种要等官方开奖公告）。
+    ///
+    /// 和 `wonCount` 分开：这些注**已经中了**，只是金额是 0 而已。
+    /// 混进 `wonCount` 会让奖金和注数对不上（中 3 注、奖金 ¥10），
+    /// 不算进去又会显示成「未中奖」，那更错。
+    let pendingPrizeCount: Int
     let createdAt: Date
     /// 只快照要画的前几注。复式一张票可以到 2000 注，全快照没有意义。
     let lines: [Line]
@@ -564,12 +575,23 @@ extension TicketCard {
 
         var costSum = 0.0
         var prizeSum = 0.0
+        var wonSum = 0
+        var floatSum = 0
         for record in records {
             costSum += record.cost
             prizeSum += record.prizeAmount
+            // 按**这一注真的有奖金**算，而不是 `status == .won`。
+            // 一张复式票整体是「已中奖」，但里面绝大多数注是没中的。
+            if record.prizeAmount > 0 {
+                wonSum += 1
+            } else if record.status == .prizeFloat {
+                floatSum += 1
+            }
         }
         cost = costSum
         prize = prizeSum
+        wonCount = wonSum
+        pendingPrizeCount = floatSum
 
         let key = batch.game
         let showsLineMode = TicketCard.showsLineModes(records, game: batch.game)
