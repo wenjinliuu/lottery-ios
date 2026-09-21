@@ -41,6 +41,47 @@ struct RecordService {
         return batchId
     }
 
+    /// 就地改写一整张票。
+    ///
+    /// 「修改」不是「删了重录」：`batchId` 和 `createdAt` 都要原样留住，
+    /// 否则这张票会跳到票夹最上面、和用户记忆里的位置对不上，
+    /// 统计里的归属日期也会跟着漂。
+    ///
+    /// 实现上仍然是「删掉旧的几注、按新号码重新展开」—— 复式改一个号码，
+    /// 展开出来的注数可能从 14 变成 21，逐条对应地改是做不到的。
+    @discardableResult
+    func replace(batchId: String,
+                 tickets: [Ticket],
+                 game: GameKey,
+                 entryKind: EntryKind,
+                 price: Double,
+                 multiple: Int,
+                 target: DrawTarget,
+                 source: String,
+                 createdAt: Date) throws -> String {
+        let descriptor = FetchDescriptor<TicketRecord>(predicate: #Predicate { $0.batchId == batchId })
+        for record in (try? context.fetch(descriptor)) ?? [] {
+            context.delete(record)
+        }
+        for (index, ticket) in tickets.enumerated() {
+            let record = TicketRecord(
+                id: "\(batchId)_\(String(format: "%03d", index + 1))",
+                batchId: batchId,
+                game: game,
+                ticket: ticket,
+                entryKind: entryKind,
+                target: target,
+                price: price,
+                multiple: multiple,
+                source: source,
+                createdAt: createdAt
+            )
+            context.insert(record)
+        }
+        try context.save()
+        return batchId
+    }
+
     func allRecords() -> [TicketRecord] {
         let descriptor = FetchDescriptor<TicketRecord>(sortBy: [SortDescriptor(\TicketRecord.createdAt, order: .reverse)])
         return (try? context.fetch(descriptor)) ?? []
@@ -381,15 +422,12 @@ struct TicketCard: Identifiable, Hashable {
         return game == .fc3d || modes.count > 1
     }
 
-    /// 把历史上各种写法的 `entryLabel` 折成票面用词。
+    /// 把历史上各种写法的 `entryLabel` 折成票面类型。
     ///
-    /// 老记录里存的可能是录入方式（扫描 / 手选）或者录入页的用词（普通），
-    /// 票面上一律叫「单式」。
-    static func shapeLabel(_ raw: String, addOn: Bool) -> String {
-        switch raw {
-        case "复式", "胆拖": return raw
-        default: return "单式"
-        }
+    /// 老记录里存的可能是录入方式（扫描 / 手选）或者录入页的旧用词（普通），
+    /// 一律按单式票看。匹配规则见 `TicketShape.from(entryLabel:)`。
+    static func shape(_ raw: String) -> TicketShape {
+        TicketShape.from(entryLabel: raw)
     }
 
     /// 从展开的每一注反推整票选号。
@@ -510,12 +548,12 @@ extension TicketCard {
         targetStatus = first?.targetStatus ?? .confirmed
         multiple = batch.multiple
         entryLabel = batch.entryLabel
-        // 票面那句话，比如「组选单式」「选八单式」「追加单式」。
+        // 票面那句话，比如「组选单式票」「选八单式票」「追加单式票」。
         // 玩法取**整张票里所有注**的集合 —— 3D 和排列3 一张票上可以混玩法，
         // 只看第一注会把「组选」说成「组六」。
         playLabel = batch.game.ticketLabel(
             modes: Set(records.map(\.playMode)),
-            shape: TicketCard.shapeLabel(batch.entryLabel, addOn: first?.ticket.addOn ?? false)
+            shape: TicketCard.shape(batch.entryLabel)
         )
         count = records.count
         createdAt = batch.createdAt

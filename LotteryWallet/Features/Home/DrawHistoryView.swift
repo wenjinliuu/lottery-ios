@@ -50,7 +50,7 @@ struct DrawHistoryView: View {
             LazyVStack(spacing: 12) {
                 if !rows.isEmpty {
                     ForEach(rows) { draw in
-                        DrawHistoryRow(draw: draw)
+                        DrawHistoryRow(game: item, draw: draw)
                     }
                     historyFooter(for: item, count: rows.count)
                 } else if !state.hasTried || state.isLoading {
@@ -156,6 +156,7 @@ struct DrawHistoryView: View {
 }
 
 struct DrawHistoryRow: View {
+    let game: GameKey
     let draw: Draw
 
     var body: some View {
@@ -172,12 +173,10 @@ struct DrawHistoryRow: View {
             }
             // 往期这里要看全号码，所以不限制颗数，只让球径自适应缩小
             DrawNumbersView(draw: draw, size: 28)
-            if let first = draw.firstPrize, first.winningCount > 0 {
-                Text("一等奖 \(first.winningCount) 注"
-                     + (first.amount > 0 ? " · \(MoneyText.compactYuan(first.amount))/注" : ""))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            // 奖级和首页那张卡用同一套 —— 原来这里只有干巴巴一行
+            // 「一等奖 N 注」，同一份数据在两个页面上长得不一样，
+            // 翻到往期会以为信息丢了。
+            DrawPrizeLines(game: game, draw: draw)
         }
         // contentCard 自己就带 16pt 内边距，外面再加一层等于 32pt，
         // 卡片里的内容会比首页窄一大截。

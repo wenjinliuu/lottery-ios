@@ -118,7 +118,7 @@ struct NumberPadSection: View {
                 .overlay(alignment: .topTrailing) {
                     if isDan {
                         Text("胆")
-                            .font(.system(size: 8, weight: .black))
+                            .scaledFont(8, weight: .black)
                             .foregroundStyle(.white)
                             .padding(2)
                             .background(Circle().fill(Palette.danger))

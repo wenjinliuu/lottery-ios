@@ -79,7 +79,7 @@ struct TicketCropView: View {
             // 裁切页是纯黑底，统一的 DisclaimerNote 用的是次要色，在这里看不清，
             // 所以这一处单独给白色。文案仍然走同一个来源。
             Text(Disclaimer.crop)
-                .font(.system(size: 10))
+                .scaledFont(10)
                 .foregroundStyle(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
             buttons

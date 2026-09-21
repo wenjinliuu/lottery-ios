@@ -101,6 +101,33 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         self == .dlt && addOn ? 3 : 2
     }
 
+    /// 票面金额里计提公益金的比例。
+    ///
+    /// **每个彩种不一样，不能一律按 36% 算。** 原来首页固定乘 0.36，
+    /// 八个彩种里有五个是错的，快乐8 更是差了六个百分点。
+    ///
+    /// 这些数字不是查来的，是从**真实票面反推**的 —— 每张票底都印着
+    /// 「感谢您为公益事业贡献 X 元」，和票面合计一除就是这个比例
+    /// （见 `Tests/LotteryWalletTests` 里的样票夹具）：
+    ///
+    /// | 彩种 | 票面合计 | 公益金 | 比例 |
+    /// | --- | --- | --- | --- |
+    /// | 双色球 / 大乐透 / 七乐彩 | 18 元 | 6.48 元 | 0.36 |
+    /// | 七星彩 / 排列5 | 10 元 | 3.70 元 | 0.37 |
+    /// | 福彩3D / 排列3 | 10 元 | 3.40 元 | 0.34 |
+    /// | 快乐8 | 4 元 | 1.20 元 | 0.30 |
+    ///
+    /// 大乐透有六张不同样票全部精确命中 0.36，排列3 两张都是 0.34，
+    /// 其余彩种各一张。数值都是干净的两位小数，是各彩种公布的提取比例。
+    var welfareRate: Double {
+        switch self {
+        case .ssq, .dlt, .qlc: 0.36
+        case .qxc, .pl5: 0.37
+        case .fc3d, .pl3: 0.34
+        case .k8: 0.30
+        }
+    }
+
     /// 支持"注数"快捷选择的彩种，与 web 版 `COUNT_GAMES` 一致。
     var supportsMultiTicketCount: Bool {
         [.ssq, .dlt, .pl5, .qxc, .qlc].contains(self)
@@ -141,14 +168,14 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     /// 大乐透的「追加」原来在票夹里完全看不见 —— 票面只显示录入方式
     /// （随机/普通/复式/胆拖），玩法字段虽然存了却没有任何地方读它。
 
-    /// 票面头部那个完整的玩法标签：`组选单式` / `直选单式` / `选八单式` / `追加单式`。
+    /// 票面头部那个完整的标签：`组选单式票` / `直选单式票` / `选八单式票` / `追加复式票`。
     ///
-    /// 要和实体票面写的一字不差 —— 用户核对时是拿票面对着看的。
     /// `modes` 是这张票里每一注的玩法（3D 和排列3 可以混），
-    /// `shape` 是票型（单式 / 复式 / 胆拖），两段拼起来才是票面那句话。
-    func ticketLabel(modes: Set<String>, shape: String) -> String {
+    /// `shape` 是票面类型（见 `TicketShape`），两段拼起来才是这张票的全名。
+    /// 样票上印的就是「单式票」三个字，所以这里也带「票」字。
+    func ticketLabel(modes: Set<String>, shape: TicketShape) -> String {
         let play = headPlayLabel(modes: modes)
-        return play.isEmpty ? shape : play + shape
+        return play.isEmpty ? shape.label : play + shape.label
     }
 
     /// 票头该写哪种玩法。

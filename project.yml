@@ -27,6 +27,9 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wenjinliu.lotterywallet
+        # iCloud 备份要的 entitlements。容器标识符和
+        # `ICloudBackupService.containerID` 必须一字不差。
+        CODE_SIGN_ENTITLEMENTS: LotteryWallet/Resources/LotteryWallet.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         TARGETED_DEVICE_FAMILY: "1"
@@ -41,6 +44,8 @@ targets:
       path: LotteryWallet/Resources/Info.plist
       properties:
         CFBundleDisplayName: 对个号
+        # 声明开发语言。没有这一条时 App Store 对语言的标注是靠猜的。
+        CFBundleDevelopmentRegion: zh-Hans
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen:
@@ -50,8 +55,21 @@ targets:
         NSCameraUsageDescription: 用于拍摄纸质彩票并在本机识别号码，照片不会离开设备。
         NSPhotoLibraryUsageDescription: 用于从相册选择彩票照片并在本机识别号码，照片不会离开设备。
         ITSAppUsesNonExemptEncryption: false
+        # 让本机备份在「文件」App 里看得见、拷得走。
+        #
+        # 暴露的只有 App 沙盒的 Documents（里面就是 Backups 那个文件夹），
+        # 数据库在 Application Support，不在这儿 —— 不会被用户顺手删掉。
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
+        # 让备份文件在「文件」App 里显示成一个有名字的文件夹，
+        # 而不是一串容器标识符。没有这一段用户根本找不到自己的备份。
+        NSUbiquitousContainers:
+          iCloud.com.wenjinliu.lotterywallet:
+            NSUbiquitousContainerIsDocumentScopePublic: true
+            NSUbiquitousContainerName: 对个号
+            NSUbiquitousContainerSupportedFolderLevels: Any
 
   LotteryWalletTests:
     type: bundle.unit-test

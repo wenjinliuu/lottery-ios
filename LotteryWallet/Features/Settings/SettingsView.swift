@@ -1,21 +1,11 @@
 import SwiftUI
 import SwiftData
-import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(DrawStore.self) private var drawStore
-    @Environment(\.modelContext) private var context
-    @Environment(\.showToast) private var showToast
-    @Environment(\.celebrate) private var celebrate
     @Query private var records: [TicketRecord]
 
-    @State private var isExporting = false
-    @State private var isImporting = false
-    @State private var exportDocument: BackupDocument?
-    @State private var isClearConfirmPresented = false
-    @State private var isBusy = false
-    @State private var busyLabel = ""
 
     var body: some View {
         @Bindable var settings = settings
@@ -40,20 +30,21 @@ struct SettingsView: View {
                     }
                 }
 
-                // 「数据状态」和「数据备份」原来是分开的两组，可是在用户心里
-                // 它们是同一件事：我的数据现在什么样、怎么带走、怎么清掉。
-                // 分成两组只是因为它们是分两次做出来的。这里合成一组。
+                // 数据只有**一组**，三行。
                 //
-                // 开奖数据只留**更新时间**一行 —— 日常要判断的就这一件事。
-                // 数据来源、数据源状态、日历取到哪一年了，都是出问题才关心的，
-                // 收进详情页（`DrawDataView`）。原来那行「往期缓存 N 个彩种」
-                // 去掉了：往期本来就是按需取的，那个数字既不该是 8、也不代表
-                // 任何异常，放在这儿只会让人以为少了什么。
+                // 原来是分开的两组：「数据状态」（开奖数据、开奖日历、往期缓存、
+                // 刷新）和「数据」（本机记录、备份）。可是在用户心里它们是同一
+                // 件事 —— 我的数据现在什么样、怎么带走、怎么清掉。分成两组只是
+                // 因为它们是分两次做出来的。
+                //
+                // 每一行只留一句话，细节都在各自的详情页里：
+                // 开奖数据的来源和日历进 `DrawDataView`，备份和清空进 `BackupView`。
                 Section {
                     NavigationLink {
                         DrawDataView()
                     } label: {
                         LabeledContent {
+                            // 日常要判断的就这一件事：数据是不是新的。
                             Text(drawStore.latestUpdatedAt.isEmpty
                                  ? "暂无" : DateText.friendly(drawStore.latestUpdatedAt))
                                 .font(.footnote)
@@ -71,18 +62,12 @@ struct SettingsView: View {
                         row("tray.full.fill", .orange, "本机记录")
                     }
 
-                    Button { export() } label: {
-                        row("square.and.arrow.up.fill", .green, "导出备份")
-                    }
-
-                    Button { isImporting = true } label: {
-                        row("square.and.arrow.down.fill", .teal, "导入备份")
-                    }
-
-                    Button(role: .destructive) {
-                        isClearConfirmPresented = true
+                    // 清空全部记录也在这里面。它是**备份的反面**，
+                    // 和备份放在一起，点之前一眼就能看到旁边那份备份在不在。
+                    NavigationLink {
+                        BackupView()
                     } label: {
-                        row("trash.fill", .red, "清空全部记录", tint: .red)
+                        row("externaldrive.fill.badge.icloud", .blue, "备份与恢复")
                     }
                 } header: {
                     Text("数据")
@@ -101,6 +86,18 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        PrizeTableView()
+                    } label: {
+                        row("tablecells", .indigo, "奖级对照表")
+                    }
+                } header: {
+                    Text("彩种资料")
+                } footer: {
+                    Text("各彩种的中奖条件与单注奖金，整理自官方公布的游戏规则，仅供参考。")
+                }
+
+                Section {
                     LabeledContent {
                         Text("\(AppInfo.version) (\(AppInfo.build))")
                             .font(.footnote)
@@ -115,32 +112,9 @@ struct SettingsView: View {
                     }
                 }
             }
+            // 导航栏不要自己糊底色，交给系统的 scroll edge effect。
+            // 理由见 `HomeView` 里同一处那段注释。
             .navigationTitle("设置")
-            .disabled(isBusy)
-            .overlay { if isBusy { busyOverlay } }
-            .fileExporter(
-                isPresented: $isExporting,
-                document: exportDocument,
-                contentType: .json,
-                defaultFilename: BackupService.suggestedFileName()
-            ) { result in
-                switch result {
-                case .success:
-                    settings.lastBackupAt = Date()
-                    showToast("备份已保存", symbol: "square.and.arrow.up", feedback: .success)
-                case .failure:
-                    showToast("导出取消或失败", symbol: "exclamationmark.triangle", feedback: .error)
-                }
-            }
-            .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
-                handleImport(result)
-            }
-            .confirmationDialog("清空全部记录？", isPresented: $isClearConfirmPresented, titleVisibility: .visible) {
-                Button("清空", role: .destructive) { clearAll() }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("\(records.count) 条记录会被永久删除。建议先导出备份。")
-            }
         }
     }
 
@@ -152,114 +126,15 @@ struct SettingsView: View {
         }
     }
 
-    private var busyOverlay: some View {
-        ZStack {
-            // 12% 的黑在深色模式下几乎看不出来，用材质两种模式都能压住底下的内容
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .ignoresSafeArea()
-            VStack(spacing: 12) {
-                ProgressView()
-                Text(busyLabel)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(24)
-            .background(Palette.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: .black.opacity(0.15), radius: 16, y: 6)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(busyLabel)
-    }
-
     private var backupFooter: String {
         guard let days = settings.daysSinceBackup else {
-            return "记录只保存在本机。换设备前请先导出备份。"
+            return "记录保存在这台设备上。进「备份与恢复」存一份，换设备时才带得走。"
         }
         if days >= 7 {
-            return "上次备份是 \(days) 天前，建议重新导出一次。"
+            return "上次备份是 \(days) 天前，建议再存一份。"
         }
         return "上次备份：\(days) 天前。"
     }
-
-    // MARK: - 动作
-
-    private func export() {
-        let service = BackupService(context: context)
-        guard let data = try? service.exportData(records: records) else {
-            showToast("生成备份失败", symbol: "exclamationmark.triangle", feedback: .error)
-            return
-        }
-        exportDocument = BackupDocument(data: data)
-        isExporting = true
-    }
-
-    /// 导入分两步：先落库，再核对。
-    /// 两步都可能很慢，中间让出主线程刷新一次界面，别让用户看到假死。
-    private func handleImport(_ result: Result<URL, Error>) {
-        guard case .success(let url) = result else {
-            showToast("导入取消", symbol: "xmark.circle")
-            return
-        }
-        Task {
-            isBusy = true
-            busyLabel = "正在导入记录…"
-            defer { isBusy = false }
-
-            let needsRelease = url.startAccessingSecurityScopedResource()
-            defer { if needsRelease { url.stopAccessingSecurityScopedResource() } }
-
-            do {
-                let data = try Data(contentsOf: url)
-                let outcome = try BackupService(context: context).importData(data)
-                await Task.yield()
-
-                busyLabel = "正在核对开奖…"
-                let service = RecordService(context: context, drawStore: drawStore)
-                // 导进来的老票绑的是几个月甚至几年前的期号，按需补那几年，
-                // 再补一次还差的彩种最近 30 期。两步都只取真正要用的。
-                await drawStore.loadArchives(service.archivesNeedingMatchRepair())
-                await drawStore.ensureRecentDraws(for: service.gamesAwaitingDraws())
-                _ = try? service.reconcileInferredTargets()
-                let checked = try? service.checkAll()
-
-                showToast("已导入 \(outcome.inserted + outcome.updated) 条记录", symbol: "square.and.arrow.down", feedback: .success)
-                // 导入一份旧备份常常一次核出好几注中奖，值得放一次烟花
-                if let checked, checked.won > 0 { celebrate() }
-            } catch {
-                showToast(error.localizedDescription, symbol: "exclamationmark.triangle", feedback: .error)
-            }
-        }
-    }
-
-    private func clearAll() {
-        do {
-            try RecordService(context: context, drawStore: drawStore).deleteAll()
-            showToast("已清空全部记录", symbol: "trash", feedback: .success)
-        } catch {
-            showToast("清空失败", symbol: "exclamationmark.triangle", feedback: .error)
-        }
-    }
-}
-
-/// 导出用的文件包装。
-struct BackupDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
-
-    var data: Data
-
-    init(data: Data) {
-        self.data = data
-    }
-
-    init(configuration: ReadConfiguration) throws {
-        data = configuration.file.regularFileContents ?? Data()
-    }
-
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
-    }
-}
 
 struct AboutView: View {
     static let privacyURL = URL(string: "https://wenjinliuu.github.io/lottery-ios/")!
@@ -285,11 +160,11 @@ struct AboutView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("对个号")
                     .font(.largeTitle.weight(.bold))
-                Text("本地优先的彩票记录与核对工具。所有票据只保存在这台设备上，不上传服务器，也没有账号体系。")
+                Text("本地优先的实体彩票票据记录与核对工具。所有票据只保存在这台设备上，不上传服务器，也没有账号体系。")
                 Divider()
                 Text("免责声明")
                     .font(.headline)
-                Text("本应用仅用于记录和辅助核对已经购买的彩票，不销售、不代购、不提供兑奖服务。开奖结果以官方渠道公布为准。如需购买，请通过当地合法、正规的线下彩票销售渠道，并理性参与、量力而行。")
+                Text("本应用仅用于记录和核对您已持有的实体彩票，不销售、不代购、不提供兑奖服务。开奖结果以官方渠道公布为准。购彩请通过当地合法、正规的线下彩票销售渠道，并理性参与、量力而行。")
                 Text("开奖数据")
                     .font(.headline)
                 Text("开奖号码与开奖日历读取自公开数据仓库 lottery-data-repo，应用只做只读访问。彩票照片的号码识别全部在本机完成，照片不会离开设备，也不会被保存。")

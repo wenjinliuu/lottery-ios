@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// 一张电子票。5 注以内全展开，更多才折叠。
+/// 票夹里的一张票据记录。5 注以内全展开，更多才折叠。
 ///
 /// 这里**只读 `TicketCard` 这个纯值快照**，一个 SwiftData 属性都不碰 ——
 /// 号码、命中标记、金额都是分组时算好的。早期版本直接持有托管对象，
@@ -11,12 +11,14 @@ struct WalletTicketCard: View {
     let isExpanded: Bool
     var onToggle: () -> Void
     var onDelete: () -> Void
+    /// 长按「修改」。打开的是录入页那套完整工作台。
+    var onEdit: (() -> Void)? = nil
     /// 点开一张已中奖的票时放烟花。
     var onCelebrate: (() -> Void)?
     /// 这张票绑定期次的开奖号码，同样由外部提前取好。
     var draw: Draw?
 
-    @Environment(\.showToast) private var showToast
+    @Environment(ToastCenter.self) private var showToast
     @State private var isDeleteConfirmPresented = false
 
     /// 收起时画几注。5 注以内的票**一律全展开** —— 大多数票就是 1–5 注，
@@ -80,6 +82,9 @@ struct WalletTicketCard: View {
             if isCollapsible { onToggle() }
         }
         .contextMenu {
+            if let onEdit {
+                Button("修改", systemImage: "square.and.pencil", action: onEdit)
+            }
             Button("复制号码", systemImage: "doc.on.doc") {
                 UIPasteboard.general.string = card.copyText
                 showToast("号码已复制", symbol: "doc.on.doc", feedback: .success)
@@ -139,9 +144,9 @@ struct WalletTicketCard: View {
         TicketMetaText(items: [
             "\(card.count) 注",
             card.multiple > 1 ? "\(card.multiple) 倍" : "",
-            // playLabel 已经是「组选单式」这种完整写法，entryLabel 再列一遍就是重复
+            // playLabel 已经是「组选单式票」这种完整写法，entryLabel 再列一遍就是重复
             card.playLabel,
-            "投入 \(MoneyText.format(card.cost))"
+            "票面金额 \(MoneyText.format(card.cost))"
         ])
         .padding(.top, 8)
     }
@@ -258,7 +263,7 @@ struct WalletTicketCard: View {
 
     // MARK: - 票尾
 
-    /// 票尾：左边开奖号码，右边盈亏，一行放完。
+    /// 票尾：左边开奖号码，右边收支，一行放完。
     ///
     /// 这里踩过一次坑。最早两列是横排的，开奖号码最后一颗球会被挤到第二行、
     /// 甚至溢出票面 —— 原因是 `BallFlow` 在 `.unspecified` 提案下报的是
@@ -280,7 +285,7 @@ struct WalletTicketCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text("盈亏")
+                Text("收支")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Text(card.status == .pending ? "待核对" : MoneyText.format(card.netProfit))

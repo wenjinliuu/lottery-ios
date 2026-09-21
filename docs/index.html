@@ -287,7 +287,7 @@
       </li>
       <li>
         <span class="tick" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.3 4.6 9 10 3"/></svg></span>
-        <span><b>数据只存在你的手机上。</b><small>号码、识别结果、备注全部保存在设备本地，开发者无法访问。</small></span>
+        <span><b>数据默认只存在你的手机上。</b><small>号码、识别结果、备注全部保存在设备本地，自动备份也只写在这台设备里。你可以自行开启「存到 iCloud」，备份只进入你自己的 iCloud 账户，开发者同样无法访问。</small></span>
       </li>
       <li>
         <span class="tick" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.3 4.6 9 10 3"/></svg></span>
@@ -315,7 +315,13 @@
       <li>照片识别得到的结果，以及您对识别结果所做的修改；</li>
       <li>核对结果、盈亏统计与您自行填写的备注。</li>
     </ul>
-    <p>上述数据不会离开您的设备，开发者<strong>无法以任何方式访问、读取或恢复</strong>这些数据。</p>
+    <p>除非您主动分享备份文件并自行选择保存位置，或主动开启「存到 iCloud」，上述数据不会离开您的设备。开发者<strong>无法以任何方式访问、读取或恢复</strong>这些数据。</p>
+
+    <p><strong>关于备份：</strong>应用会在退到后台且记录有过变化时自动存一份备份，<strong>默认只写在本机</strong>（应用自己的「备份」文件夹，可在「文件」App 里查看），滚动保留最近几份。这一份不离开您的设备。</p>
+
+    <p><strong>关于「存到 iCloud」：</strong>该开关<strong>默认关闭</strong>，需要您在「设置 → 备份与恢复」中主动开启。开启后，备份会优先写入<strong>您本人的 iCloud 云盘</strong>（可在「文件」App 的「对个号」文件夹中查看）。该文件由 Apple 的 iCloud 服务在您的账户内保管，<strong>不经过我们的任何服务器</strong>，开发者无权也无法访问。关闭开关不会删除已经上传的备份，您可以随时在应用内或「文件」App 中自行删除。</p>
+
+    <p><strong>关于同步：</strong>应用<strong>不做任何跨设备同步</strong>。您的彩票记录保存在本机数据库里，备份只是显式的快照文件，不会在设备之间自动合并或覆盖。</p>
     <div class="notice">
       <p><strong>请注意：</strong>由于数据只存在于本机，卸载本应用会一并删除全部记录，且无法找回。如果您需要长期保留或更换设备，请先在「设置 → 备份」中导出备份文件并妥善保存。备份文件由您自行选择保存位置，导出过程同样不经过任何服务器。</p>
     </div>
@@ -360,7 +366,7 @@
 
   <footer>
     <p><a class="textlink" href="support.html">技术支持与常见问题</a></p>
-    <p>对个号 · 本应用仅用于记录您已在正规渠道购买的彩票，不销售、不代购彩票。请理性购彩。</p>
+    <p>对个号 · 本应用仅用于记录和核对您已持有的实体彩票，不销售、不代购、不提供兑奖服务。请理性购彩。</p>
   </footer>
 
 </div>

@@ -7,8 +7,11 @@ import SwiftUI
 /// 在一条几百行的列表里翻找日期是最笨的办法。
 ///
 /// 换成月历之后，开奖日在格子里一眼可见（哪几天开、隔几天开一次），
-/// 点中某一天再在下面看那一期的完整信息：期号、开奖时刻、停售时刻、
-/// 还能不能买。列表能给的信息一样不少，只是换了个人找得到的排法。
+/// 点中某一天再在下面看那一期的完整信息：期号、开奖时刻、开没开奖。
+/// 列表能给的信息一样不少，只是换了个人找得到的排法。
+///
+/// 这一页回答的是「我手里这张票属于哪一期」，不是「现在还能买哪一期」，
+/// 所以界面上一律按**开奖进度**说话（已开奖 / 待开奖），不出现销售状态。
 struct IssuePickerSheet: View {
     let game: GameKey
     /// 当前绑定的期号，用来高亮和定位。
@@ -35,10 +38,20 @@ struct IssuePickerSheet: View {
         Dictionary(allIssues.map { ($0.drawDate, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
-    /// 现在还能买的第一期。
-    private var onSaleIssue: CalendarIssue? {
+    /// 没有已绑定期号时的建议期次。
+    ///
+    /// 判据仍然是销售截止时刻（`isOnSale`）—— 一张刚买到手的票，多半就属于
+    /// 当下这个还没截止的期。这是个**推断用的内部信号，界面上不露出来**：
+    /// 用户看到的只是日历默认停在某一期上，仍然可以照着票面自己改。
+    private var suggestedIssue: CalendarIssue? {
         let now = Date()
         return allIssues.first { $0.isOnSale(at: now) }
+    }
+
+    /// 这一期开没开过奖。界面上的状态、配色、灰度全按它走。
+    private func hasDrawn(_ issue: CalendarIssue, at now: Date = Date()) -> Bool {
+        guard let drawsAt = issue.drawsAt else { return false }
+        return now >= drawsAt
     }
 
     var body: some View {
@@ -155,7 +168,10 @@ struct IssuePickerSheet: View {
             let issue = byDate[key]
             let isSelected = issue != nil && issue?.issue == selected?.issue
             let isBound = issue != nil && issue?.issue == current
-            let closed = issue.map { !$0.isOnSale(at: Date()) } ?? false
+            // 配色照旧要有 —— 它表达的是**期号进度**：开过奖的日子淡下去，
+            // 待开奖的亮着，翻月时一眼看得出走到哪儿了。只是判据从
+            // 「还能不能买」换成了「开没开奖」。
+            let drawn = issue.map { hasDrawn($0) } ?? false
 
             Button {
                 guard let issue else { return }
@@ -163,24 +179,28 @@ struct IssuePickerSheet: View {
             } label: {
                 VStack(spacing: 1) {
                     Text(dayNumber(day))
-                        .font(.system(size: 15, weight: issue != nil ? .semibold : .regular))
+                        // 日历格里的日期也得跟 Dynamic Type 走。写死 15pt 的话，
+                        // 用户把系统字号调大，整页只有这一处纹丝不动。
+                        .scaledFont(15, weight: issue != nil ? .semibold : .regular)
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     // 期号只显示后三位：同一年里前面几位都一样，
                     // 全写出来这一格根本放不下，也没有区分度。
                     Text(issue.map { String($0.issue.suffix(3)) } ?? " ")
-                        .font(.system(size: 9))
+                        .scaledFont(9)
                         .monospacedDigit()
                         .opacity(0.75)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
-                .foregroundStyle(cellForeground(issue: issue, isSelected: isSelected, closed: closed))
+                .foregroundStyle(cellForeground(issue: issue, isSelected: isSelected, drawn: drawn))
                 .background {
                     if isSelected {
                         RoundedRectangle(cornerRadius: 9, style: .continuous).fill(game.tint)
                     } else if issue != nil {
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(game.tint.opacity(closed ? 0.08 : 0.16))
+                            .fill(game.tint.opacity(drawn ? 0.08 : 0.16))
                     }
                 }
                 .overlay {
@@ -200,17 +220,17 @@ struct IssuePickerSheet: View {
         }
     }
 
-    private func cellForeground(issue: CalendarIssue?, isSelected: Bool, closed: Bool) -> Color {
+    private func cellForeground(issue: CalendarIssue?, isSelected: Bool, drawn: Bool) -> Color {
         if isSelected { return game.onTint }
         if issue == nil { return .secondary.opacity(0.45) }
-        return closed ? .secondary : .primary
+        return drawn ? .secondary : .primary
     }
 
     /// 选中那一期的完整信息。列表里有的这里一样不少。
     @ViewBuilder
     private var detailCard: some View {
         if let issue = selected {
-            let closed = !issue.isOnSale(at: Date())
+            let drawn = hasDrawn(issue)
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("第 \(issue.issue) 期")
@@ -218,16 +238,15 @@ struct IssuePickerSheet: View {
                         .monospacedDigit()
                         .foregroundStyle(game.accent.accentColor)
                     Spacer(minLength: 8)
-                    // 已截止的期次照样能选 —— 补录旧票、修正扫描识别错误都要选到它们
-                    Text(closed ? "已截止" : "可购买")
+                    // 开过奖的期次照样能选 —— 补录旧票、修正扫描识别错误都要选到它们
+                    Text(drawn ? "已开奖" : "待开奖")
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(closed ? Color.secondary : Palette.live)
+                        .foregroundStyle(drawn ? Color.secondary : Palette.live)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background((closed ? Color.secondary : Palette.live).opacity(0.14), in: Capsule())
+                        .background((drawn ? Color.secondary : Palette.live).opacity(0.14), in: Capsule())
                 }
                 detailRow("开奖", "\(DateText.monthDay(issue.drawDate)) \(weekdayName(issue.weekday)) \(clock(issue.drawTime))")
-                detailRow("停售", "\(DateText.monthDay(issue.drawDate)) \(clock(issue.saleCloseTime))")
                 if issue.issue == current {
                     Text("这张票当前就绑在这一期")
                         .font(.caption2)
@@ -309,9 +328,9 @@ struct IssuePickerSheet: View {
         withAnimation(.easeOut(duration: 0.2)) { month = target }
     }
 
-    /// 打开时先跳到已绑定的那一期，没有就跳到现在能买的那一期。
+    /// 打开时先跳到已绑定的那一期，没有就落在建议期次上。
     private func jumpToInitialMonth() {
-        let anchor = allIssues.first { $0.issue == current } ?? onSaleIssue
+        let anchor = allIssues.first { $0.issue == current } ?? suggestedIssue
         guard let anchor, let date = DateText.parse(anchor.drawDate) else { return }
         month = date
         selected = anchor

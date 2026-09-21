@@ -1,22 +1,24 @@
 import SwiftUI
 import SwiftData
 
-/// 票夹：每次购买是一张电子票，按购买时间倒序。
+/// 票夹：一张实体票对应一条票据记录，按录入时间倒序。
 struct WalletView: View {
 
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.modelContext) private var context
-    @Environment(\.showToast) private var showToast
-    @Environment(\.celebrate) private var celebrate
+    @Environment(ToastCenter.self) private var showToast
+    @Environment(CelebrationCenter.self) private var celebrate
     @Query(sort: \TicketRecord.createdAt, order: .reverse) private var records: [TicketRecord]
 
     @State private var filter: WalletFilter = .all
     @State private var expandedBatches: Set<String> = []
     @State private var isChecking = false
+    /// 正在修改的那张票。
+    @State private var editTarget: EntryDraft?
     /// 渲染快照。记录变化时算一次，之后渲染完全不碰 SwiftData 对象。
     @State private var cards: [TicketCard] = []
     @State private var counts: [WalletFilter: Int] = [:]
-    /// 筛选结果也存下来。放在 body 里当计算属性的话，每帧都要把全部电子票过一遍。
+    /// 筛选结果也存下来。放在 body 里当计算属性的话，每帧都要把全部票据过一遍。
     @State private var visibleCards: [TicketCard] = []
 
     /// **进页面时冻结下来的顺序**（batchId → 名次）。
@@ -49,7 +51,7 @@ struct WalletView: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
-    /// 首屏一共画这么多张。一张电子票是一整块带号码球的卡片，
+    /// 首屏一共画这么多张。一张票据是一整块带号码球的卡片，
     /// 几十上百张一次性铺开，进票夹那一下明显要卡。
     static let previewLimit = 12
     /// 分区配额。一刀切 prefix 的话，新结果一多就把历史全挤出首屏，
@@ -137,6 +139,8 @@ struct WalletView: View {
                 .padding(.bottom, 120)
             }
             .background(Palette.canvas)
+            // 导航栏不要自己糊底色，交给系统的 scroll edge effect。
+            // 理由见 `HomeView` 里同一处那段注释。
             .navigationTitle("票夹")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -168,6 +172,10 @@ struct WalletView: View {
                 // 下拉就是「再核对一遍」，和右上角那颗按钮同一件事，
                 // 所以也给同样的结果提示，别让人以为什么都没发生。
                 await recheck()
+            }
+            // 修改用的是录入页那套完整工作台，保存后照常按 RecordsToken 重排。
+            .sheet(item: $editTarget) { draft in
+                EntryFlowView(draft: draft)
             }
             .task(id: RecordsToken(records)) { rebuild() }
             .onChange(of: filter) { _, _ in applyFilter() }
@@ -202,6 +210,7 @@ struct WalletView: View {
             isExpanded: expandedBatches.contains(item.id),
             onToggle: { toggle(item.id) },
             onDelete: { delete(item) },
+            onEdit: { editTarget = EntryDraft.load(batchId: item.id, context: context) },
             onCelebrate: { celebrate() },
             draw: drawStore.draw(for: item.game, expect: item.expect)
         )
@@ -356,14 +365,14 @@ struct WalletView: View {
             ContentUnavailableView {
                 Label("票夹是空的", systemImage: "wallet.bifold")
             } description: {
-                Text("扫描纸质彩票，或手动录入已经购买的号码 —— 右下角那颗加号就是入口")
+                Text("拍下你手里的实体彩票，或照着票面手动录入 —— 右下角那颗加号就是入口")
             }
             .padding(.top, 50)
         } else {
             ContentUnavailableView {
                 Label("没有\(filter.label)的票", systemImage: "line.3.horizontal.decrease.circle")
             } description: {
-                Text("这里只显示\(filter.label)的电子票，切回「全部」可以看到其余 \(cards.count) 张。")
+                Text("这里只显示\(filter.label)的票据，切回「全部」可以看到其余 \(cards.count) 张。")
             } actions: {
                 Button("查看全部") {
                     withAnimation(.easeOut(duration: 0.18)) { filter = .all }
@@ -431,7 +440,7 @@ enum WalletRow: Identifiable {
     }
 }
 
-/// 完整电子票列表。票夹首屏只放前几张，其余在这里翻。
+/// 完整票据列表。票夹首屏只放前几张，其余在这里翻。
 /// 完整票列表。
 ///
 /// 这一页原来只是把票铺开，**顶上的筛选条没跟过来** —— 首页只放十张，
@@ -446,6 +455,7 @@ struct WalletAllTicketsView: View {
 
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.modelContext) private var context
+    @State private var editTarget: EntryDraft?
     @State private var status: WalletFilter = .all
     @State private var game: GameKey?
     /// 和首屏一样：滚到过就算看过，离开这一页时统一写库。
@@ -482,6 +492,7 @@ struct WalletAllTicketsView: View {
                             }
                         },
                         onDelete: { onDelete(item) },
+                        onEdit: { editTarget = EntryDraft.load(batchId: item.id, context: context) },
                         onCelebrate: onCelebrate,
                         draw: drawStore.draw(for: item.game, expect: item.expect)
                     )
@@ -495,7 +506,10 @@ struct WalletAllTicketsView: View {
             .padding(.bottom, 40)
         }
         .background(Palette.canvas)
-        .navigationTitle("全部电子票")
+        .sheet(item: $editTarget) { draft in
+            EntryFlowView(draft: draft)
+        }
+        .navigationTitle("全部票据")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { status = initialFilter }
         .onDisappear {

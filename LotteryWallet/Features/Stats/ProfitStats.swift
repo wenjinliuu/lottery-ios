@@ -1,8 +1,8 @@
 import Foundation
 
-/// 盈亏图的时间范围。
+/// 收支图的时间范围。
 ///
-/// 近 7 天对买彩票这件事来说太短了 —— 一周可能就一两次开奖，图上没东西可看。
+/// 近 7 天对彩票这件事来说太短了 —— 一周可能就一两次开奖，图上没东西可看。
 enum ProfitRange: String, CaseIterable, Identifiable {
     case month = "month"
     case half = "183"
@@ -45,7 +45,7 @@ struct SettledEntry: Hashable, Sendable {
     var net: Double { prize - cost }
 }
 
-/// 一天的盈亏汇总。
+/// 一天的收支汇总。
 struct ProfitDay: Identifiable, Hashable {
     var date: String
     var day: Date
@@ -77,6 +77,9 @@ struct ProfitSeries {
     var days: [ProfitDay] = []
     var costTotal: Double = 0
     var prizeTotal: Double = 0
+    /// 公益金合计。**必须逐条按彩种算**，不能拿 `costTotal` 乘一个固定比例 ——
+    /// 八个彩种的提取比例有四档，见 `GameKey.welfareRate`。
+    var welfareTotal: Double = 0
     var settledCount: Int = 0
     var closingBalance: Double = 0
     var rangeLabel: String = ""
@@ -113,7 +116,7 @@ enum ProfitStats {
         }
     }
 
-    // MARK: - 累计盈亏折线
+    // MARK: - 累计收支折线
 
     /// 只在**有记录的日子**上打点，不再逐日填充空白天。
     /// 逐日填充在跨度大时会生成上万个点，既拖慢渲染又没有信息量。
@@ -151,6 +154,7 @@ enum ProfitStats {
 
         var costTotal = 0.0
         var prizeTotal = 0.0
+        var welfareTotal = 0.0
         var settledCount = 0
         for day in visible {
             let items = byDay[day] ?? []
@@ -161,6 +165,7 @@ enum ProfitStats {
             for item in items {
                 cost += item.cost
                 prize += item.prize
+                welfareTotal += item.cost * item.game.welfareRate
                 if item.isWon { won += 1 }
                 var spend = byGame[item.game] ?? GameSpend(game: item.game, cost: 0, prize: 0, count: 0)
                 spend.cost += item.cost
@@ -185,6 +190,7 @@ enum ProfitStats {
         return ProfitSeries(days: downsample(points),
                             costTotal: costTotal,
                             prizeTotal: prizeTotal,
+                            welfareTotal: welfareTotal,
                             settledCount: settledCount,
                             closingBalance: balance,
                             rangeLabel: range.label)
