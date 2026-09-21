@@ -120,6 +120,10 @@ enum LotteryDataError: LocalizedError {
             "开奖数据格式不对"
         case .noData:
             "还没有可显示的开奖数据"
+        case .contractViolation(let endpoint, let problems):
+            // 这句是给人看的，而且**必须说清差在哪** —— 一句「格式不对」
+            // 没法判断该去查服务端还是查客户端。
+            "\(endpoint) 的响应不符合约定格式：\(problems.joined(separator: "、"))"
         }
     }
 
