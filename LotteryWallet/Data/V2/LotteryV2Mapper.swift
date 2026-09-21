@@ -130,6 +130,25 @@ enum LotteryV2Mapper {
                             basisIssue: item.basisIssue.text)
     }
 
+    // MARK: - 数据源体检
+
+    /// `ok` 和 `status` 两套字段哪套来了用哪套 —— 见 `LotteryV2.Health`
+    /// 里为什么不能假定只有一种。
+    static func health(_ item: LotteryV2.Health) -> DataSourceHealth {
+        let healthy: Bool?
+        if let ok = item.ok {
+            healthy = ok
+        } else if let status = item.status?.lowercased() {
+            healthy = ["ok", "healthy", "up", "pass", "success"].contains(status)
+        } else {
+            healthy = nil
+        }
+        return DataSourceHealth(isHealthy: healthy,
+                                message: item.message ?? "",
+                                updatedAt: item.updatedAt ?? item.generatedAt ?? "",
+                                gameCount: item.results?.count ?? 0)
+    }
+
     // MARK: - 年度日历
 
     /// 把扁平的 `entries` 还原成按彩种分组的年度日历。

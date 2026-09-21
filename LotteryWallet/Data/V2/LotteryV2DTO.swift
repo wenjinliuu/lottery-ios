@@ -216,3 +216,49 @@ extension LotteryV2 {
         }
     }
 }
+
+// MARK: - 数据源健康
+
+extension LotteryV2 {
+    /// `/v2/health`：**数据源自己的体检报告**，不是开奖数据。
+    ///
+    /// 用处只有一个场景：用户说「开奖号怎么没更新」时，用来分清是谁的锅 ——
+    /// 它说正常就是 App 这边的事（缓存没刷、请求失败），它说抓取卡住了就是
+    /// 后端的事，App 怎么重试都没用。
+    ///
+    /// **绝不进冷启动。** 文档 §3.5 明确要求，而上一版恰恰违反了这条：
+    /// 每次启动都拉一次 `health.json`，拉回来却没有任何界面读过。
+    /// 现在只有用户打开「设置 → 开奖数据」时才请求一次。
+    ///
+    /// 字段写得很宽，因为**没有一份可信的 schema**：文档没给，
+    /// GitHub 上也没有 `public_data/v2/health.json`（404，V2 镜像缺这一个）。
+    /// 唯一能参考的是 V1 的 `public_data/health.json`，它用的是
+    /// `ok` / `message` / `updated_at`。所以这里 `ok` 和 `status`、
+    /// `updated_at` 和 `generated_at` 两套都认，哪套来了用哪套。
+    struct Health: Decodable, Sendable {
+        var ok: Bool?
+        var status: String?
+        var message: String?
+        var updatedAt: String?
+        var generatedAt: String?
+        var results: [HealthResult]?
+
+        enum CodingKeys: String, CodingKey {
+            case ok, status, message, results
+            case updatedAt = "updated_at"
+            case generatedAt = "generated_at"
+        }
+    }
+
+    struct HealthResult: Decodable, Sendable {
+        var lotteryType: String?
+        var issue: FlexibleText?
+        var drawDate: String?
+
+        enum CodingKeys: String, CodingKey {
+            case issue
+            case lotteryType = "lottery_type"
+            case drawDate = "draw_date"
+        }
+    }
+}

@@ -14,7 +14,6 @@ struct SettingsView: View {
     @State private var isImporting = false
     @State private var exportDocument: BackupDocument?
     @State private var isClearConfirmPresented = false
-    @State private var isRefreshing = false
     @State private var isBusy = false
     @State private var busyLabel = ""
 
@@ -41,50 +40,29 @@ struct SettingsView: View {
                     }
                 }
 
+                // 「数据状态」和「数据备份」原来是分开的两组，可是在用户心里
+                // 它们是同一件事：我的数据现在什么样、怎么带走、怎么清掉。
+                // 分成两组只是因为它们是分两次做出来的。这里合成一组。
+                //
+                // 开奖数据只留**更新时间**一行 —— 日常要判断的就这一件事。
+                // 数据来源、数据源状态、日历取到哪一年了，都是出问题才关心的，
+                // 收进详情页（`DrawDataView`）。原来那行「往期缓存 N 个彩种」
+                // 去掉了：往期本来就是按需取的，那个数字既不该是 8、也不代表
+                // 任何异常，放在这儿只会让人以为少了什么。
                 Section {
-                    LabeledContent {
-                        Text(drawStore.latestUpdatedAt.isEmpty ? "暂无" : DateText.friendly(drawStore.latestUpdatedAt))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    NavigationLink {
+                        DrawDataView()
                     } label: {
-                        row("arrow.down.circle.fill", .blue, "开奖数据")
-                    }
-
-                    LabeledContent {
-                        Text(drawStore.schedules.isEmpty ? "未获取" : "正常")
-                            .font(.footnote)
-                            .foregroundStyle(drawStore.schedules.isEmpty ? Palette.warning : Color.secondary)
-                    } label: {
-                        row("calendar", .red, "开奖日程")
-                    }
-
-                    LabeledContent {
-                        // 往期是按需加载的，这里显示的是「已经取过几个彩种」，
-                        // 不是「应该取满八个」——  没打开过的彩种本来就不该取。
-                        Text("\(loadedRecentCount) 个彩种")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } label: {
-                        row("externaldrive.fill", .gray, "往期缓存")
-                    }
-
-                    Button {
-                        refreshData()
-                    } label: {
-                        HStack {
-                            row("arrow.clockwise", .teal, "刷新开奖数据")
-                            Spacer()
-                            if isRefreshing { ProgressView() }
+                        LabeledContent {
+                            Text(drawStore.latestUpdatedAt.isEmpty
+                                 ? "暂无" : DateText.friendly(drawStore.latestUpdatedAt))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } label: {
+                            row("arrow.down.circle.fill", .blue, "开奖数据")
                         }
                     }
-                    .disabled(isRefreshing)
-                } header: {
-                    Text("数据状态")
-                } footer: {
-                    Text("开奖数据来自公开仓库 lottery-data-repo，应用只读取、不上传任何内容。")
-                }
 
-                Section {
                     LabeledContent {
                         Text("\(records.count) 条")
                             .font(.footnote)
@@ -94,11 +72,11 @@ struct SettingsView: View {
                     }
 
                     Button { export() } label: {
-                        row("square.and.arrow.up.fill", .blue, "导出备份")
+                        row("square.and.arrow.up.fill", .green, "导出备份")
                     }
 
                     Button { isImporting = true } label: {
-                        row("square.and.arrow.down.fill", .green, "导入备份")
+                        row("square.and.arrow.down.fill", .teal, "导入备份")
                     }
 
                     Button(role: .destructive) {
@@ -107,7 +85,7 @@ struct SettingsView: View {
                         row("trash.fill", .red, "清空全部记录", tint: .red)
                     }
                 } header: {
-                    Text("数据备份")
+                    Text("数据")
                 } footer: {
                     Text(backupFooter)
                 }
@@ -204,23 +182,7 @@ struct SettingsView: View {
         return "上次备份：\(days) 天前。"
     }
 
-    /// 已经取过最近开奖的彩种数量。
-    private var loadedRecentCount: Int {
-        drawStore.recentStates.values.filter { $0 == .loaded }.count
-    }
-
     // MARK: - 动作
-
-    private func refreshData() {
-        Task {
-            isRefreshing = true
-            await drawStore.refresh()
-            // 只刷新用户已经看过的那几个彩种，不顺手把没看过的也拉下来。
-            await drawStore.refreshLoadedRecents()
-            isRefreshing = false
-            showToast("数据状态已更新")
-        }
-    }
 
     private func export() {
         let service = BackupService(context: context)

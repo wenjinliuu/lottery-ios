@@ -205,6 +205,51 @@ final class LotteryV2DecodingTests: XCTestCase {
         XCTAssertFalse(first.isOnSale(at: after))
     }
 
+    // MARK: - 数据源体检
+
+    /// V1 的 `health.json` 用 `ok` + `updated_at`，实测就长这样。
+    func testHealthAcceptsOkBool() throws {
+        let json = """
+        {"schema":"random_draw_agent_public_data_health","version":1,
+         "ok":true,"updated_at":"2026-09-21T00:52:29.144+08:00",
+         "message":"exported_from_cloudbase",
+         "results":[{"lottery_type":"ssq","issue":"2026109","draw_date":"2026-09-20"},
+                    {"lottery_type":"kl8","issue":"2026253","draw_date":"2026-09-20"}]}
+        """
+        let health = LotteryV2Mapper.health(try decode(LotteryV2.Health.self, Data(json.utf8)))
+        XCTAssertEqual(health.isHealthy, true)
+        XCTAssertEqual(health.label, "正常")
+        XCTAssertEqual(health.message, "exported_from_cloudbase")
+        XCTAssertEqual(health.gameCount, 2)
+    }
+
+    /// 文档没给 `/v2/health` 的 schema，GitHub 的 V2 镜像里也没有这个文件，
+    /// 所以另一种常见写法（`status` 字符串 + `generated_at`）也必须认。
+    func testHealthAcceptsStatusString() throws {
+        let json = """
+        {"status":"ok","generated_at":"2026-09-21T00:00:00+08:00","message":"fine"}
+        """
+        let health = LotteryV2Mapper.health(try decode(LotteryV2.Health.self, Data(json.utf8)))
+        XCTAssertEqual(health.isHealthy, true)
+        XCTAssertEqual(health.updatedAt, "2026-09-21T00:00:00+08:00")
+    }
+
+    func testHealthReportsNotOk() throws {
+        let json = """
+        {"ok": false, "message": "scrape stalled"}
+        """
+        let health = LotteryV2Mapper.health(try decode(LotteryV2.Health.self, Data(json.utf8)))
+        XCTAssertEqual(health.isHealthy, false)
+        XCTAssertEqual(health.label, "异常")
+    }
+
+    /// 两套字段都没有时不许瞎猜「正常」——  那会把故障说成健康。
+    func testHealthWithoutAnyFlagIsUnknown() throws {
+        let health = LotteryV2Mapper.health(try decode(LotteryV2.Health.self, Data("{}".utf8)))
+        XCTAssertNil(health.isHealthy)
+        XCTAssertEqual(health.label, "未知")
+    }
+
     func testJoinDateTimeLeavesCompleteValuesAlone() {
         XCTAssertEqual(LotteryV2Mapper.joinDateTime("2026-01-01", "21:15:00"), "2026-01-01 21:15:00")
         // 已经是完整时刻就别再拼一次

@@ -219,6 +219,52 @@ final class ProgressiveLoadingTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.count("v2/calendar/\(ChinaClock.year() + 1)"), 1)
     }
 
+    // MARK: - 数据源体检
+
+    /// health **只有用户打开「开奖数据」详情页才请求**，而且只打 CloudBase。
+    func testHealthIsOnDemandAndCloudBaseOnly() async {
+        StubURLProtocol.stub("v2/bootstrap", body: LotteryV2Fixtures.bootstrap)
+        StubURLProtocol.stub("v2/health", body: Data("""
+        {"ok": true, "updated_at": "2026-09-21T00:00:00+08:00", "message": "ok"}
+        """.utf8))
+        let store = makeStore()
+
+        await store.bootstrap()
+        XCTAssertEqual(StubURLProtocol.count("v2/health"), 0, "冷启动不该碰 health")
+        XCTAssertNil(store.health)
+
+        await store.loadHealth()
+        XCTAssertEqual(StubURLProtocol.count("v2/health"), 1)
+        XCTAssertEqual(store.health?.isHealthy, true)
+        // 它问的就是主数据源自己，不该回落到别处去问
+        XCTAssertEqual(StubURLProtocol.count("v2/health.json"), 0)
+    }
+
+    /// 已经查过就不重复查，除非明确要求。
+    func testHealthIsNotRefetched() async {
+        StubURLProtocol.stub("v2/health", body: Data("{\"ok\": true}".utf8))
+        let store = makeStore()
+        await store.loadHealth()
+        await store.loadHealth()
+        XCTAssertEqual(StubURLProtocol.count("v2/health"), 1)
+
+        await store.loadHealth(force: true)
+        XCTAssertEqual(StubURLProtocol.count("v2/health"), 2)
+    }
+
+    /// 查不到 health 不能影响别的东西 —— 它只是个诊断项。
+    func testHealthFailureIsContained() async {
+        StubURLProtocol.stub("v2/bootstrap", body: LotteryV2Fixtures.bootstrap)
+        let store = makeStore()
+        await store.bootstrap()
+        await store.loadHealth()   // 没配桩，必然失败
+
+        XCTAssertTrue(store.healthState.hasFailed)
+        XCTAssertNil(store.health)
+        XCTAssertEqual(store.bootstrapState, .loaded)
+        XCTAssertNotNil(store.latestDraw(for: .ssq))
+    }
+
     // MARK: - 三级降级
 
     /// CloudBase 成功时**不该再碰 GitHub**。

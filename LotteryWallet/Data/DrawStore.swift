@@ -94,6 +94,9 @@ final class DrawStore {
     private(set) var exhaustedHistory: Set<GameKey> = []
     /// 最近一次成功取数的来源，只用于诊断。
     private(set) var lastSource: LotteryDataSource?
+    /// 数据源体检结果。**只有用户打开「开奖数据」详情页才会有值。**
+    private(set) var health: DataSourceHealth?
+    private(set) var healthState: LoadState = .idle
 
     /// 各彩种最早支持翻到哪一年。再往前服务端也没有数据，别无限往下探。
     static let earliestYear = 2003
@@ -291,6 +294,25 @@ final class DrawStore {
         await loadCalendar(year: year)
         if ChinaClock.month(now) == 12 {
             await loadCalendar(year: year + 1)
+        }
+    }
+
+    // MARK: - 数据源体检
+
+    /// 问一次数据源「你那边现在正不正常」。
+    ///
+    /// **只能从「设置 → 开奖数据」这一个地方调，绝不进冷启动。**
+    /// 上一版每次启动都拉一次 health，而拉回来的东西从头到尾没有界面读过。
+    func loadHealth(force: Bool = false) async {
+        if !force, healthState == .loaded { return }
+        if healthState == .loading { return }
+        healthState = .loading
+        do {
+            health = LotteryV2Mapper.health(try await repository.health())
+            healthState = .loaded
+        } catch {
+            health = nil
+            healthState = .failed(message(for: error))
         }
     }
 

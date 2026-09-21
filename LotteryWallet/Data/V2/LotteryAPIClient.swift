@@ -50,12 +50,30 @@ actor LotteryAPIClient {
         }
     }
 
-    private func get(_ url: URL) async throws -> Data {
+    /// 数据源体检。**只打 CloudBase，不走 GitHub 兜底，也不进缓存。**
+    ///
+    /// 三个「不」都是有意的：
+    /// - 它问的就是 CloudBase 自己的状态，回落到别处问等于换了个人回答；
+    /// - GitHub 的 V2 镜像里根本没有这个文件（404）；
+    /// - 缓存一份体检报告毫无意义 —— 要的就是「此刻」。
+    ///
+    /// 它也**不是任何端点**（`LotteryEndpoint` 里没有 health 这一项），
+    /// 这样它在结构上就不可能被误接进冷启动。
+    func fetchHealth() async throws -> LotteryV2.Health {
+        let data = try await get(cloudBase.appendingPathComponent("v2/health"), timeout: 10)
+        do {
+            return try JSONDecoder().decode(LotteryV2.Health.self, from: data)
+        } catch {
+            throw LotteryDataError.decoding(String(describing: error))
+        }
+    }
+
+    private func get(_ url: URL, timeout: TimeInterval = 15) async throws -> Data {
         var request = URLRequest(url: url)
         // 这一层自己管缓存（见 `LotteryCache`），不要让 URLSession 再存一份：
         // 两套缓存各有各的过期判断，出问题时根本说不清界面上那份是谁给的。
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.timeoutInterval = 15
+        request.timeoutInterval = timeout
         request.httpMethod = "GET"
 
         let (data, response) = try await session.data(for: request)

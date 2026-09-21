@@ -112,6 +112,12 @@ actor LotteryRepository {
         }
     }
 
+    /// 数据源体检。**不缓存、不兜底、不属于任何端点**，理由见
+    /// `LotteryAPIClient.fetchHealth`。只有用户打开「开奖数据」详情页才会调。
+    func health() async throws -> LotteryV2.Health {
+        try await client.fetchHealth()
+    }
+
     /// 缓存写入时间，设置页「数据状态」用。
     func cacheDate(_ endpoint: LotteryEndpoint) async -> Date? {
         await cache.savedAt(endpoint)
