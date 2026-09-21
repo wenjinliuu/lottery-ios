@@ -4,19 +4,19 @@ import Foundation
 /// V2 四个端点的样例响应。
 ///
 /// **全部裁剪自真实响应**（`public_data/v2` 上的实际文件，和 CloudBase 同构），
-/// 不是照着文档手写的。这一点很要紧 —— 文档和实际至少有三处对不上：
+/// 不是照着文档手写的。这一点当初救了命 —— 那时文档和实际有三处对不上，
+/// 每一处都足以让对应端点静默失效：`latest.*.time` 文档里有实际没有、
+/// `year` 文档说数字实际是字符串、日历的结构整个不同。
 ///
-/// - `latest.*.time` 文档里有，实际一个都没有（开奖时刻在 `schedule` 上）；
-/// - `by-year` / `calendar` 的 `year` 文档里是数字，实际是**字符串**；
-/// - `calendar` 的结构整个不同：扁平数组，时刻不带日期。
-///
-/// 照文档手写 fixture 的话，这三处一个都测不出来，而它们每一个都足以让
-/// 对应端点静默失效。
+/// 数据端后来把这三处都对齐了（`year` 统一成数字、新增 `earliest_year`），
+/// 但 fixture 仍然按「照着真实响应写」这条规矩维护，并且**新旧两种都留着** ——
+/// GitHub 镜像要等下一次导出才会更新，在那之前读到的还是旧格式。
 enum LotteryV2Fixtures {
 
     static var bootstrap: Data { Data(bootstrapJSON.utf8) }
     static var recentDraws: Data { Data(recentJSON.utf8) }
     static var yearDraws: Data { Data(yearJSON.utf8) }
+    static var legacyYearDraws: Data { Data(legacyYearJSON.utf8) }
     static var calendar: Data { Data(calendarJSON.utf8) }
 
     static let bootstrapJSON = """
@@ -128,13 +128,14 @@ enum LotteryV2Fixtures {
     }
     """
 
-    /// 注意 `"year": "2026"` —— **字符串**，不是文档里写的数字。
+    /// 现行契约：`year` / `earliest_year` 都是 **JSON 数字**。
     static let yearJSON = """
     {
       "schema": "duigehao.lottery.year",
       "version": 2,
       "lottery_type": "ssq",
-      "year": "2026",
+      "year": 2026,
+      "earliest_year": 2026,
       "generated_at": "2026-09-21T00:52:29.144+08:00",
       "draws": [
         {
@@ -158,7 +159,7 @@ enum LotteryV2Fixtures {
     {
       "schema": "duigehao.lottery.calendar",
       "version": 2,
-      "year": "2026",
+      "year": 2026,
       "generated_at": "2026-09-21T00:52:29.144+08:00",
       "entries": [
         {"lottery_type": "kl8", "issue": "2026001", "date": "2026-01-01",
@@ -172,6 +173,57 @@ enum LotteryV2Fixtures {
       ]
     }
     """
+
+    /// 迁移之前生成的 GitHub 镜像：`year` 是**字符串**，而且没有
+    /// `earliest_year`。这份还会在镜像重新导出之前被读到，不能解码失败，
+    /// 也不能因为少了边界字段就乱判断。
+    static let legacyYearJSON = """
+    {
+      "schema": "duigehao.lottery.year",
+      "version": 2,
+      "lottery_type": "ssq",
+      "year": "2026",
+      "generated_at": "2026-09-21T00:52:29.144+08:00",
+      "draws": [
+        {
+          "issue": "2026109", "date": "2026-09-20",
+          "numbers": {"red": [9, 12, 15, 26, 30, 33], "blue": [6]},
+          "fetched_at": "2026-09-20T21:34:06.201+08:00"
+        }
+      ]
+    }
+    """
+
+    /// 按年响应的构造器。
+    ///
+    /// 渐进式加载那组用例要分别控制**年份**、**边界**和**空不空**，
+    /// 写死一份 fixture 不够用 —— 而这三样恰恰决定了「还能不能往前翻」。
+    static func yearPayload(year: Int, earliestYear: Int?, empty: Bool = false) -> Data {
+        let boundary = earliestYear.map { "\n      \"earliest_year\": \($0)," } ?? ""
+        let draws = empty ? "" : """
+
+              {
+                "issue": "\(year)109", "date": "\(year)-09-20",
+                "numbers": {"red": [9, 12, 15, 26, 30, 33], "blue": [6]},
+                "fetched_at": "\(year)-09-20T21:34:06.201+08:00"
+              },
+              {
+                "issue": "\(year)001", "date": "\(year)-01-01",
+                "numbers": {"red": [1, 2, 3, 4, 5, 6], "blue": [7]},
+                "fetched_at": "\(year)-01-01T22:00:00+08:00"
+              }
+        """
+        return Data("""
+        {
+          "schema": "duigehao.lottery.year",
+          "version": 2,
+          "lottery_type": "ssq",
+          "year": \(year),\(boundary)
+          "generated_at": "\(year)-09-21T00:52:29.144+08:00",
+          "draws": [\(draws)]
+        }
+        """.utf8)
+    }
 
     /// 空到不能再空的一份 bootstrap：字段能省的全省了。
     /// 服务端省略空值是常态，这种响应不能把解码打挂。

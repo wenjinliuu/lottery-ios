@@ -156,20 +156,30 @@ extension LotteryV2 {
 
     /// `/v2/by-year/{type}/{year}`。
     ///
-    /// **`year` 必须按字符串读。** 文档的示例里它是数字（`"year": 2026`），
-    /// 而实际返回的是字符串（`"year": "2026"`）。写成 `Int?` 的话整份响应
-    /// 解码失败 —— 表现是「查看今年全部」永远没反应，而且不报任何错。
+    /// **`year` 和 `earliest_year` 都按 `FlexibleText` 读。**
+    /// 新契约里它们是 JSON 数字，但迁移之前已经生成的 GitHub 镜像里
+    /// `year` 是字符串（`"year": "2026"`）。写死 `Int?` 的话，读到旧镜像时
+    /// 整份响应解码失败 —— 表现是「查看今年全部」永远没反应，而且不报任何错。
+    /// 两种都吃，代价只是一次 `Int(...)`。
     struct YearPayload: Decodable, Sendable {
         var schema: String?
         var version: Int?
         var lotteryType: String?
         var year: FlexibleText?
+        /// 这个彩种在数据源里**真实存在的最早年份**。
+        ///
+        /// 有了它，「还能不能往前翻」就是一个事实而不是猜测。
+        /// 在它出现之前，客户端只能靠「某一年返回空就算到头」—— 而中间年份
+        /// 恰好为空（某彩种停办过一年）时那个猜测是错的。
+        /// 旧镜像没有这个字段，所以仍然是 Optional。
+        var earliestYear: FlexibleText?
         var generatedAt: String?
         var draws: [DrawItem]?
 
         enum CodingKeys: String, CodingKey {
             case schema, version, year, draws
             case lotteryType = "lottery_type"
+            case earliestYear = "earliest_year"
             case generatedAt = "generated_at"
         }
     }

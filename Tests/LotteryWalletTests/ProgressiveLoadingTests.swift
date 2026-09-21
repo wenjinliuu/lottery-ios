@@ -27,7 +27,9 @@ final class ProgressiveLoadingTests: XCTestCase {
         for game in GameKey.ordered {
             StubURLProtocol.stub("v2/draws/\(game.apiKey)", body: LotteryV2Fixtures.recentDraws)
             for year in (ChinaClock.year() - 3)...ChinaClock.year() {
-                StubURLProtocol.stub("v2/by-year/\(game.apiKey)/\(year)", body: LotteryV2Fixtures.yearDraws)
+                StubURLProtocol.stub("v2/by-year/\(game.apiKey)/\(year)",
+                                     body: LotteryV2Fixtures.yearPayload(
+                                        year: year, earliestYear: ChinaClock.year() - 5))
             }
         }
         for year in (ChinaClock.year() - 1)...(ChinaClock.year() + 1) {
@@ -165,18 +167,50 @@ final class ProgressiveLoadingTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.count("v2/by-year/ssq/\(year)"), 1)
     }
 
-    /// 某一年一条都没有，就说明到头了，不该再给「加载更早」。
-    func testEmptyYearEndsTheHistory() async {
-        StubURLProtocol.stub("v2/by-year/ssq/\(ChinaClock.year())",
-                             body: Data("""
-                             {"schema":"duigehao.lottery.year","version":2,
-                              "lottery_type":"ssq","year":"2026","draws":[]}
-                             """.utf8))
+    /// 服务端给了 `earliest_year`，就按它定边界，不用猜。
+    func testEarliestYearDefinesTheBoundary() async {
+        let year = ChinaClock.year()
+        StubURLProtocol.stub("v2/by-year/ssq/\(year)",
+                             body: LotteryV2Fixtures.yearPayload(year: year, earliestYear: year))
         let store = makeStore()
         await store.loadOlderHistory(for: .ssq)
 
-        XCTAssertFalse(store.hasMoreHistory(for: .ssq))
+        XCTAssertEqual(store.earliestYears[.ssq], year)
+        XCTAssertFalse(store.hasMoreHistory(for: .ssq), "已经翻到数据源的最早年份了")
         XCTAssertNil(store.nextYearToLoad(for: .ssq))
+    }
+
+    /// **中间某一年为空不代表到头了。**
+    ///
+    /// 某彩种可能停办过一年。只要 `earliest_year` 还在更前面，就得接着往前翻 ——
+    /// 拿「这一年是空的」当终点，会把更早的历史整个藏起来。
+    func testEmptyMiddleYearKeepsGoingWhenBoundaryIsKnown() async {
+        let year = ChinaClock.year()
+        StubURLProtocol.stub("v2/by-year/ssq/\(year)",
+                             body: LotteryV2Fixtures.yearPayload(year: year, earliestYear: year - 3))
+        StubURLProtocol.stub("v2/by-year/ssq/\(year - 1)",
+                             body: LotteryV2Fixtures.yearPayload(year: year - 1,
+                                                                 earliestYear: year - 3, empty: true))
+        let store = makeStore()
+        await store.loadOlderHistory(for: .ssq)
+        await store.loadOlderHistory(for: .ssq)
+
+        XCTAssertTrue(store.hasMoreHistory(for: .ssq), "空的那一年不该把更早的历史挡掉")
+        XCTAssertEqual(store.nextYearToLoad(for: .ssq), year - 2)
+    }
+
+    /// 旧镜像没有 `earliest_year`，只能退回「这一年空了就算到头」。
+    ///
+    /// GitHub 上那份要等下一次导出才带上这个字段，在那之前读到的就是这样。
+    func testEmptyYearEndsHistoryWhenBoundaryIsUnknown() async {
+        let year = ChinaClock.year()
+        StubURLProtocol.stub("v2/by-year/ssq/\(year)",
+                             body: LotteryV2Fixtures.yearPayload(year: year, earliestYear: nil, empty: true))
+        let store = makeStore()
+        await store.loadOlderHistory(for: .ssq)
+
+        XCTAssertNil(store.earliestYears[.ssq])
+        XCTAssertFalse(store.hasMoreHistory(for: .ssq))
     }
 
     /// 最近 30 期和年度数据按期号去重，并按日期倒序。

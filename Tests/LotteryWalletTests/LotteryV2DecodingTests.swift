@@ -146,12 +146,23 @@ final class LotteryV2DecodingTests: XCTestCase {
         XCTAssertFalse(latest.drawValues[.red].isEmpty)
     }
 
-    /// **`year` 实际是字符串**，文档里写的是数字。
-    /// 按 `Int` 解的话整份响应解码失败，「查看今年全部」永远没反应。
-    func testYearPayloadAcceptsStringYear() throws {
+    /// 现行契约：`year` / `earliest_year` 都是 JSON 数字。
+    func testYearPayloadReadsNumericYearAndBoundary() throws {
         let payload = try decode(LotteryV2.YearPayload.self, LotteryV2Fixtures.yearDraws)
         XCTAssertEqual(payload.year.text, "2026")
+        XCTAssertEqual(payload.earliestYear.text, "2026")
         XCTAssertEqual(LotteryV2Mapper.draws(payload.draws, game: .ssq).count, 2)
+    }
+
+    /// 迁移之前生成的 GitHub 镜像：`year` 是**字符串**，没有 `earliest_year`。
+    ///
+    /// 镜像要等下一次导出才更新，在那之前读到的就是这一份。写死 `Int?` 的话
+    /// 整份响应解码失败 —— 表现是「查看今年全部」永远没反应，而且不报错。
+    func testYearPayloadStillReadsLegacyStringYear() throws {
+        let payload = try decode(LotteryV2.YearPayload.self, LotteryV2Fixtures.legacyYearDraws)
+        XCTAssertEqual(payload.year.text, "2026")
+        XCTAssertTrue(payload.earliestYear.text.isEmpty)
+        XCTAssertEqual(LotteryV2Mapper.draws(payload.draws, game: .ssq).count, 1)
     }
 
     // MARK: - 年度日历

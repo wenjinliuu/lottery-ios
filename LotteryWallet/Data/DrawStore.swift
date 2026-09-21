@@ -90,7 +90,12 @@ final class DrawStore {
     private(set) var recentStates: [GameKey: LoadState] = [:]
     private(set) var yearStates: [GameKey: [Int: LoadState]] = [:]
     private(set) var calendarStates: [Int: LoadState] = [:]
-    /// 已经确认「再往前没有了」的彩种。翻到最早那一年之后就不再给「加载更早」。
+    /// 服务端给的「这个彩种真实存在的最早年份」（`by-year` 的 `earliest_year`）。
+    ///
+    /// 有它就按它来，**不再靠猜**。
+    private(set) var earliestYears: [GameKey: Int] = [:]
+    /// 靠猜得出的「再往前没有了」：只在服务端**没给** `earliest_year` 时用
+    /// （迁移前生成的 GitHub 镜像没有这个字段）。
     private(set) var exhaustedHistory: Set<GameKey> = []
     /// 最近一次成功取数的来源，只用于诊断。
     private(set) var lastSource: LotteryDataSource?
@@ -98,8 +103,9 @@ final class DrawStore {
     private(set) var health: DataSourceHealth?
     private(set) var healthState: LoadState = .idle
 
-    /// 各彩种最早支持翻到哪一年。再往前服务端也没有数据，别无限往下探。
-    static let earliestYear = 2003
+    /// 服务端没给 `earliest_year` 时的兜底下限，防止无限往前探。
+    /// 只在读旧镜像时才会用到。
+    static let fallbackEarliestYear = 2003
 
     // MARK: - 索引
 
@@ -218,12 +224,20 @@ final class DrawStore {
 
     /// 下一次「加载更早」该取哪一年。今年还没取就是今年，
     /// 否则是已取到的最早那年再往前一年。
+    ///
+    /// 下限优先用服务端给的 `earliest_year`。**它在的时候不看「空年份」那条
+    /// 猜测** —— 中间某一年恰好没有数据（某彩种停办过一年）是可能的，
+    /// 拿它当终点会把更早的历史整个藏起来。只有读到没有这个字段的旧镜像时，
+    /// 才退回「空年份即到头」加一个硬下限。
     func nextYearToLoad(for game: GameKey, now: Date = Date()) -> Int? {
-        guard !exhaustedHistory.contains(game) else { return nil }
         let current = ChinaClock.year(now)
-        guard let earliest = loadedYears(for: game).min() else { return current }
+        let floor = earliestYears[game] ?? Self.fallbackEarliestYear
+        if earliestYears[game] == nil, exhaustedHistory.contains(game) { return nil }
+        guard let earliest = loadedYears(for: game).min() else {
+            return current >= floor ? current : nil
+        }
         let candidate = earliest - 1
-        return candidate >= Self.earliestYear ? candidate : nil
+        return candidate >= floor ? candidate : nil
     }
 
     func hasMoreHistory(for game: GameKey, now: Date = Date()) -> Bool {
@@ -241,8 +255,13 @@ final class DrawStore {
             let converted = LotteryV2Mapper.draws(loaded.value.draws, game: game)
             merge(converted)
             yearStates[game, default: [:]][year] = .loaded
-            // 这一年一条都没有，说明再往前也不会有了。
-            if converted.isEmpty { exhaustedHistory.insert(game) }
+            if let earliest = Int(loaded.value.earliestYear.text) {
+                // 服务端直接告诉了我们边界，那就不需要猜。
+                earliestYears[game] = earliest
+            } else if converted.isEmpty {
+                // 旧镜像没有 `earliest_year`，只能沿用「这一年空了就算到头」。
+                exhaustedHistory.insert(game)
+            }
         } catch {
             yearStates[game, default: [:]][year] = .failed(message(for: error))
         }
