@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 import Charts
 
-/// 统计：按年或按月查看盈亏、彩种占比、全年彩种堆叠与每日明细。
+/// 统计：按年或按月查看收支、彩种占比、全年彩种堆叠与每日明细。
 struct StatsView: View {
     @Query(sort: \TicketRecord.createdAt, order: .reverse) private var records: [TicketRecord]
 
@@ -89,11 +89,11 @@ struct StatsView: View {
 
     private var kpiGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 2), spacing: 12) {
-            // 数值本身用 primary。原来给"投入""中奖率"传的是 .secondary，
+            // 数值本身用 primary。原来给"票面金额""中奖率"传的是 .secondary，
             // KPI 最该看清的那个数字反而是灰的。
-            kpi("投入", MoneyText.format(stats.cost), "cart", .primary)
+            kpi("票面金额", MoneyText.format(stats.cost), "cart", .primary)
             kpi("奖金", MoneyText.format(stats.prize), "trophy", Palette.profit)
-            kpi("盈亏", MoneyText.format(stats.net), "chart.line.uptrend.xyaxis", Palette.profitColor(stats.net))
+            kpi("收支", MoneyText.format(stats.net), "chart.line.uptrend.xyaxis", Palette.profitColor(stats.net))
             kpi("中奖率", String(format: "%.1f%%", stats.winRate), "target", .primary)
         }
     }
@@ -215,8 +215,8 @@ struct StatsView: View {
 
         VStack(spacing: 12) {
             HStack(spacing: 10) {
-                dayTally("赚钱", winning.count, Palette.profit)
-                dayTally("亏钱", losing.count, Palette.loss)
+                dayTally("有结余", winning.count, Palette.profit)
+                dayTally("净支出", losing.count, Palette.loss)
                 dayTally("打平", stats.byDay.count - winning.count - losing.count, .secondary)
             }
 
@@ -324,12 +324,12 @@ struct DayProportionBar: View {
             }
             .frame(height: 8)
 
-            Text("赚钱的日子占 \(Int((Double(win) / Double(total) * 100).rounded()))%")
+            Text("有结余的日子占 \(Int((Double(win) / Double(total) * 100).rounded()))%")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("赚钱 \(win) 天，亏钱 \(lose) 天，打平 \(flat) 天")
+        .accessibilityLabel("有结余 \(win) 天，净支出 \(lose) 天，打平 \(flat) 天")
     }
 
     @ViewBuilder

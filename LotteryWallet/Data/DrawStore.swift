@@ -19,6 +19,13 @@ struct ChinaClock: Sendable {
         // Calendar 的 weekday 是 1...7（周日为 1），换算成 web 版的 0...6。
         return ChinaClock(date: date, clock: clock, weekday: (parts.weekday ?? 1) - 1)
     }
+
+    /// 东八区的当前年份。整年往期按它取 `by-year/{game}/{year}.json`。
+    static func year(_ reference: Date = Date()) -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = DateText.chinaTimeZone
+        return calendar.component(.year, from: reference)
+    }
 }
 
 /// 开奖数据的全局状态：最新一期、往期、日历、仓库健康。
@@ -35,6 +42,15 @@ final class DrawStore {
     private(set) var loadedHistoryGames: Set<GameKey> = []
     /// **尝试过**的彩种，不管成没成。往期页拿它区分「还在加载」和「确实没有」。
     private(set) var attemptedHistoryGames: Set<GameKey> = []
+    /// 已经把**整年**往期拉下来的彩种。
+    ///
+    /// 默认只拉 `draws/{game}.json` 的近 50 期 —— 那是往期页第一屏要的量，
+    /// 拉整年等于一上来就下载十倍的数据、解一遍、再全量渲染，
+    /// 而绝大多数人翻不到第 50 期。用户点了「查看整年」才按需补。
+    private(set) var loadedYearGames: Set<GameKey> = []
+    /// 整年拉取失败的彩种，用来把按钮从「加载中」退回可重试。
+    private(set) var yearLoadFailedGames: Set<GameKey> = []
+    private(set) var loadingYearGames: Set<GameKey> = []
     /// 整年开奖日历，按年缓存。文件是静态的，一年只需要取一次。
     private(set) var yearCalendars: [Int: DrawCalendarYear] = [:]
     private var loadedArchives: Set<ArchiveKey> = []
@@ -172,6 +188,28 @@ final class DrawStore {
             loadedHistoryGames.insert(game)
         }
     }
+
+    /// 按需补齐某个彩种的整年往期。
+    ///
+    /// 仓库里 `draws/{game}.json` 只有最近 50 期，`by-year/{game}/{year}.json`
+    /// 才是整年。两份格式一模一样，`merge` 按期号去重，所以直接叠上去即可。
+    func loadYearHistory(for game: GameKey, year: Int = ChinaClock.year()) async {
+        guard !loadedYearGames.contains(game), !loadingYearGames.contains(game) else { return }
+        loadingYearGames.insert(game)
+        defer { loadingYearGames.remove(game) }
+        guard let yearDraws = try? await client.fetchYearDraws(for: game, year: year),
+              !yearDraws.isEmpty else {
+            yearLoadFailedGames.insert(game)
+            return
+        }
+        yearLoadFailedGames.remove(game)
+        merge(yearDraws)
+        loadedYearGames.insert(game)
+    }
+
+    func isLoadingYear(_ game: GameKey) -> Bool { loadingYearGames.contains(game) }
+    func hasLoadedYear(_ game: GameKey) -> Bool { loadedYearGames.contains(game) }
+    func yearLoadFailed(_ game: GameKey) -> Bool { yearLoadFailedGames.contains(game) }
 
     /// 用户点「重试」：清掉标记再拉一次。
     func reloadHistory(for game: GameKey) async {
@@ -351,7 +389,7 @@ final class DrawStore {
     /// 录入票据时可以绑定的期次。
     ///
     /// 判断顺序刻意把整年日历放在最前面：仓库的 `latest.json` 只带"下一期"，
-    /// 一旦当期停售、开奖号又还没更新，它就只能回一句"本期已截止"，
+    /// 一旦当期停售、开奖号又还没更新，它就只能回一句"没有可绑定的期次"，
     /// 用户在录入页看到的是一个不能保存的死界面。而整年日历里每一期都带
     /// `sale_close_time`，只要顺着往后找第一期还没停售的，永远能给出一个
     /// 可以绑定的期次 —— 过了今天的截止时间就自动落到下一期。
@@ -388,7 +426,8 @@ final class DrawStore {
         }
         if now >= buyEndAt {
             target.isAvailable = false
-            target.message = "本期已截止，请等待下一期数据更新"
+            // 界面上不提销售状态：对用户来说这就是"下一期的数据还没到"。
+            target.message = "下一期的开奖数据还没更新，请稍后刷新"
             return target
         }
         target.isAvailable = true

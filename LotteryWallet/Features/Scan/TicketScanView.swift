@@ -19,8 +19,8 @@ struct TicketScanView: View {
     @Environment(\.modelContext) private var context
     @Environment(DrawStore.self) private var drawStore
     @Environment(AppSettings.self) private var settings
-    @Environment(\.showToast) private var showToast
-    @Environment(\.celebrate) private var celebrate
+    @Environment(ToastCenter.self) private var showToast
+    @Environment(CelebrationCenter.self) private var celebrate
 
     @State private var stage: Stage = .intro
     @State private var detent: PresentationDetent = .medium
@@ -46,6 +46,11 @@ struct TicketScanView: View {
     @State private var debugNotes: [String] = []
     /// 正在改期号 / 改号码的那张票。
     @State private var issuePickerTarget: IssuePickerTarget?
+    /// 用户要求改的票面类型，等确认后转手动录入。
+    @State private var shapeChange: ShapeChangeRequest?
+    /// 盖在复核页上面的那张手动录入抽屉。
+    @State private var manualEntry: ManualEntryHandoff?
+    @State private var isResponsibleAlertPresented = false
     @State private var zoneEditorTarget: ZoneEditorTarget?
 
     enum Stage {
@@ -56,6 +61,20 @@ struct TicketScanView: View {
     /// 所以期号选择器和号码编辑器都提到根视图上，用 item 驱动。
     struct IssuePickerTarget: Identifiable {
         let ticketID: ScannedTicket.ID
+        var id: ScannedTicket.ID { ticketID }
+    }
+
+    /// 改票面类型的请求。
+    struct ShapeChangeRequest: Identifiable {
+        let ticketID: ScannedTicket.ID
+        let shape: TicketShape
+        var id: ScannedTicket.ID { ticketID }
+    }
+
+    /// 转去手动录入时要带的东西，外加「是哪张票转过去的」。
+    struct ManualEntryHandoff: Identifiable {
+        let ticketID: ScannedTicket.ID
+        let reference: EntryReference
         var id: ScannedTicket.ID { ticketID }
     }
 
@@ -144,6 +163,35 @@ struct TicketScanView: View {
         }
         .sheet(item: $issuePickerTarget) { target in
             issuePicker(target)
+        }
+        // 手动录入盖在复核页**上面**，不关掉复核页。
+        // 下滑关掉就回到复核页，这张票原样还在、票型也没动过。
+        .sheet(item: $manualEntry) { handoff in
+            EntryFlowView(reference: handoff.reference,
+                          onSaved: { finishHandoff(handoff) })
+        }
+        // 改票面类型**不做就地转换**，而是转到手动录入重录。
+        //
+        // 单式的每一注是一组独立号码；复式是一个区多选几个号再展开；
+        // 胆拖还要再分出胆码。三种票的号码结构根本不是一回事，
+        // 识别出来的号码没有任何一种安全的转换方式 —— 硬转出来的结果
+        // 必然和用户手里那张票对不上，而这张票后面是要拿来核对中奖的。
+        // 与其给一个「看起来成功了」的错误结果，不如老老实实让人重录一遍。
+        .confirmationDialog("改成\(shapeChange?.shape.label ?? "")？",
+                            isPresented: .init(get: { shapeChange != nil },
+                                               set: { if !$0 { shapeChange = nil } }),
+                            titleVisibility: .visible,
+                            presenting: shapeChange) { request in
+            Button("转去手动录入") { handOffToManualEntry(request) }
+            Button("取消", role: .cancel) { shapeChange = nil }
+        } message: { request in
+            Text("单式票、复式票、胆拖票的号码结构不一样，已经识别出来的号码没法直接换成\(request.shape.label)。接下来会打开手动录入，票面照片和期号都带过去，你对照票面把号码重录一遍即可。不想改就返回，这张票原样保留。")
+        }
+        .alert("理性购彩", isPresented: $isResponsibleAlertPresented) {
+            Button("我已了解") { settings.responsibleAcknowledged = true; importAll() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("本应用仅用于记录和核对你已持有的实体彩票，不销售、不代购、不提供兑奖服务。请理性参与，量力而行。")
         }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
@@ -514,7 +562,7 @@ struct TicketScanView: View {
     /// 现在两边都走 `Game.ticketLabel`，玩法是从**每一注**的集合里取的：
     /// 排列3 的组选票一眼能看出是组选还是直选，快乐8 看得出是选几。
     private func headLabel(_ ticket: ScannedTicket) -> String {
-        ticket.game.ticketLabel(modes: playModes(ticket), shape: ticket.play.label)
+        ticket.game.ticketLabel(modes: playModes(ticket), shape: ticket.play.shape)
     }
 
     /// 这张票上出现过的玩法。
@@ -560,12 +608,7 @@ struct TicketScanView: View {
                 Text(game.label)
                     .font(.headline)
                     .foregroundStyle(game.accent.accentColor)
-                Text(headLabel(value))
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(game.onTint)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(game.tint, in: Capsule())
+                shapeMenu(value)
                 Spacer(minLength: 8)
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) {
@@ -636,7 +679,7 @@ struct TicketScanView: View {
         let matches = printed.map { abs($0 - value.totalCost) < 0.5 }
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("\(value.count) 注 × \(value.multiple) 倍\(value.periods > 1 ? " × \(value.periods) 期" : "")")
+                Text("票面共 \(value.count) 注 × \(value.multiple) 倍\(value.periods > 1 ? " × \(value.periods) 期" : "")")
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -868,21 +911,111 @@ struct TicketScanView: View {
         return "点按从开奖日历里选"
     }
 
+    /// 票头那枚彩色胶囊 —— 同时也是改票面类型的入口。
+    ///
+    /// 它本来就写着这张票是什么（「追加单式票」「组选单式票」），
+    /// 要改票型的人第一眼看的就是它。再在下面单开一行「票面类型」，
+    /// 等于把同一件事说两遍，而且**改的地方离显示的地方很远**。
+    ///
+    /// 只有双色球和大乐透能改：其余彩种本来就只有单式票，
+    /// 给个点不出东西的菜单是骗人。判据用 `EntryMode.modes(for:)`，
+    /// 和录入页那个分段控件是同一条。
+    @ViewBuilder
+    private func shapeMenu(_ value: ScannedTicket) -> some View {
+        let capsule = HStack(spacing: 3) {
+            Text(headLabel(value))
+            if EntryMode.modes(for: value.game).count > 1 {
+                Image(systemName: "chevron.down").scaledFont(8, weight: .bold)
+            }
+        }
+        .font(.caption2.weight(.bold))
+        .foregroundStyle(value.game.onTint)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(value.game.tint, in: Capsule())
+
+        if EntryMode.modes(for: value.game).count > 1 {
+            Menu {
+                ForEach(TicketShape.allCases) { shape in
+                    Button {
+                        guard shape != value.play.shape else { return }
+                        shapeChange = ShapeChangeRequest(ticketID: value.id, shape: shape)
+                    } label: {
+                        if shape == value.play.shape {
+                            Label(shape.label, systemImage: "checkmark")
+                        } else {
+                            Text(shape.label)
+                        }
+                    }
+                } 
+            } label: {
+                capsule
+            }
+            .accessibilityLabel("票面类型 \(value.play.shape.label)，点按可以改")
+        } else {
+            capsule
+        }
+    }
+
+    /// 改票面类型 → 转手动录入。
+    ///
+    /// **不 dismiss 自己，而是在自己上面盖一张抽屉。** 先关掉再由根视图排队开下一张
+    /// 是两段完整的抽屉动画（一down一up），中间还会闪一下底下的页面，很生硬；
+    /// 盖在上面只有一段向上的动画，而且「返回」天然就回到复核页。
+    ///
+    /// 带过去的是**这张票自己**的正片，不是整张原图 —— 一张照片里可能有好几张票，
+    /// 给错照片等于让用户对着别人的票录号码。期号也一并带上：改票型只是重录号码，
+    /// 没有理由让人再选一遍期。
+    private func handOffToManualEntry(_ request: ShapeChangeRequest) {
+        shapeChange = nil
+        guard let ticket = tickets.first(where: { $0.id == request.ticketID }),
+              let image = ticketImages[ticket.id] ?? croppedPreview ?? preview else { return }
+        manualEntry = ManualEntryHandoff(
+            ticketID: ticket.id,
+            reference: EntryReference(image: image,
+                                      game: ticket.game,
+                                      shape: request.shape,
+                                      issue: drawStore.issuesFollowing(game: ticket.game,
+                                                                       from: ticket.issue,
+                                                                       count: 1).first)
+        )
+    }
+
+    /// 手动录入存完之后，这张票就算处理完了，从复核列表里摘掉。
+    /// 摘光了就把复核页也关掉 —— 留一张空列表在那儿没有任何意义。
+    private func finishHandoff(_ handoff: ManualEntryHandoff) {
+        withAnimation(.easeOut(duration: 0.18)) {
+            tickets.removeAll { $0.id == handoff.ticketID }
+        }
+        ticketImages[handoff.ticketID] = nil
+        guard tickets.isEmpty else { return }
+        // 最后一张也处理完了，复核页没有存在的意义了。
+        // 但**不能当场关** —— 录入页那张抽屉这会儿正在往下收，
+        // 两张一起关会打架（和 `wrapIfNeeded` 那里等动画的理由一样）。
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            dismiss()
+        }
+    }
+
     @ViewBuilder
     private func optionRows(_ ticket: Binding<ScannedTicket>) -> some View {
         let game = ticket.wrappedValue.game
         VStack(spacing: 4) {
             // 玩法和「追不追加」排在最上面，两个加减号的 Stepper 挨在一起。
             // 开关和 Stepper 交错着放，手指要在两种交互之间来回切，很别扭。
+            //
+            // 这几行的措辞和手动录入页保持一致：一律是「票面……」，
+            // 说的是**那张纸上印着什么**，不是在这儿决定要买什么。
             playModeRow(ticket)
             if game == .dlt {
-                Toggle("追加投注（3 元一注）", isOn: ticket.addOn)
+                Toggle("票面追加（3 元一注）", isOn: ticket.addOn)
                     .font(.subheadline)
             }
-            Stepper("倍数 \(ticket.wrappedValue.multiple)", value: ticket.multiple, in: 1...99)
+            Stepper("票面倍数 \(ticket.wrappedValue.multiple)", value: ticket.multiple, in: 1...99)
                 .font(.subheadline)
             if game == .dlt {
-                Stepper("连打 \(ticket.wrappedValue.periods) 期", value: ticket.periods, in: 1...20)
+                Stepper("票面连打 \(ticket.wrappedValue.periods) 期", value: ticket.periods, in: 1...20)
                     .font(.subheadline)
             }
         }
@@ -900,7 +1033,7 @@ struct TicketScanView: View {
     ///
     /// 3D 和排列3 的直选·组三·组六不在这儿改 —— 那是**逐注**的东西
     /// （实体票每注各印各的），票头改一下就把每一注都盖成同一种，
-    /// 反而比认错更糟。大乐透的玩法就是「追不追加」，上面那个开关管着。
+    /// 反而比认错更糟。大乐透的票面玩法就是「追不追加」，上面那个开关管着。
     /// 双色球、七乐彩、排列5、七星彩本来就只有一种玩法。
     @ViewBuilder
     private func playModeRow(_ ticket: Binding<ScannedTicket>) -> some View {
@@ -909,9 +1042,9 @@ struct TicketScanView: View {
         if value.game == .k8, modes.count > 1 {
             let current = value.playMode.isEmpty ? value.game.defaultPlayMode : value.playMode
             HStack(spacing: 8) {
-                Text("玩法").font(.subheadline)
+                Text("票面玩法").font(.subheadline)
                 Spacer(minLength: 8)
-                Picker("玩法", selection: Binding(
+                Picker("票面玩法", selection: Binding(
                     get: { current },
                     set: { newValue in
                         ticket.playMode.wrappedValue = newValue
@@ -978,15 +1111,29 @@ struct TicketScanView: View {
                     }
                 }
                 Spacer(minLength: 8)
-                Text(MoneyText.format(tickets.reduce(0) { $0 + $1.totalCost }))
-                    .font(.title3.weight(.bold))
-                    .monospacedDigit()
-                    .foregroundStyle(Color.accentColor)
+                // 和录入页底栏同一个写法：金额要有「票面金额」这行小字，
+                // 否则一个跟着识别结果变的 ¥ 数字看着就像结账页。
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("票面金额")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(MoneyText.format(tickets.reduce(0) { $0 + $1.totalCost }))
+                        .font(.title3.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(barTint)
+                }
+                .fixedSize()
             }
 
-            Button("加入票夹") { importAll() }
-                .buttonStyle(ProminentGlassButton(tint: .accentColor))
-                .disabled(!canImport)
+            Button("加入票夹") {
+                if settings.responsibleAcknowledged {
+                    importAll()
+                } else {
+                    isResponsibleAlertPresented = true
+                }
+            }
+            .buttonStyle(ProminentGlassButton(tint: barTint))
+            .disabled(!canImport)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -999,6 +1146,16 @@ struct TicketScanView: View {
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
+    }
+
+    /// 底栏配色跟着这一批票的彩种走，和录入页一致。
+    ///
+    /// 一次扫描目前就是一张票（多彩种混扫还没做），所以取第一张的彩种色即可；
+    /// 真的混了彩种就退回中性的强调色，免得用一个彩种的颜色去代表另一个。
+    private var barTint: Color {
+        let games = Set(tickets.map(\.game))
+        guard games.count == 1, let game = games.first else { return .accentColor }
+        return game.tint
     }
 
     /// 不能导入时说清楚卡在哪一步，别只把按钮变灰。
@@ -1109,9 +1266,9 @@ struct TicketScanView: View {
                             }
                             return ticket.playMode
                         }()
-                        // entryLabel 存的是**票型**（单式 / 复式 / 胆拖），
+                        // entryLabel 存的是**票面类型**（单式票 / 复式票 / 胆拖票），
                         // 不是录入方式 —— 票夹卡片上要拼成票面那句话
-                        // 「组选单式」「选八单式」，而「扫描」两个字对核对毫无帮助。
+                        // 「组选单式票」「选八单式票」，而「扫描」两个字对核对毫无帮助。
                         var item = Ticket(numbers: numbers,
                                           playMode: mode,
                                           entryLabel: ticket.play.label)
@@ -1179,7 +1336,7 @@ private struct ScanZoneEditor: View {
     var image: UIImage?
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.showToast) private var showToast
+    @Environment(ToastCenter.self) private var showToast
     @State private var selection = SectionSelection()
     @State private var danPicking = true
 
@@ -1243,7 +1400,7 @@ private struct ScanLineEditor: View {
     var image: UIImage?
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.showToast) private var showToast
+    @Environment(ToastCenter.self) private var showToast
     @State private var selections: [SectionKey: SectionSelection] = [:]
 
     /// 问号没补完就不能点「完成」。

@@ -74,7 +74,7 @@ struct StatusChip: View {
     var body: some View {
         HStack(spacing: 3) {
             Image(systemName: status.symbol)
-                .font(.system(size: 9, weight: .bold))
+                .scaledFont(9, weight: .bold)
             Text(status.label)
                 .font(.caption2.weight(.semibold))
         }

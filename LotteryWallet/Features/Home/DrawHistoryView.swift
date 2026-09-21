@@ -1,6 +1,11 @@
 import SwiftUI
 
-/// 往期开奖：按彩种查看最近 50 期。
+/// 往期开奖：按彩种查看往期。
+///
+/// **默认只读近 50 期**（仓库的 `draws/{game}.json`），用户滑到底点
+/// 「查看今年全部」才去拉 `by-year/{game}/{year}.json`。整年是近 50 期的
+/// 十倍体量，一进页面就全拉等于下载、解码、渲染都翻十倍，
+/// 而绝大多数人根本翻不到第 50 期。
 struct DrawHistoryView: View {
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.dismiss) private var dismiss
@@ -36,6 +41,7 @@ struct DrawHistoryView: View {
     @ViewBuilder
     private func page(for item: GameKey) -> some View {
         let rows = drawStore.draws(for: item)
+        let loadedYear = drawStore.hasLoadedYear(item)
         // 「还没拉过」和「拉过但是空的」是两回事。只按当前选中的彩种判断
         // 是否在加载，滑到还没加载的那一页会直接看到「网络没连上」的空状态 ——
         // 明明只是还没轮到它。
@@ -44,8 +50,9 @@ struct DrawHistoryView: View {
             LazyVStack(spacing: 12) {
                 if !rows.isEmpty {
                     ForEach(rows) { draw in
-                        DrawHistoryRow(draw: draw)
+                        DrawHistoryRow(game: item, draw: draw)
                     }
+                    moreFooter(for: item, loadedYear: loadedYear, count: rows.count)
                 } else if !hasLoaded {
                     ProgressView("正在读取往期开奖")
                         .padding(.top, 60)
@@ -68,6 +75,44 @@ struct DrawHistoryView: View {
         }
         // 每一页管自己那份数据，滑过去就开始拉
         .task(id: item) { await drawStore.loadHistory(for: item) }
+    }
+
+    /// 列表底部：还没拉整年就给一颗「查看今年全部」，拉过了就说明已经到底。
+    @ViewBuilder
+    private func moreFooter(for item: GameKey, loadedYear: Bool, count: Int) -> some View {
+        if loadedYear {
+            Text("已显示 \(count) 期 · 今年的都在这儿了")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 6)
+        } else {
+            VStack(spacing: 6) {
+                Button {
+                    Task { await drawStore.loadYearHistory(for: item) }
+                } label: {
+                    if drawStore.isLoadingYear(item) {
+                        ProgressView()
+                    } else {
+                        Text("查看今年全部")
+                    }
+                }
+                .buttonStyle(SecondaryGlassButton(tint: item.tint))
+                .disabled(drawStore.isLoadingYear(item))
+
+                Text(drawStore.yearLoadFailed(item)
+                     ? "没读到整年数据，检查一下网络再试"
+                     : "当前显示最近 \(count) 期")
+                    .font(.caption2)
+                    // 三元的两支必须同类型：Palette.warning 是 Color，
+                    // 而 .tertiary 是 HierarchicalShapeStyle，直接混写编译不过。
+                    .foregroundStyle(drawStore.yearLoadFailed(item)
+                                     ? AnyShapeStyle(Palette.warning)
+                                     : AnyShapeStyle(.tertiary))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 10)
+        }
     }
 
     /// 彩种切换条。
@@ -104,6 +149,7 @@ struct DrawHistoryView: View {
 }
 
 struct DrawHistoryRow: View {
+    let game: GameKey
     let draw: Draw
 
     var body: some View {
@@ -120,12 +166,10 @@ struct DrawHistoryRow: View {
             }
             // 往期这里要看全号码，所以不限制颗数，只让球径自适应缩小
             DrawNumbersView(draw: draw, size: 28)
-            if let first = draw.firstPrize, first.winningCount > 0 {
-                Text("一等奖 \(first.winningCount) 注"
-                     + (first.amount > 0 ? " · \(MoneyText.compactYuan(first.amount))/注" : ""))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            // 奖级和首页那张卡用同一套 —— 原来这里只有干巴巴一行
+            // 「一等奖 N 注」，同一份数据在两个页面上长得不一样，
+            // 翻到往期会以为信息丢了。
+            DrawPrizeLines(game: game, draw: draw)
         }
         // contentCard 自己就带 16pt 内边距，外面再加一层等于 32pt，
         // 卡片里的内容会比首页窄一大截。

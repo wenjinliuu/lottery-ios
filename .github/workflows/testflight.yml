@@ -99,6 +99,41 @@ jobs:
           test -f "$APP_PATH/Assets.car"
           find "$APP_PATH" -maxdepth 1 -type f -name 'AppIcon*.png' -print -quit | grep -q .
 
+      # 把 entitlements 塞进归档里的 App。
+      #
+      # 归档是 CODE_SIGNING_ALLOWED=NO，Xcode 整个跳过了 ProcessProductPackaging，
+      # 所以归档出来的 App 身上**一条 entitlement 都没有**。而 `-exportArchive`
+      # 重新签名时，是拿「归档里那个 App 已有的 entitlements」去和描述文件合并的 ——
+      # 已有的是空，合并出来自然也没有 iCloud 权限。真机上的表现就是：
+      # 描述文件里明明有 iCloud，App 却拿不到容器，系统的 iCloud 云盘 App 列表
+      # 里也找不到「对个号」。
+      #
+      # 这里用 ad-hoc 签名（`--sign -`）把 entitlements 写进去，让归档长得和
+      # 正常 Xcode 归档一样。导出那一步会连签名带 entitlements 整个重做，
+      # ad-hoc 这个签名本身活不过导出，只有 entitlements 会被继承下去。
+      #
+      # 这一版（构建 59）的导出结果印证了上面的推断：签名后二进制里的
+      # entitlements 和本仓库这份 entitlements 文件**一字不差**
+      # （icloud-services 只有 CloudDocuments），而描述文件里是
+      # `icloud-services: *`、还多出 ubiquity-kvstore-identifier、
+      # keychain-access-groups 等等。也就是说导出签名取的是**归档里那个 App
+      # 的 entitlements**，不是描述文件的 —— 那么在加这一步之前，归档里是空的，
+      # 最终二进制自然也是空的。
+      #
+      # 失败也不拦流水线：拦了就等于一个包都发不出去，而上一版至少还能发。
+      - name: Embed entitlements into archive
+        continue-on-error: true
+        run: |
+          set -e
+          APP_PATH=$(find build/LotteryWallet.xcarchive/Products/Applications -maxdepth 1 -type d -name '*.app' -print -quit)
+          test -n "$APP_PATH"
+          codesign --force --sign - \
+            --entitlements LotteryWallet/Resources/LotteryWallet.entitlements \
+            --generate-entitlement-der \
+            "$APP_PATH"
+          echo "=== 归档里的 entitlements ==="
+          codesign -d --entitlements :- --xml "$APP_PATH" 2>/dev/null | plutil -convert xml1 -o - -
+
       - name: Write export options
         run: |
           mkdir -p build
@@ -129,6 +164,97 @@ jobs:
             -authenticationKeyID "$KEY_ID" \
             -authenticationKeyIssuerID "$ISSUER_ID" \
             | xcbeautify --renderer github-actions
+
+      # iCloud entitlement 到底有没有签进最终二进制。
+      #
+      # **只报告，不决定成败**，而且排在上传后面 —— 上传那条路一个字都不动。
+      #
+      # 上一版这一步什么都证明不了：ExportOptions 里是 destination=upload，
+      # xcodebuild 直接把包传走、本地不留产物，于是检查永远落在「没找到」。
+      # 这里改成再导一次到本地（同一个归档、同样的自动签名），
+      # 只为把 `codesign -d --entitlements` 的结果打出来。
+      #
+      # 为什么非看不可：归档是 CODE_SIGNING_ALLOWED=NO，entitlements 根本
+      # 没在归档阶段处理过；导出阶段重新签名时用的是哪一份 entitlements，
+      # 光看构建日志看不出来。描述文件里有 ≠ 二进制里有。
+      - name: Inspect iCloud entitlement (informational)
+        if: always()
+        continue-on-error: true
+        run: |
+          set +e
+          cat > build/ExportOptionsLocal.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><false/>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild -exportArchive \
+            -archivePath build/LotteryWallet.xcarchive \
+            -exportOptionsPlist build/ExportOptionsLocal.plist \
+            -exportPath build/inspect \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" > build/inspect-export.log 2>&1
+          if [ $? -ne 0 ]; then
+            echo "ℹ️ 本地导出失败，跳过检查（不影响已经上传的包）"
+            tail -40 build/inspect-export.log
+            exit 0
+          fi
+
+          IPA=$(find build/inspect -maxdepth 2 -name '*.ipa' -print -quit)
+          if [ -z "$IPA" ]; then
+            echo "ℹ️ 没找到 ipa，跳过检查"
+            exit 0
+          fi
+          rm -rf build/unzipped && mkdir -p build/unzipped
+          unzip -q "$IPA" -d build/unzipped
+          APP=$(find build/unzipped/Payload -maxdepth 1 -name '*.app' -print -quit)
+          if [ -z "$APP" ]; then
+            echo "ℹ️ ipa 里没找到 .app，跳过检查"
+            exit 0
+          fi
+
+          echo "=== 签名后的二进制 entitlements ==="
+          codesign -d --entitlements :- --xml "$APP" 2>/dev/null \
+            | plutil -convert xml1 -o - - | tee build/entitlements.txt
+
+          echo "=== 描述文件里声明的 entitlements ==="
+          security cms -D -i "$APP/embedded.mobileprovision" 2>/dev/null \
+            | plutil -extract Entitlements xml1 -o - - | tee build/profile-entitlements.txt
+
+          echo "=== Info.plist 里的 NSUbiquitousContainers ==="
+          plutil -extract NSUbiquitousContainers xml1 -o - "$APP/Info.plist" 2>/dev/null || echo "（没有）"
+
+          echo "=== 结论 ==="
+          if grep -q "ubiquity-container-identifiers" build/entitlements.txt; then
+            echo "✅ 二进制带着 ubiquity-container-identifiers"
+          else
+            echo "❌ 二进制里没有 ubiquity-container-identifiers —— iCloud 在真机上必然用不了"
+            if grep -q "ubiquity-container-identifiers" build/profile-entitlements.txt; then
+              echo "   描述文件里是有的，说明丢在导出签名这一环"
+            else
+              echo "   描述文件里也没有，说明 App ID 的 iCloud 能力没生效"
+            fi
+          fi
+
+      - name: Upload entitlement report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: entitlements-${{ steps.build.outputs.number }}
+          path: |
+            build/entitlements.txt
+            build/profile-entitlements.txt
+          if-no-files-found: ignore
 
       - name: Upload dSYMs as artifact
         if: always()

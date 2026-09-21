@@ -259,13 +259,13 @@ final class TicketTextParserGamesTests: XCTestCase {
     /// 卡片头部要写得和实体票面一字不差。
     func testTicketHeadLabelMatchesPrintedWording() {
         // 排列3 票面只分直选/组选，组三组六是组选里按号码再分的
-        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["single"], shape: "单式"), "直选单式")
-        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["group6", "group3"], shape: "单式"), "组选单式")
+        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["single"], shape: .single), "直选单式票")
+        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["group6", "group3"], shape: .single), "组选单式票")
         // 3D 逐注印玩法，票头只写「单式」
-        XCTAssertEqual(GameKey.fc3d.ticketLabel(modes: ["group6", "single"], shape: "单式"), "单式")
-        XCTAssertEqual(GameKey.k8.ticketLabel(modes: ["8"], shape: "单式"), "选八单式")
-        XCTAssertEqual(GameKey.dlt.ticketLabel(modes: ["add"], shape: "单式"), "追加单式")
-        XCTAssertEqual(GameKey.ssq.ticketLabel(modes: [""], shape: "复式"), "复式")
+        XCTAssertEqual(GameKey.fc3d.ticketLabel(modes: ["group6", "single"], shape: .single), "单式票")
+        XCTAssertEqual(GameKey.k8.ticketLabel(modes: ["8"], shape: .single), "选八单式票")
+        XCTAssertEqual(GameKey.dlt.ticketLabel(modes: ["add"], shape: .single), "追加单式票")
+        XCTAssertEqual(GameKey.ssq.ticketLabel(modes: [""], shape: .system), "复式票")
     }
 
     /// 同一个玩法两家印法不同：3D 叫「单选」，排列3 叫「直选」。

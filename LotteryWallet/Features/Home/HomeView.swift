@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import Charts
 import UIKit
 
 /// 记录集合的变化指纹。
@@ -45,6 +44,10 @@ struct HomeView: View {
     @State private var todayGames: Set<GameKey> = []
     @State private var pendingGames: [GameKey] = []
     @State private var carouselGames: [GameKey] = GameKey.ordered
+    /// 量出来的可用宽度。量到之前用起手值，见 `HomeLayout.fallbackScreenWidth`。
+    @State private var measuredWidth: CGFloat?
+
+    private var screenWidth: CGFloat { measuredWidth ?? HomeLayout.fallbackScreenWidth }
 
     var body: some View {
         NavigationStack {
@@ -60,6 +63,30 @@ struct HomeView: View {
                 .padding(.bottom, 120)
             }
             .background(Palette.canvas)
+            // 量宽度放在 `background` 里：背景不参与布局，量它不会把
+            // `GeometryReader` 的贪心尺寸带进内容，也动不到导航栏那套
+            // 大标题/滚动渐变的行为。量到之后经环境值往下传。
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { measuredWidth = proxy.size.width }
+                        .onChange(of: proxy.size.width) { _, width in measuredWidth = width }
+                }
+            )
+            // **导航栏这里什么都不要加。**
+            //
+            // 试过两版，两版都是退步：
+            // 1. `.toolbarBackgroundVisibility(.visible)` 把导航栏钉死在
+            //    「已滚动」外观上，大标题只存在于未滚动的 scrollEdge 外观里，
+            //    结果大标题整个消失，从头到尾只剩中间那行小字。
+            // 2. 只给 `.toolbarBackground(Palette.canvas)` 也不行 —— 那是一块
+            //    平涂的不透明色，把 iOS 26 自带的渐变模糊顶掉了，
+            //    滚动时是一条硬边界压在内容上，比原来更难看。
+            //
+            // 系统的 scroll edge effect 本来就会在滚动时给标题后面铺一层
+            // 渐变模糊，那才是这一版该有的观感。偶发的标题错位是轮播每 4 秒
+            // 用全局 withAnimation 写 @State 引起的，已经在下面 TabView 那里
+            // 把动画作用域收窄解决了，跟导航栏背景没关系。
             .navigationTitle("首页")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -75,6 +102,7 @@ struct HomeView: View {
             .task(id: RecordsToken(records)) { recompute() }
             .task(id: drawStore.scheduleToken) { refreshSchedule() }
             .onChange(of: range) { _, _ in recomputeSeries() }
+            .environment(\.screenWidth, screenWidth)
         }
     }
 
@@ -108,13 +136,13 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - 累计盈亏
+    // MARK: - 累计收支
 
     private var profitCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("累计盈亏")
+                    Text("累计收支")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Text(MoneyText.format(series.netTotal))
@@ -141,10 +169,11 @@ struct HomeView: View {
             Divider()
 
             HStack(alignment: .top, spacing: 8) {
-                statPair("投入", MoneyText.format(series.costTotal))
+                statPair("票面金额", MoneyText.format(series.costTotal))
                 statPair("奖金", MoneyText.format(series.prizeTotal))
-                // 公益金：彩票面额的 36% 计提，这部分钱是确定流向公益事业的
-                statPair("公益金", MoneyText.format(series.costTotal * 0.36))
+                // 公益金逐条按彩种计提，比例见 `GameKey.welfareRate` ——
+                // 原来固定乘 0.36，八个彩种里五个是错的。
+                statPair("公益金", MoneyText.format(series.welfareTotal))
                 statPair("已结算", "\(series.settledCount) 注")
             }
         }
@@ -203,9 +232,18 @@ struct HomeView: View {
             // 系统自带的分页圆点画在 TabView 的画布里，会压在卡片下沿上。
             // 关掉它自己画一排放到卡片外面，既不重叠也能控制配色。
             .tabViewStyle(.page(indexDisplayMode: .never))
+            // 翻页动画绑在 TabView 上，而不是在 `runAutoScroll` 里用
+            // `withAnimation` 包住 `pageIndex += 1`。
+            //
+            // `pageIndex` 是 HomeView 自己的 @State，用全局 withAnimation 写它
+            // 等于**每 4 秒把整个 HomeView 的 body 拖进一次显式动画事务**。
+            // 这一下要是正好落在用户滚动、大标题正在收起的瞬间，标题的布局
+            // 会被卷进这个事务里停在半路 —— 就是那个偶发的标题卡住。
+            // 绑在这里，动画只作用于轮播子树。
+            .animation(.easeInOut(duration: 0.45), value: pageIndex)
             // 八张卡一个高度。跟着当前页的内容变高变矮是很难受的：
             // 页面下半截会跟着上下跳，眼睛每翻一页都要重新找位置。
-            .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: HomeLayout.screenWidth))
+            .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: screenWidth))
             .accessibilityHint("左右滑动查看其他彩种的最新开奖")
             // 手一碰就停自动轮播。轮播抢走用户正在看的那张卡是很讨厌的事。
             .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in
@@ -219,7 +257,7 @@ struct HomeView: View {
             // 抓错、延迟、口径不一致都可能发生，而彩票是真金白银的事。
             // 放在设置页里没人会看到 —— 它只在人正盯着开奖号的时候才有意义。
             Text(Disclaimer.draw)
-                .font(.system(size: 10))
+                .scaledFont(10)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 2)
@@ -242,9 +280,8 @@ struct HomeView: View {
             guard !Task.isCancelled, Date() >= autoScrollResumeAt else { continue }
             // 一直往后推就行 —— 推到尾部那张哨兵页之后，
             // `wrapIfNeeded` 会无动画地接回第一张，转成一个环。
-            withAnimation(.easeInOut(duration: 0.45)) {
-                pageIndex += 1
-            }
+            // 动画由 TabView 上的 `.animation(_:value:)` 负责，这里只改值。
+            pageIndex += 1
         }
     }
 
@@ -312,8 +349,8 @@ struct HomeView: View {
         return VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "\(month) 月概览", subtitle: "本机记录 · \(monthStats.ticketCount) 注")
 
-            // 盈亏是这张卡的主角，单独占一行给足字号；
-            // 投入和奖金退到下面一行当支撑数据。
+            // 收支是这张卡的主角，单独占一行给足字号；
+            // 票面金额和奖金退到下面一行当支撑数据。
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(MoneyText.format(monthStats.net))
                     .font(.system(.title, design: .rounded, weight: .bold))
@@ -323,7 +360,7 @@ struct HomeView: View {
                     .minimumScaleFactor(0.6)
                     .foregroundStyle(Palette.profitColor(monthStats.net))
                 if monthStats.ticketCount > 0 {
-                    Text(monthStats.net >= 0 ? "盈利" : "亏损")
+                    Text(monthStats.net >= 0 ? "结余" : "支出")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -341,7 +378,7 @@ struct HomeView: View {
             }
 
             HStack(spacing: 10) {
-                miniStat("投入", MoneyText.format(monthStats.cost), "arrow.down.circle.fill", .secondary)
+                miniStat("票面金额", MoneyText.format(monthStats.cost), "arrow.down.circle.fill", .secondary)
                 miniStat("奖金", MoneyText.format(monthStats.prize), "trophy.fill", Palette.profit)
             }
 
@@ -394,20 +431,40 @@ enum HomeLayout {
     static let pagePadding: CGFloat = 16
     static let carouselPagePadding: CGFloat = 5
 
-    static var screenWidth: CGFloat {
+    /// 首屏第一帧用的宽度，**只是个起手值**。
+    ///
+    /// 真正的宽度由 `HomeView` 量出来，经 `\.screenWidth` 传给卡片
+    /// （见下面的环境值）。这里留一个起手值是为了第一帧就画对高度 ——
+    /// 量宽度要等一次布局，那一帧用默认值画会让卡片肉眼可见地弹一下。
+    ///
+    /// `keyWindow` 在分屏/多窗口下未必是自己那一个，所以它只配当起手值，
+    /// 不配当数据源。
+    static var fallbackScreenWidth: CGFloat {
         UIApplication.shared.connectedScenes
             .compactMap { ($0 as? UIWindowScene)?.keyWindow?.bounds.width }
             .first ?? 393
     }
+}
 
-    static var drawCardInnerWidth: CGFloat {
-        screenWidth - pagePadding * 2 - carouselPagePadding * 2 - DrawCardMetrics.horizontalPadding * 2
+/// 首页量出来的可用宽度。
+///
+/// 开奖卡片的高度依赖自身宽度，而高度必须在 `GeometryReader` **外面**算好
+/// （高度依赖自身宽度会成布局环）。所以宽度在首页量一次往下传，
+/// 卡片自己不再去问系统要窗口宽度。
+private struct ScreenWidthKey: EnvironmentKey {
+    static var defaultValue: CGFloat { HomeLayout.fallbackScreenWidth }
+}
+
+extension EnvironmentValues {
+    var screenWidth: CGFloat {
+        get { self[ScreenWidthKey.self] }
+        set { self[ScreenWidthKey.self] = newValue }
     }
 }
 
-// MARK: - 盈亏热力图
+// MARK: - 收支热力图
 
-/// 逐日盈亏方格图。
+/// 逐日收支方格图。
 ///
 /// 换掉原来的折线图：买彩票长期期望为负，折线永远是一条从左上到右下的
 /// 45° 斜坡，看一次就没有信息量了。方格图把「哪天买了、那天是赚是亏、
@@ -536,7 +593,11 @@ struct ProfitHeatmap: View {
                             // 一列就是一周。整列可点，弹一个很小的浮层说这一周
                             // 花了多少、中了多少、中奖率多少 —— 方格图本身只有
                             // 颜色，具体数字总得有地方看。
-                            .contentShape(Rectangle())
+                            //
+                            // 格子只有 9pt 宽，整列的命中区也就 9pt，远低于 HIG
+                            // 的 28pt 下限。用负 inset 把命中区向两侧撑开，
+                            // **视觉一点没变**，只是手指更容易点中。
+                            .contentShape(Rectangle().inset(by: -(28 - cell) / 2))
                             .overlay {
                                 if selectedWeek == index {
                                     RoundedRectangle(cornerRadius: 4, style: .continuous)
@@ -562,7 +623,7 @@ struct ProfitHeatmap: View {
                     HStack(alignment: .top, spacing: gap) {
                         ForEach(Array(grid.monthLabels.enumerated()), id: \.offset) { _, label in
                             Text(label)
-                                .font(.system(size: 9))
+                                .scaledFont(9)
                                 .foregroundStyle(.secondary)
                                 .fixedSize()
                                 .frame(width: cell, alignment: .leading)
@@ -575,7 +636,7 @@ struct ProfitHeatmap: View {
             .defaultScrollAnchor(.trailing)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("逐日盈亏方格图，共 \(grid.byDay.count) 天有记录")
+        .accessibilityLabel("逐日收支方格图，共 \(grid.byDay.count) 天有记录")
     }
 
     /// 一周小结。
@@ -608,9 +669,9 @@ struct ProfitHeatmap: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                row("投入", MoneyText.format(summary.cost), .primary)
+                row("票面金额", MoneyText.format(summary.cost), .primary)
                 row("奖金", MoneyText.format(summary.prize), .primary)
-                row("盈亏", MoneyText.format(summary.net), Palette.profitColor(summary.net))
+                row("收支", MoneyText.format(summary.net), Palette.profitColor(summary.net))
                 row("中奖率", "\(summary.wonDays)/\(summary.days) 天 · \(Int((summary.hitRate * 100).rounded()))%", .secondary)
             }
         }
@@ -657,13 +718,13 @@ struct ProfitHeatmap: View {
 
     /// 图例 + 最好的一天。
     ///
-    /// 图例的字收成「亏 / 赚」两个字。原来写「全亏 / 大赚」是想说明色阶的
+    /// 图例的字收成「支 / 收」两个字。原来写「全亏 / 大赚」是想说明色阶的
     /// 两端，但色块本身已经从浅到深排开了，浓度的含义一眼就看得出来，
     /// 那两个字只是把一行挤窄。
     private var topBar: some View {
         HStack(spacing: 6) {
-            Text("亏")
-                .font(.system(size: 10))
+            Text("支")
+                .scaledFont(10)
                 .foregroundStyle(.secondary)
             ForEach([1.0, 0.55, 0.25], id: \.self) { level in
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -678,13 +739,13 @@ struct ProfitHeatmap: View {
                     .fill(Palette.profit.opacity(0.30 + 0.70 * level))
                     .frame(width: 9, height: 9)
             }
-            Text("赚")
-                .font(.system(size: 10))
+            Text("收")
+                .scaledFont(10)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
             if let best = days.filter({ $0.count > 0 }).max(by: { $0.net < $1.net }), best.net > 0 {
                 Text("最好的一天 \(MoneyText.format(best.net))")
-                    .font(.system(size: 10))
+                    .scaledFont(10)
                     .foregroundStyle(Palette.profit)
                     .lineLimit(1)
             }
@@ -877,22 +938,15 @@ enum DrawCardMetrics {
 /// 卡片里三段各归各位：**标题永远在最上面**（八张卡翻过去标题不会跳），
 /// 号码在剩余空间里居中，奖项贴底。
 struct DrawCard: View {
+    /// 首页量好的宽度。卡片自己不去问系统要窗口宽度 —— 那在分屏/多窗口下
+    /// 拿到的未必是自己这一个窗口。
+    @Environment(\.screenWidth) private var screenWidth
+
     let game: GameKey
     let draw: Draw?
     /// 这个彩种今天开奖。原来「今日开奖」是页面顶部单独一行标签，
     /// 和它描述的卡片隔得很远；写进卡片里既更省地方也更好懂。
     var opensToday: Bool = false
-
-    /// 卡片上要列的奖级。
-    ///
-    /// 快乐8 的奖级表是「选十中十、选十中九…选九中九…」几十行，一等奖这个
-    /// 概念在它身上不成立。排序的第一依据是**单注奖金**，不是表里的行序 ——
-    /// 官方那张表按「选几」从大到小排，而「选十中十 1000 万」和
-    /// 「选九中九 300 万」谁更值钱得按钱算。取金额最高的两档，
-    /// 奖级名本身就带着玩法（「选十中10」），一眼看得出是哪个玩法中的。
-    private var prizes: [PrizeEntry] {
-        PrizeRanking.topTwo(of: draw?.prizeList ?? [], game: game)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DrawCardMetrics.blockSpacing) {
@@ -900,18 +954,13 @@ struct DrawCard: View {
             Spacer(minLength: 0)
             numbersRow
             Spacer(minLength: 0)
-            if !prizes.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(prizes.enumerated()), id: \.offset) { rank, entry in
-                        prizeStrip(entry, rank: rank)
-                    }
-                }
-            }
+            // 奖级行和「往期开奖」共用，见 `DrawPrizeLines`
+            DrawPrizeLines(game: game, draw: draw)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, DrawCardMetrics.verticalPadding)
         .padding(.horizontal, DrawCardMetrics.horizontalPadding)
-        .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: HomeLayout.screenWidth))
+        .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: screenWidth))
         .background(
             RoundedRectangle(cornerRadius: DrawCardMetrics.cornerRadius, style: .continuous)
                 .fill(Palette.card)
@@ -925,7 +974,7 @@ struct DrawCard: View {
     @ViewBuilder
     private var numbersRow: some View {
         if let draw {
-            let inner = DrawCardMetrics.innerWidth(screenWidth: HomeLayout.screenWidth)
+            let inner = DrawCardMetrics.innerWidth(screenWidth: screenWidth)
             DrawNumbersView(draw: draw, size: DrawCardMetrics.ballSize(for: draw, width: inner))
                 .frame(width: inner, alignment: .leading)
         } else {
@@ -950,7 +999,7 @@ struct DrawCard: View {
 
             if opensToday {
                 Text("今日开奖")
-                    .font(.system(size: 10, weight: .bold))
+                    .scaledFont(10, weight: .bold)
                     .foregroundStyle(Palette.live)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -969,40 +1018,6 @@ struct DrawCard: View {
         }
     }
 
-    /// 一个奖级一行。奖金后面不再跟「/注」—— 奖级本来就是按注计的，
-    /// 那两个字每行都重复一遍，纯占地方。
-    private func prizeStrip(_ entry: PrizeEntry, rank: Int) -> some View {
-        HStack(spacing: 6) {
-            // 快乐8 没有「一等奖」这个名字，用排名区分：金额最高的那行挂奖杯。
-            Image(systemName: isTopPrize(entry, rank: rank) ? "trophy.fill" : "rosette")
-                .font(.system(size: 10))
-                .foregroundStyle(game.tint)
-            Text("\(prizeLabel(entry)) \(entry.winningCount) 注")
-                .font(.caption2)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Spacer(minLength: 6)
-            if entry.amount > 0 {
-                Text(MoneyText.compactYuan(entry.amount))
-                    .font(.system(.footnote, design: .rounded, weight: .bold))
-                    .monospacedDigit()
-                    .foregroundStyle(game.tint)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-        }
-    }
-
-    private func isTopPrize(_ entry: PrizeEntry, rank: Int) -> Bool {
-        game == .k8 ? rank == 0 : entry.prizeName.contains("一等奖")
-    }
-
-    /// 快乐8 的奖级名照抄票面（「选十中9」），其余彩种收成「一等奖 / 二等奖」。
-    private func prizeLabel(_ entry: PrizeEntry) -> String {
-        if game == .k8 { return entry.prizeName }
-        return entry.prizeName.contains("一等奖") ? "一等奖" : "二等奖"
-    }
 }
 
 /// 卡片上那两行奖级挑谁。
