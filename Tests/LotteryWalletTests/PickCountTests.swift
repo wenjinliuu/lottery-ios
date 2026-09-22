@@ -19,7 +19,11 @@ final class PickCountTests: XCTestCase {
     // MARK: - 快乐8：唯一一个两者不等的彩种
 
     /// 选一到选十，选几就是几。
-    func testK8PickCountFollowsPlayMode() {
+    ///
+    /// （`TicketBuilderTests` 里有一条同名的老用例，那条只点了 5 和 10；
+    /// 这条把十个玩法全过一遍。两个 suite 里重名不冲突，但失败日志里
+    /// 只写类名 + 方法名，重名会让人找错文件，所以这里换个名字。）
+    func testK8PickCountCoversEveryPlayMode() {
         let section = try! XCTUnwrap(GameKey.k8.sections.first)
         XCTAssertEqual(section.count, 20, "前提：快乐8 的 section.count 是开奖开出的 20 个号")
 

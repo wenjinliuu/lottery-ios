@@ -163,6 +163,49 @@ final class TicketCardPrizeTests: XCTestCase {
         XCTAssertEqual(card.wonCount + card.pendingPrizeCount, 2)
     }
 
+    // MARK: - 快乐8：整票对账也要按玩法算
+
+    /// **快乐8 的复式票在票夹里要画得成整票。**
+    ///
+    /// `wholeZones` 用「展开数 == 记录条数」对账，而展开数原来是按
+    /// `section.count`（快乐8 是开奖的 20 个）算的：一张选五复式选了 7 个号，
+    /// 算出来是 `binomial(7, 20) = 0`，和真实的 21 注对不上 —— 于是快乐8 的
+    /// 复式和胆拖票**永远画不成整票**，连带「中 N 注 · 奖金」那行小结
+    /// 也跟着消失，正是这张票最该显示的东西。
+    func testK8SystemTicketFormsWholeView() throws {
+        let selections: [SectionKey: SectionSelection] = [
+            .nums: SectionSelection(selected: [1, 2, 3, 4, 5, 6, 7])
+        ]
+        let tickets = try XCTUnwrap(TicketBuilder.expand(game: .k8, selections: selections,
+                                                         mode: .system, playMode: "5", addOn: false))
+        XCTAssertEqual(tickets.count, 21, "前提：选五从 7 个号里展开是 C(7,5) = 21 注")
+
+        let items = tickets.enumerated().map { index, ticket -> TicketRecord in
+            let record = TicketRecord(id: String(format: "r%04d", index),
+                                      batchId: "batch",
+                                      game: .k8,
+                                      ticket: ticket,
+                                      entryKind: .system,
+                                      target: DrawTarget(expect: "2026253", openDate: "2026-09-20"),
+                                      price: 2,
+                                      multiple: 1,
+                                      source: "test")
+            record.status = index == 3 ? .won : .lost
+            record.prizeAmount = index == 3 ? 19 : 0
+            return record
+        }
+        let card = try card(items)
+
+        XCTAssertFalse(card.whole.isEmpty,
+                       "按 section.count(20) 对账会得到 0 注，这张票就画不成整票了")
+        let zone = try XCTUnwrap(card.whole.first { $0.key == .nums })
+        XCTAssertEqual(zone.selected, [1, 2, 3, 4, 5, 6, 7])
+        XCTAssertEqual(card.count, 21)
+        // 中奖明细只在整票视图里，所以上面那条不成立时这里也一起没了
+        XCTAssertEqual(card.wonCount, 1)
+        XCTAssertEqual(card.prize, 19)
+    }
+
     // MARK: - 展不展得开
 
     /// **复式 / 胆拖一律要能展开，跟注数无关。**
