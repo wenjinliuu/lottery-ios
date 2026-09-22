@@ -68,6 +68,23 @@ actor LotteryAPIClient {
         }
     }
 
+    /// 后端最近一次抓取任务的状态。**和 health 一样：只打 CloudBase，
+    /// 不走 GitHub 兜底，也不进缓存。**
+    ///
+    /// 三个「不」同一套理由：问的就是 CloudBase 那边的任务跑得怎么样，
+    /// 回落到一个静态镜像去问等于换了个人回答；镜像里也根本没有这个文件；
+    /// 而「最近一次跑得怎么样」缓存下来就失去意义了。
+    ///
+    /// 它同样**不是 `LotteryEndpoint` 的成员** —— 结构上就进不了冷启动。
+    func fetchStatus() async throws -> LotteryV2.Status {
+        let data = try await get(cloudBase.appendingPathComponent("v2/status"), timeout: 10)
+        do {
+            return try JSONDecoder().decode(LotteryV2.Status.self, from: data)
+        } catch {
+            throw LotteryDataError.decoding(String(describing: error))
+        }
+    }
+
     private func get(_ url: URL, timeout: TimeInterval = 15) async throws -> Data {
         var request = URLRequest(url: url)
         // 这一层自己管缓存（见 `LotteryCache`），不要让 URLSession 再存一份：

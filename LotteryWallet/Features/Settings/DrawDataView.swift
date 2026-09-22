@@ -1,21 +1,23 @@
 import SwiftUI
 
-/// 开奖数据详情。
+/// 数据状态详情。
 ///
-/// 设置页那一行只给一个**更新时间** —— 那是日常唯一要看的东西，
-/// 「数据是不是新的」一眼就能判断。剩下的（从哪儿取到的、后端什么时候抓到的、
-/// 日历取到哪一年了）都是出问题时才关心的，进来看。
+/// 设置页那一行已经把最要紧的三件事说完了（什么时候跑的、成没成功、齐了几个）。
+/// 进来是为了看清**两个方向**上各自发生了什么：
 ///
-/// **「数据来源」这一行是这次迁移唯一能在真机上自证的地方。** CloudBase 和
-/// GitHub 兜底取回来的数据一模一样，界面上分不出来；没有这一行，用户装上
-/// 之后也说不清主数据源到底通没通。
+/// ```
+/// 更新时间        ← 这台设备上一次去腾讯云取数的时刻
+/// 数据来源        ← 取到的那一份是谁给的
+/// 数据源状态      ← 后端八个彩种齐了几个
+/// 数据源更新时间  ← 后端上一次抓取任务什么时候跑的、成没成功
+/// ```
 ///
-/// ## 两个时间为什么都要
+/// 上面两行是**本机这边**，下面两行是**后端那边**。开奖号迟迟不更新时，
+/// 分清是谁没动全靠这个对照：上面新下面旧 = 后端没抓到，重试没用；
+/// 上面旧 = 这台设备没取到，点一下刷新就行。
 ///
-/// 「更新时间」是这份数据文件拼出来的时刻，「数据源更新时间」是后端把号码球
-/// 和金额真正落库的时刻。**前者每次导出都会变，哪怕一个号码都没抓到。**
-/// 开奖号迟迟不更新时，能分清是谁没动的只有后者：两个时间都新 = 正常；
-/// 上面新、下面旧 = 后端没抓到，重试没用。
+/// **「数据来源」这一行是 V2 迁移唯一能在真机上自证的地方。** CloudBase 和
+/// GitHub 兜底取回来的数据一模一样，界面上分不出来。
 struct DrawDataView: View {
     @Environment(DrawStore.self) private var drawStore
 
@@ -23,23 +25,22 @@ struct DrawDataView: View {
         Form {
             Section {
                 LabeledContent("更新时间") {
-                    Text(drawStore.latestUpdatedAt.isEmpty
-                         ? "暂无" : DateText.friendly(drawStore.latestUpdatedAt))
-                        .foregroundStyle(.secondary)
-                }
-                LabeledContent("数据源更新时间") {
-                    Text(drawStore.sourceFetchedAt.isEmpty
-                         ? "暂无" : DateText.friendly(drawStore.sourceFetchedAt))
+                    Text(drawStore.lastFetchedAt.map(DateText.stamp) ?? "暂无")
                         .foregroundStyle(.secondary)
                 }
                 LabeledContent("数据来源") {
                     Text(drawStore.lastSource?.label ?? "尚未取数")
                         .foregroundStyle(sourceTint)
                 }
-                LabeledContent("已获取彩种") {
-                    Text("\(gamesWithLatest)/\(GameKey.ordered.count)")
+                LabeledContent("数据源状态") {
+                    Text(progressText)
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
+                }
+                LabeledContent("数据源更新时间") {
+                    Text(executionText)
+                        .foregroundStyle(executionTint)
+                        .multilineTextAlignment(.trailing)
                 }
             } header: {
                 Text("最新开奖")
@@ -66,11 +67,30 @@ struct DrawDataView: View {
                 Text("日历是按年、按需取的：录入或扫描彩票、需要选择期号时才会加载当年那一份，跨年前后才会多取下一年。它决定了每一期的期号、开奖日和停售时刻。")
             }
         }
-        .navigationTitle("开奖数据")
+        .navigationTitle("数据状态")
         .navigationBarTitleDisplayMode(.inline)
+        .task { await drawStore.loadStatus() }
     }
 
     // MARK: - 片段
+
+    /// `6/8 数据完整`。读不到状态时不编一个分数出来。
+    private var progressText: String {
+        if let status = drawStore.fetchStatus { return status.progressText }
+        return drawStore.statusState.isLoading ? "读取中…" : "暂无"
+    }
+
+    /// `09月22日 02:44 · 执行成功`
+    private var executionText: String {
+        if let status = drawStore.fetchStatus { return status.executionText }
+        return drawStore.statusState.isLoading ? "读取中…" : "暂无执行记录"
+    }
+
+    /// 只有执行失败才标黄。数据没齐不标 —— 今天还没开奖的彩种
+    /// 本来就该是 waiting，画成警告等于每天一次假警报。
+    private var executionTint: Color {
+        drawStore.fetchStatus?.needsAttention == true ? Palette.warning : .secondary
+    }
 
     private var sourceTint: Color {
         switch drawStore.lastSource {
@@ -91,11 +111,7 @@ struct DrawDataView: View {
         case .none:
             "优先从主数据源取；取不到就用备用的公开镜像；都取不到就用本机缓存。应用只读取，不上传任何内容。"
         }
-        return source + "「数据源更新时间」是后端把号码和金额抓全之后落库的时刻；上面那个「更新时间」只是这份数据文件送出来的时刻。开奖号迟迟不更新时，看下面那个。"
-    }
-
-    private var gamesWithLatest: Int {
-        GameKey.ordered.filter { drawStore.latestDraw(for: $0) != nil }.count
+        return source + "上面两行是这台设备取数的情况，下面两行是数据源那边抓取的情况。开奖号迟迟不更新时，看下面两行就知道是不是后端还没抓到 ——「数据完整」按八个彩种算，今天还没开奖的彩种不计入，所以白天看到 6/8 是正常的。"
     }
 
     private var calendarYears: [Int] {

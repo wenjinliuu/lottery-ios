@@ -89,6 +89,20 @@ final class DrawStore {
     /// 号码球和金额落进库里」。开奖号迟迟不更新的时候，能分清是谁没动的
     /// 只有后者。
     private(set) var sourceFetchedAt: String = ""
+    /// **这台设备**最近一次成功取到数据的时刻。
+    ///
+    /// 设置页「更新时间」显示的就是它 —— 回答的是「我这个 App 上一次
+    /// 去腾讯云拿数据是什么时候」，通常就是最近一次打开应用的时间。
+    /// 和后端那边的时间（`FetchStatus.executedAt`）是两个方向上的事：
+    /// 一个是本机去拿，一个是后端去抓。两个都看得见才分得清是谁没动。
+    private(set) var lastFetchedAt: Date?
+    /// 后端最近一次抓取任务的状态（`/v2/status`）。
+    ///
+    /// **取数失败时不清空** —— 契约要求保留上一次成功读到的状态。
+    /// 清空的话，网络抖一下界面就变成「暂无执行记录」，
+    /// 用户会以为后端出事了，而实际上只是这一次没问到。
+    private(set) var fetchStatus: FetchStatus?
+    private(set) var statusState: LoadState = .idle
     /// 年度开奖日历，按年存。
     private(set) var yearCalendars: [Int: DrawCalendarYear] = [:]
 
@@ -163,6 +177,7 @@ final class DrawStore {
         schedules = result.schedules
         latestUpdatedAt = result.generatedAt.isEmpty ? DateText.day(updatedAt) : result.generatedAt
         sourceFetchedAt = result.fetchedAt
+        lastFetchedAt = updatedAt
         lastSource = source
         merge(result.latest)
     }
@@ -352,6 +367,28 @@ final class DrawStore {
         } catch {
             health = nil
             healthState = .failed(message(for: error))
+        }
+    }
+
+    // MARK: - 抓取状态
+
+    /// 问一次后端「最近一班岗跑得怎么样」。
+    ///
+    /// **失败时保留上一次成功的结果**，只把状态标成失败。这是契约里写明的：
+    /// 网络抖一下就把界面变成「暂无执行记录」，用户会以为后端出事了。
+    ///
+    /// 和 health 一样只打 CloudBase、不走兜底、不进缓存，也不是
+    /// `LotteryEndpoint` 的成员 —— 结构上进不了冷启动。
+    func loadStatus(force: Bool = false) async {
+        if !force, statusState == .loaded { return }
+        if statusState == .loading { return }
+        statusState = .loading
+        do {
+            fetchStatus = LotteryV2Mapper.status(try await repository.status())
+            statusState = .loaded
+        } catch {
+            // 这里**不动** `fetchStatus`。
+            statusState = .failed(message(for: error))
         }
     }
 

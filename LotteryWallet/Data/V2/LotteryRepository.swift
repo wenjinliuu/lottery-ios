@@ -118,6 +118,10 @@ actor LotteryRepository {
         try await client.fetchHealth()
     }
 
+    func status() async throws -> LotteryV2.Status {
+        try await client.fetchStatus()
+    }
+
     /// 缓存写入时间，设置页「数据状态」用。
     func cacheDate(_ endpoint: LotteryEndpoint) async -> Date? {
         await cache.savedAt(endpoint)

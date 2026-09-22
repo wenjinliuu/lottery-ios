@@ -24,7 +24,17 @@ struct WalletTicketCard: View {
     private static let collapsedLineLimit = 5
 
     private var game: GameKey { card.game }
-    private var isCollapsible: Bool { card.count > Self.collapsedLineLimit }
+
+    /// 点按能不能展开。
+    ///
+    /// **复式 / 胆拖一律可展开，跟注数无关。** 这两种票收起时只画整票那两行
+    /// 号码，逐注号码只有展开才有 —— 原来的判据只看「注数 > 5」，于是
+    /// 双色球 6 红 2 蓝（2 注）、2 胆 5 拖（5 注）、大乐透 1 胆 5 拖（5 注）
+    /// 这些常见票型**永远看不到自己那几注号码**，点了也没反应。
+    /// 常见胆拖有一半落在这个区间里。
+    private var isCollapsible: Bool {
+        card.count > Self.collapsedLineLimit || !card.whole.isEmpty
+    }
 
     private var visibleLines: [TicketCard.Line] {
         Array(card.lines.prefix(isExpanded ? TicketCard.lineLimit : Self.collapsedLineLimit))

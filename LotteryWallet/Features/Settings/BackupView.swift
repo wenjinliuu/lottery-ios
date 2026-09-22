@@ -28,6 +28,10 @@ struct BackupView: View {
     @State private var restoreTarget: BackupItem?
     @State private var deleteTarget: BackupItem?
     @State private var isImporting = false
+    @State private var isExporting = false
+    /// 导出用的文件。**点「导出」时才生成**，而不是每次 body 求值都序列化
+    /// 一遍全部记录 —— 几百条记录编码一次不便宜，而导出是很少点的操作。
+    @State private var exportDocument: BackupDocument?
     @State private var isClearConfirmPresented = false
 
     var body: some View {
@@ -56,6 +60,17 @@ struct BackupView: View {
                 }
                 .disabled(isBusy || records.isEmpty)
 
+                // 「导出」和「立即备份」不是一回事，两个都得有。
+                //
+                // 立即备份写进 App 自己管的那个列表（iCloud 或沙盒），
+                // 归 App 管、也归 App 删；导出是**把文件交出去** ——
+                // 存到「文件」、发给自己、丢进网盘，从此和 App 无关。
+                // 换手机、卸载重装、想留个长期存档，靠的是后者。
+                Button { startExport() } label: {
+                    row("square.and.arrow.up.fill", .indigo, "导出数据…")
+                }
+                .disabled(isBusy || records.isEmpty)
+
                 Button { isImporting = true } label: {
                     row("square.and.arrow.down.fill", .orange, "从文件导入…")
                 }
@@ -63,7 +78,7 @@ struct BackupView: View {
             } footer: {
                 Text(records.isEmpty
                      ? "现在没有记录可以备份。"
-                     : "现在有 \(records.count) 条记录。手动备份永远不会被自动清理。")
+                     : "现在有 \(records.count) 条记录。手动备份永远不会被自动清理。导出的文件由你自己保管，和这里的备份列表互不影响，任何时候都能用「从文件导入」读回来。")
             }
 
             Section {
@@ -129,6 +144,21 @@ struct BackupView: View {
         .task { await center.reload() }
         .refreshable { await center.reload() }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { handleFileImport($0) }
+        .fileExporter(isPresented: $isExporting,
+                      document: exportDocument,
+                      contentType: .json,
+                      defaultFilename: BackupNaming.name(for: .manual)) { result in
+            switch result {
+            case .success:
+                showToast("已导出", symbol: "square.and.arrow.up", feedback: .success)
+            case .failure(let error):
+                // 用户自己取消不算失败，`fileExporter` 会给一个 cancelled 错误。
+                if (error as NSError).code != NSUserCancelledError {
+                    showToast(error.localizedDescription, symbol: "exclamationmark.triangle", feedback: .error)
+                }
+            }
+            exportDocument = nil
+        }
         .confirmationDialog("从这份备份恢复？", isPresented: .init(
             get: { restoreTarget != nil },
             set: { if !$0 { restoreTarget = nil } }
@@ -136,7 +166,7 @@ struct BackupView: View {
             Button("恢复") { restore(item) }
             Button("取消", role: .cancel) {}
         } message: { item in
-            Text("会把这份备份里的记录合并进来：同一条记录以备份为准，本机多出来的不会被删掉。\n\n恢复前会先把当前状态存成一份「恢复前快照」，后悔了可以退回去。\n\n备份时间：\(DateText.friendly(DateText.day(item.modifiedAt)))")
+            Text("会把这份备份里的记录合并进来：同一条记录以备份为准，本机多出来的不会被删掉。\n\n恢复前会先把当前状态存成一份「恢复前快照」，后悔了可以退回去。\n\n备份时间：\(DateText.stamp(item.modifiedAt))")
         }
         .confirmationDialog("清空全部记录？", isPresented: $isClearConfirmPresented,
                             titleVisibility: .visible) {
@@ -185,7 +215,7 @@ struct BackupView: View {
                     .foregroundStyle(item.kind == .manual ? Color.accentColor : Color.secondary)
                     .frame(width: 28, height: 28)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(DateText.friendly(DateText.day(item.modifiedAt)))
+                    Text(DateText.stamp(item.modifiedAt))
                         .font(.subheadline)
                         .foregroundStyle(.primary)
                     Text(subtitle(item))
@@ -221,8 +251,8 @@ struct BackupView: View {
 
     private var autoFooter: String {
         var text = settings.autoBackupEnabled
-            ? "每次退到后台、且记录有过变化时自动存一份，滚动保留最近 \(BackupPolicy.autoKeep) 份。"
-            : "关掉之后不再自动备份。手动备份不受影响。"
+            ? "每次退到后台、且记录有过变化时自动存一份，**只保留最新的一份**，新的覆盖旧的。想长期留着某一份，用「立即备份」或「导出数据」——那两种永远不会被自动清理。"
+            : "关掉之后不再自动备份。手动备份和导出不受影响。"
         text += settings.iCloudBackupEnabled
             ? "\n\n备份优先写进你自己的 iCloud 云盘（「文件」App 里的「对个号」文件夹）；iCloud 用不了时自动落到本机，不会因此漏掉一次备份。"
             : "\n\n备份只存在这台设备上，不会离开手机。打开上面那个开关才会同时放一份到你自己的 iCloud。"
@@ -287,6 +317,20 @@ struct BackupView: View {
             settings.iCloudBackupEnabled = true
             await center.reload()
         }
+    }
+
+    /// 把当前全部记录导成一个 JSON 文件交给用户。
+    ///
+    /// 用的是**和备份完全同一份数据**（`BackupService.exportData`），
+    /// 所以导出去的文件可以原样从「从文件导入」读回来。两套格式是绝对
+    /// 不能有的事 —— 用户手里那个文件，将来必须还认得。
+    private func startExport() {
+        guard let data = try? BackupService(context: context).exportData(records: records) else {
+            showToast("生成导出文件失败", symbol: "exclamationmark.triangle", feedback: .error)
+            return
+        }
+        exportDocument = BackupDocument(data: data)
+        isExporting = true
     }
 
     private func createSnapshot() {

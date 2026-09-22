@@ -142,6 +142,39 @@ enum LotteryV2Mapper {
                             basisIssue: item.basisIssue.text)
     }
 
+    // MARK: - 抓取状态
+
+    /// 抓取状态。
+    ///
+    /// **分母写死 `GameKey.ordered.count`，不跟着 `lotteries` 字典的大小走。**
+    /// 某个彩种整个没出现在响应里，恰恰是最该被看见的情况 —— 跟着字典走的话
+    /// 少一个彩种分母就少一个，显示成 `7/7 数据完整`，问题被抹平了。
+    ///
+    /// 这里刻意**不做契约校验**：这一项只是个状态指示，字段缺了就按
+    /// 「暂无执行记录 / 状态未知」显示，不值得把整次请求判成失败。
+    /// health 那边严，是因为它的全部意义就是发现契约变化。
+    static func status(_ item: LotteryV2.Status) -> FetchStatus {
+        let lotteries = item.lotteries ?? [:]
+        var completed = 0
+        for game in GameKey.ordered {
+            // 按**远端标识**查（快乐8 是 kl8 不是 k8）。查错键的表现是
+            // 「永远差一个彩种」，而且看上去很像后端的问题。
+            if lotteries[game.apiKey]?.isCompleted == true { completed += 1 }
+        }
+        let execution = item.latestExecution
+        let isSuccess: Bool? = if execution?.isSuccess == true {
+            true
+        } else if execution?.isFailure == true {
+            false
+        } else {
+            nil
+        }
+        return FetchStatus(executedAt: execution?.executedAt ?? "",
+                           isSuccess: isSuccess,
+                           completed: completed,
+                           total: GameKey.ordered.count)
+    }
+
     // MARK: - 数据源体检
 
     /// 按 V2 正式契约转换，**必需字段缺一个就抛契约违例**。

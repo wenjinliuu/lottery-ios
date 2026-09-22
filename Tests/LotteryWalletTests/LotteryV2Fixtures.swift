@@ -275,6 +275,93 @@ enum LotteryV2Fixtures {
     }
     """
 
+    // MARK: - 抓取状态
+
+    static var status: Data { Data(statusJSON.utf8) }
+
+    /// 文档给的那份样例：六个 completed、一个 numbers_ready、一个 waiting。
+    /// 对应界面上的 `09月22日 02:44 · 执行成功 · 6/8 数据完整`。
+    static let statusJSON = """
+    {
+      "latest_execution": {
+        "executed_at": "2026-09-22T02:44:00+08:00",
+        "execution_status": "success"
+      },
+      "lotteries": {
+        "ssq": {"data_status": "completed"},
+        "dlt": {"data_status": "completed"},
+        "fc3d": {"data_status": "completed"},
+        "pl3": {"data_status": "completed"},
+        "pl5": {"data_status": "completed"},
+        "qxc": {"data_status": "completed"},
+        "qlc": {"data_status": "numbers_ready"},
+        "kl8": {"data_status": "waiting"}
+      }
+    }
+    """
+
+    /// 执行失败。
+    static let failedStatusJSON = """
+    {
+      "latest_execution": {
+        "executed_at": "2026-09-22T02:44:00+08:00",
+        "execution_status": "failed"
+      },
+      "lotteries": {
+        "ssq": {"data_status": "completed"}
+      }
+    }
+    """
+
+    /// 还没有执行记录。界面上是「暂无执行记录」，不是「0/8」。
+    static let emptyStatusJSON = """
+    {
+      "latest_execution": null,
+      "lotteries": {}
+    }
+    """
+
+    /// 八个全齐。
+    static let completeStatusJSON = """
+    {
+      "latest_execution": {
+        "executed_at": "2026-09-22T02:44:00+08:00",
+        "execution_status": "success"
+      },
+      "lotteries": {
+        "ssq": {"data_status": "completed"},
+        "dlt": {"data_status": "completed"},
+        "kl8": {"data_status": "completed"},
+        "fc3d": {"data_status": "completed"},
+        "pl3": {"data_status": "completed"},
+        "pl5": {"data_status": "completed"},
+        "qxc": {"data_status": "completed"},
+        "qlc": {"data_status": "completed"}
+      }
+    }
+    """
+
+    /// 少了三个彩种、其中一个值是 `null`。
+    ///
+    /// **分母仍然是 8。** 跟着字典大小走的话这份会显示成 `5/5 数据完整`，
+    /// 恰好把「后端连记录都没有」这件事抹平。
+    static let sparseStatusJSON = """
+    {
+      "latest_execution": {
+        "executed_at": "2026-09-22T02:44:00+08:00",
+        "execution_status": "success"
+      },
+      "lotteries": {
+        "ssq": {"data_status": "completed"},
+        "dlt": {"data_status": "completed"},
+        "kl8": {"data_status": "completed"},
+        "fc3d": {"data_status": "completed"},
+        "pl3": {"data_status": "completed"},
+        "qlc": null
+      }
+    }
+    """
+
     /// 空到不能再空的一份 bootstrap：字段能省的全省了。
     /// 服务端省略空值是常态，这种响应不能把解码打挂。
     static let sparseBootstrapJSON = """

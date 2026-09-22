@@ -292,4 +292,58 @@ extension LotteryV2 {
         /// `null`，或者给了对象但没有期号 —— 都算「这个彩种没有记录」。
         var isMissing: Bool { (issue?.value ?? "").isEmpty }
     }
+
+    // MARK: - 抓取状态 /v2/status
+
+    /// 后端最近一次抓取任务跑得怎么样。
+    ///
+    /// 和 `Health` 的区别：`Health` 问的是「你那边现在活着吗」，
+    /// 这个问的是「你**上一班岗**干完了没有、干成了没有」。后者才是用户
+    /// 真正想知道的 —— 开奖号没更新时，他要的不是「服务正常」，
+    /// 而是「02:44 跑过一次，成功，八个彩种里六个数据齐了」。
+    struct Status: Decodable, Sendable {
+        var latestExecution: Execution?
+        /// 按远端彩种标识给的每个彩种数据状态。
+        var lotteries: [String: LotteryStatus]?
+
+        enum CodingKeys: String, CodingKey {
+            case lotteries
+            case latestExecution = "latest_execution"
+        }
+    }
+
+    struct Execution: Decodable, Sendable {
+        var executedAt: String?
+        var executionStatus: String?
+
+        enum CodingKeys: String, CodingKey {
+            case executedAt = "executed_at"
+            case executionStatus = "execution_status"
+        }
+
+        /// 契约里只有这两个值。**不认识的值一律不当成成功** ——
+        /// 把没见过的状态默认显示成「执行成功」是最坏的一种猜：
+        /// 真出事的时候界面上一片正常。
+        var isSuccess: Bool { executionStatus == "success" }
+        var isFailure: Bool { executionStatus == "failed" }
+    }
+
+    /// 单个彩种的数据状态。可能整个是 `null`，理由同 `LatestIssue`。
+    struct LotteryStatus: Decodable, Sendable {
+        var dataStatus: String? = nil
+
+        enum CodingKeys: String, CodingKey { case dataStatus = "data_status" }
+
+        init(from decoder: Decoder) throws {
+            if let single = try? decoder.singleValueContainer(), single.decodeNil() { return }
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            dataStatus = try container.decodeIfPresent(String.self, forKey: .dataStatus)
+        }
+
+        /// **只有 `completed` 算数据完整。**
+        ///
+        /// `numbers_ready` 是只拿到号码、奖金还没回来；`waiting` 是还没开奖。
+        /// 两者都还不能用来核对奖金，所以都不计入。彩种整个缺失同理。
+        var isCompleted: Bool { dataStatus == "completed" }
+    }
 }

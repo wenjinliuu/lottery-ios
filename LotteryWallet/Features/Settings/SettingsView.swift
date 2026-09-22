@@ -46,13 +46,14 @@ struct SettingsView: View {
                         DrawDataView()
                     } label: {
                         LabeledContent {
-                            // 日常要判断的就这一件事：数据是不是新的。
-                            Text(drawStore.latestUpdatedAt.isEmpty
-                                 ? "暂无" : DateText.friendly(drawStore.latestUpdatedAt))
+                            // 一行把三件事说完：后端什么时候跑的、跑成了没有、
+                            // 八个彩种齐了几个。开奖号没更新时要的就是这三件事。
+                            Text(statusSummary)
                                 .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(statusTint)
+                                .multilineTextAlignment(.trailing)
                         } label: {
-                            row("arrow.down.circle.fill", .blue, "开奖数据")
+                            row("checkmark.seal.fill", .blue, "数据状态")
                         }
                     }
 
@@ -133,7 +134,25 @@ struct SettingsView: View {
             // 导航栏不要自己糊底色，交给系统的 scroll edge effect。
             // 理由见 `HomeView` 里同一处那段注释。
             .navigationTitle("设置")
+            .task { await drawStore.loadStatus() }
         }
+    }
+
+    /// 设置页那一行的状态文案。
+    ///
+    /// 取数失败时**不显示失败**，而是继续显示上一次成功读到的那份 ——
+    /// 契约就是这么定的。真的一次都没读到才说「暂无执行记录」。
+    private var statusSummary: String {
+        if let status = drawStore.fetchStatus { return status.summary }
+        return drawStore.statusState.isLoading ? "读取中…" : "暂无执行记录"
+    }
+
+    /// 只有**执行失败**才标黄。
+    ///
+    /// 数据没齐（6/8）不标 —— 今天还没开奖的彩种本来就该是 waiting，
+    /// 把它画成警告，用户每天都会看到一次假警报。
+    private var statusTint: Color {
+        drawStore.fetchStatus?.needsAttention == true ? Palette.warning : .secondary
     }
 
     /// 重新取各彩种的最新一期与开奖日程，并刷新**已经看过的**那些彩种的往期。
@@ -144,6 +163,7 @@ struct SettingsView: View {
             defer { isRefreshing = false }
             await drawStore.refresh()
             await drawStore.refreshLoadedRecents()
+            await drawStore.loadStatus(force: true)
         }
     }
 

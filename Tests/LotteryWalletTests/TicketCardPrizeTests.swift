@@ -163,6 +163,64 @@ final class TicketCardPrizeTests: XCTestCase {
         XCTAssertEqual(card.wonCount + card.pendingPrizeCount, 2)
     }
 
+    // MARK: - 展不展得开
+
+    /// **复式 / 胆拖一律要能展开，跟注数无关。**
+    ///
+    /// 这两种票收起时只画整票那两行号码，逐注号码只有展开才有。原来的判据
+    /// 只看「注数 > 5」，于是双色球 6 红 2 蓝（2 注）、2 胆 5 拖（5 注）、
+    /// 大乐透 1 胆 5 拖（5 注）这些常见票型**永远看不到自己那几注号码**，
+    /// 点了也没反应 —— 常见胆拖有一半落在这个区间。
+    ///
+    /// 判据在视图里（`WalletTicketCard.isCollapsible`），这里钉的是它依赖的
+    /// 那个事实：这些票的 `whole` 非空而 `count` 很小，两个条件同时成立。
+    func testSmallSystemAndDantuoTicketsStillHaveWholeView() throws {
+        // 双色球 6 红 + 2 蓝复式 → 2 注
+        let small = try card(records(game: .ssq,
+                                     selections: [.red: SectionSelection(selected: [1, 2, 3, 4, 5, 6]),
+                                                  .blue: SectionSelection(selected: [7, 8])],
+                                     mode: .system,
+                                     prizes: [0, 0],
+                                     statuses: [.lost, .lost]))
+        XCTAssertEqual(small.count, 2)
+        XCTAssertFalse(small.whole.isEmpty,
+                       "2 注的复式仍然按整票画 —— 所以它必须能展开，否则逐注号码永远看不到")
+
+        // 双色球 2 胆 5 拖 → 5 注，正好卡在旧判据的边界上
+        let dantuo = try card(records(game: .ssq,
+                                      selections: [.red: SectionSelection(selected: [1, 2, 3, 4, 5, 6, 7], dan: [1, 2]),
+                                                   .blue: SectionSelection(selected: [8])],
+                                      mode: .dantuo,
+                                      prizes: Array(repeating: 0, count: 5),
+                                      statuses: Array(repeating: .lost, count: 5)))
+        XCTAssertEqual(dantuo.count, 5)
+        XCTAssertFalse(dantuo.whole.isEmpty)
+        XCTAssertLessThanOrEqual(dantuo.count, 5,
+                                 "前提：注数没超过旧判据的阈值，否则这条用例测不到那个 bug")
+    }
+
+    /// 单式票不受影响：5 注以内本来就全展开，没有「藏起来的号码」。
+    func testSmallSingleTicketHasNoWholeView() throws {
+        let items = (0..<3).map { index -> TicketRecord in
+            let ticket = Ticket(numbers: NumberSet([.red: [1, 2, 3, 4, 5, 6 + index], .blue: [7]]),
+                                entryLabel: "单式")
+            let record = TicketRecord(id: String(format: "r%04d", index),
+                                      batchId: "batch",
+                                      game: .ssq,
+                                      ticket: ticket,
+                                      entryKind: .manual,
+                                      target: DrawTarget(expect: "2026109", openDate: "2026-09-20"),
+                                      price: 2,
+                                      multiple: 1,
+                                      source: "test")
+            record.status = .lost
+            return record
+        }
+        let card = try card(items)
+        XCTAssertTrue(card.whole.isEmpty, "三注互不相干的单式不该被当成复式")
+        XCTAssertEqual(card.count, 3)
+    }
+
     // MARK: - 只数前几注是错的
 
     /// 中奖注数必须按**全部记录**数，不能从 `lines` 里数。
