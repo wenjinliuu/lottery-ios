@@ -849,11 +849,14 @@ struct TicketScanView: View {
             case (.dlt, .back): base = "后区"
             default: base = section.label
             }
-            if ticket.play == .dantuo, section.count > 1 {
+            // 一律问 `pickCount`，不用 `section.count`。这两处在双色球上
+            // 碰巧一样，正是这种「碰巧对」让快乐8 那个 bug 活了很久。
+            let need = ticket.pickCount(for: section)
+            if ticket.play == .dantuo, need > 1 {
                 rows.append(ZoneRow(key: section.key, label: base + "胆", color: section.color, values: selection.dan))
                 rows.append(ZoneRow(key: section.key, label: base + "拖", color: section.color, values: selection.tuo))
             } else {
-                let suffix = ticket.game == .ssq ? (selection.selected.count > section.count ? "复" : "单") : ""
+                let suffix = ticket.game == .ssq ? (selection.selected.count > need ? "复" : "单") : ""
                 rows.append(ZoneRow(key: section.key, label: base + suffix,
                                     color: section.color, values: selection.selected))
             }
@@ -1351,7 +1354,9 @@ private struct ScanZoneEditor: View {
                     .frame(maxHeight: .infinity)
                 if let section {
                     VStack(alignment: .leading, spacing: 14) {
-                        if ticket.play == .dantuo, section.count > 1 {
+                        // 胆码要留得出拖码的位置，判据是**按玩法算的个数**，
+                        // 不是彩种默认的 `section.count`。
+                        if ticket.play == .dantuo, ticket.pickCount(for: section) > 1 {
                             Picker("选号类型", selection: $danPicking) {
                                 Text("选胆码").tag(true)
                                 Text("选拖码").tag(false)
@@ -1360,7 +1365,7 @@ private struct ScanZoneEditor: View {
                         }
                         NumberPadSection(section: section,
                                          selection: $selection,
-                                         required: section.count,
+                                         required: ticket.pickCount(for: section),
                                          mode: ticket.play.entryMode,
                                          danPicking: danPicking,
                                          onReject: { showToast($0, symbol: "hand.raised", feedback: .warning) })
@@ -1391,7 +1396,13 @@ private struct ScanZoneEditor: View {
     }
 }
 
-/// 改单式票里的一注。一注跨两个号码区（红+蓝、前区+后区），一起改完再落回。
+/// 改单式票里的一注。
+///
+/// **本体是 `TicketLineEditor`**，三处共用同一个。这里只负责两件扫描页
+/// 特有的事：把票面参照图传进去，以及「补一注」取消时要把那一注空的删掉。
+///
+/// 上一版这里是一份独立实现，把「要选几个」写成了 `section.count` ——
+/// 快乐8 选五的票让用户去点 20 个号，选够 5 个之后「完成」还是灰的。
 private struct ScanLineEditor: View {
     @Binding var ticket: ScannedTicket
     let lineIndex: Int
@@ -1399,125 +1410,29 @@ private struct ScanLineEditor: View {
     /// 让他一边翻回上一页看图一边改号是最容易改错的做法。
     var image: UIImage?
 
-    @Environment(\.dismiss) private var dismiss
-    @Environment(ToastCenter.self) private var showToast
-    @State private var selections: [SectionKey: SectionSelection] = [:]
-
-    /// 问号没补完就不能点「完成」。
-    ///
-    /// 光数个数是不够的：识别出来的那一注**位数本来就是齐的**，
-    /// 只是其中某一位是问号。不查这个，用户一路点"完成"就把 -1 存进去了。
-    private var isComplete: Bool {
-        ticket.game.sections.allSatisfy { section in
-            let values = selections[section.key]?.selected ?? []
-            return values.count == section.count && !values.contains { $0 < 0 }
-        }
-    }
-
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 12) {
-                TicketReferenceImage(image: image, expands: true)
-                    .frame(maxHeight: .infinity)
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(ticket.game.sections) { section in
-                        NumberPadSection(section: section,
-                                         selection: binding(for: section.key),
-                                         required: section.count,
-                                         mode: .manual,
-                                         danPicking: false,
-                                         allowsUnknown: true,
-                                         onReject: { showToast($0, symbol: "hand.raised", feedback: .warning) })
-                    }
+        TicketLineEditor(
+            game: ticket.game,
+            // 每一注可以有自己的玩法（3D 一张票上混着组六和组三），
+            // 所以要按**这一注**解析，不能只看整票那个。
+            playMode: ticket.effectivePlayMode(lineIndex: lineIndex),
+            title: "修改第 \(lineIndex + 1) 注",
+            image: image,
+            // 识别出来的票可能有某一位是问号，滚轮得先能显示这个状态。
+            allowsUnknown: true,
+            initial: ticket.lines.indices.contains(lineIndex) ? ticket.lines[lineIndex] : NumberSet(),
+            onCancel: {
+                // 「补一注」是先塞一注空号码再打开这个页面的。用户点取消
+                // 就该当没发生过，不能在票上留一注空的。
+                if ticket.lines.indices.contains(lineIndex), ticket.lines[lineIndex].isEmpty {
+                    ticket.lines.remove(at: lineIndex)
                 }
-                .contentCard()
-                .layoutPriority(1)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 16)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Palette.canvas)
-            .navigationTitle("修改第 \(lineIndex + 1) 注")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
-                        // 「补一注」是先塞一注空号码再打开这个页面的。
-                        // 用户点取消就该当没发生过，不能在票上留一注空的。
-                        if ticket.lines.indices.contains(lineIndex),
-                           ticket.lines[lineIndex].isEmpty {
-                            ticket.lines.remove(at: lineIndex)
-                        }
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") {
-                        guard ticket.lines.indices.contains(lineIndex) else { return dismiss() }
-                        for section in ticket.game.sections {
-                            ticket.lines[lineIndex][section.key] =
-                                (selections[section.key]?.selected ?? []).sorted()
-                        }
-                        dismiss()
-                    }
-                    .disabled(!isComplete)
-                }
-            }
-            .onAppear {
+            },
+            onDone: { numbers in
                 guard ticket.lines.indices.contains(lineIndex) else { return }
-                let numbers = ticket.lines[lineIndex]
-                selections = Dictionary(uniqueKeysWithValues: ticket.game.sections.map {
-                    ($0.key, SectionSelection(selected: numbers[$0.key]))
-                })
+                ticket.lines[lineIndex] = numbers
             }
-        }
-    }
-
-    private func binding(for key: SectionKey) -> Binding<SectionSelection> {
-        Binding(get: { selections[key] ?? SectionSelection() },
-                set: { selections[key] = $0 })
-    }
-}
-
-/// 改号页面顶上的票面参照图。可捏合放大 —— 要核对的就是那几行小字。
-private struct TicketReferenceImage: View {
-    var image: UIImage?
-    /// 是否吃掉版面上剩下的全部高度。
-    ///
-    /// 改号的时候人是**盯着票面**在改的，图越大越好认。号码盘的高度是定死的
-    /// （几行球就是几行），所以正确的分法是：号码盘贴底、按自己需要的高度占位，
-    /// 剩下多少全给图 —— 而不是给图一个 210 的死高度、底下空一大片。
-    var expands = false
-    @State private var isZoomPresented = false
-
-    var body: some View {
-        if let image {
-            Button { isZoomPresented = true } label: {
-                ZStack(alignment: .bottomTrailing) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: expands ? .infinity : 210)
-                    Label("放大", systemImage: "arrow.up.left.and.arrow.down.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.black.opacity(0.45), in: Capsule())
-                        .padding(8)
-                }
-                .frame(maxWidth: .infinity)
-                .background(Palette.card)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Palette.separator))
-            }
-            .buttonStyle(.plain)
-            .fullScreenCover(isPresented: $isZoomPresented) {
-                PhotoZoomView(image: image)
-            }
-        }
+        )
     }
 }
 

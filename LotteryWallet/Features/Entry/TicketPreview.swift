@@ -132,6 +132,12 @@ struct TicketPreviewCard: View {
     var removableCount: Int = 0
     /// 手选模式下逐注删除。
     var onRemoveLine: ((Int) -> Void)?
+    /// 手选模式下逐注**改号**。
+    ///
+    /// 没有它的时候，「修改彩票」只能把整注删掉重录 —— 一张五注的票改错
+    /// 一个号，用户要重新点四十个球。改一注是修改这件事最常见的动作，
+    /// 它必须就在那一注旁边。
+    var onEditLine: ((Int) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -187,18 +193,33 @@ struct TicketPreviewCard: View {
                         }
                     }
                     Spacer(minLength: 0)
-                    if let onRemoveLine, let index = lineIndex(of: row) {
-                        Button {
-                            withAnimation(.easeOut(duration: 0.18)) { onRemoveLine(index) }
-                        } label: {
-                            Image(systemName: "minus.circle.fill")
-                                .font(.footnote)
-                                .foregroundStyle(.tertiary)
-                                .frame(width: 32, height: 32)
-                                .contentShape(Rectangle())
+                    if let index = lineIndex(of: row) {
+                        if let onEditLine {
+                            Button {
+                                onEditLine(index)
+                            } label: {
+                                Image(systemName: "square.and.pencil")
+                                    .font(.footnote)
+                                    .foregroundStyle(game.accent.accentColor)
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("修改第 \(index + 1) 注")
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("删除第 \(index + 1) 注")
+                        if let onRemoveLine {
+                            Button {
+                                withAnimation(.easeOut(duration: 0.18)) { onRemoveLine(index) }
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .font(.footnote)
+                                    .foregroundStyle(.tertiary)
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("删除第 \(index + 1) 注")
+                        }
                     }
                 }
             }
@@ -206,6 +227,9 @@ struct TicketPreviewCard: View {
     }
 
     /// 手选预览里行首是「3.」这样的注序号，从它反推是第几注。
+    ///
+    /// 末尾那条可能是**还没加入候选的当前选号**，它不在候选数组里 ——
+    /// 给它一个减号或铅笔只会点了没反应，所以按 `removableCount` 截断。
     private func lineIndex(of row: TicketPreview.Row) -> Int? {
         guard row.label.hasSuffix("."), let number = Int(row.label.dropLast()) else { return nil }
         let index = number - 1

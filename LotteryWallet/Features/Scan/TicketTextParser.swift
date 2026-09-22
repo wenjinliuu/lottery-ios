@@ -68,6 +68,28 @@ struct ScannedTicket: Identifiable, Hashable {
     /// 单注价格。大乐透追加 3 元，其余 2 元。
     var unitPrice: Double { game.unitPrice(addOn: addOn) }
 
+    /// 这张票（或其中某一注）实际生效的玩法键。
+    ///
+    /// 三层回退：**这一注自己印的 → 整票印的 → 彩种默认**。
+    /// 3D 和排列3 一张票上每一注可以是不同玩法，所以 `lineModes` 优先；
+    /// 快乐8 的「选几」是整票一个值，走第二层。
+    ///
+    /// 大乐透是例外：它的 `playMode` 存的是追加与否，而追加不影响选几个号，
+    /// 所以这里按 `addOn` 还原成 `normal` / `add`，和 `expandedLines` 同一套。
+    func effectivePlayMode(lineIndex: Int? = nil) -> String {
+        if game == .dlt { return addOn ? "add" : "normal" }
+        if let lineIndex, lineModes.indices.contains(lineIndex) {
+            let mode = lineModes[lineIndex]
+            if !mode.isEmpty { return mode }
+        }
+        return playMode.isEmpty ? game.defaultPlayMode : playMode
+    }
+
+    /// 这一注的某个号码区要选几个号。**改号界面必须问它，不能用 `section.count`。**
+    func pickCount(for section: GameSection, lineIndex: Int? = nil) -> Int {
+        game.pickCount(for: section, playMode: effectivePlayMode(lineIndex: lineIndex))
+    }
+
     /// 展开成一注一注。
     ///
     /// 单式票会过滤掉空号码：「补一注」是先塞一注空的再打开编辑器，
@@ -753,7 +775,9 @@ enum TicketTextParser {
 
         // 标签行读到号码，但玩法没写「复式/胆拖」——按选号个数反推
         if !selections.isEmpty {
-            let inferred = ticket.play == .single ? inferPlay(game: game, selections: selections) : ticket.play
+            let inferred = ticket.play == .single
+                ? inferPlay(game: game, playMode: ticket.effectivePlayMode(), selections: selections)
+                : ticket.play
             ticket.play = inferred
             if inferred == .single {
                 // 每个区都刚好选满，这就是一注单式，只是印成了带标签的样子
@@ -819,10 +843,25 @@ enum TicketTextParser {
     }
 
     /// 玩法没印清楚时按选号个数反推：有胆码就是胆拖，某个区多选了就是复式。
-    private static func inferPlay(game: GameKey, selections: [SectionKey: SectionSelection]) -> ScanPlay {
+    ///
+    /// **「多选了」按玩法算，不用 `section.count`。**
+    ///
+    /// 说清楚现状：这个改动**今天是个 no-op**。区标签（`zoneLabel`）只认
+    /// 双色球的红/蓝和大乐透的前区/后区，快乐8 没有区标签，`selections`
+    /// 恒为空，这个函数根本到不了；而双色球和大乐透的 `pickCount` 和
+    /// `section.count` 本来就相等。快乐8 的复式是靠玩法行里的「复式」
+    /// 两个字直接判出来的（见 `detectPlay`），不走这里。
+    ///
+    /// 那为什么还要改：哪天给快乐8 加上区标签、或者再来一个按玩法改
+    /// 选号个数的彩种，这里就是下一个踩坑的地方 —— 而且和扫描页改号那个
+    /// bug 是同一个形状，同样会在七个彩种上一路正常。
+    private static func inferPlay(game: GameKey,
+                                  playMode: String,
+                                  selections: [SectionKey: SectionSelection]) -> ScanPlay {
         if selections.values.contains(where: { !$0.dan.isEmpty }) { return .dantuo }
         for section in game.sections {
-            if (selections[section.key]?.selected.count ?? 0) > section.count { return .system }
+            let need = game.pickCount(for: section, playMode: playMode)
+            if (selections[section.key]?.selected.count ?? 0) > need { return .system }
         }
         return .single
     }

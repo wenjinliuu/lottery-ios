@@ -218,12 +218,21 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
 
     /// 投注时这个号码区实际要选几个号。
     ///
+    /// **这是「要选几个」唯一的答案，任何选号界面都必须问它。**
+    ///
     /// 快乐8 的 `section.count` 是**开奖**开出的 20 个号，投注选几个由玩法决定
-    /// （选一 … 选十）。其余彩种两者一致。
+    /// （选一 … 选十）。其余彩种两者一致，所以直接用 `section.count` 在
+    /// 七个彩种上都碰巧是对的 —— 正因为碰巧对，这个错误极难被发现：
+    /// 扫描复核页两处改号都写死了 `section.count`，于是一张快乐8 选五的票
+    /// 让用户去选 20 个号，选够 5 个还点不了「完成」，整张票改不动。
+    ///
+    /// 空玩法按彩种默认值算，不要当成 0。
     func pickCount(for section: GameSection, playMode: String) -> Int {
         guard self == .k8 else { return section.count }
-        return Int(playMode) ?? section.count
+        let mode = playMode.isEmpty ? defaultPlayMode : playMode
+        return Int(mode) ?? section.count
     }
+
 
     /// 开奖号的号码区定义。
     ///
