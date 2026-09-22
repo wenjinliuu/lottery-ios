@@ -200,9 +200,26 @@ final class TicketCardPrizeTests: XCTestCase {
     }
 
     /// 单式票不受影响：5 注以内本来就全展开，没有「藏起来的号码」。
+    ///
+    /// ## 号码必须**真的互不相干**
+    ///
+    /// 这条用例第一版写成了「红球只差最后一个号」的三注
+    /// （1-2-3-4-5-6 / 1-2-3-4-5-7 / 1-2-3-4-5-8），结果挂了 ——
+    /// 而且挂得对。那三注的并集是 8 个号、交集是 5 个号，按 5 胆 3 拖
+    /// 展开正好是 C(3,1) = 3 注，和记录条数严丝合缝，所以 `wholeZones`
+    /// 判定它是一张胆拖票。**它在数据上和真的胆拖票没有任何区别。**
+    ///
+    /// 这不是 bug，是 `combinations == records.count` 这条判据的固有代价：
+    /// 手选出来的几注恰好构成一个合法展开时，两者无从分辨。核对仍然逐注进行，
+    /// 只是画法变了。
+    ///
+    /// 所以这里的号码要选成**怎么凑都凑不出一个合法展开**的：三注红球完全
+    /// 不重叠，并集 18 个号选 6 是 18564 种，和 3 差了四个数量级。
     func testSmallSingleTicketHasNoWholeView() throws {
+        let reds = [[1, 2, 3, 4, 5, 6], [10, 11, 12, 13, 14, 15], [20, 21, 22, 23, 24, 25]]
+        let blues = [7, 16, 26]
         let items = (0..<3).map { index -> TicketRecord in
-            let ticket = Ticket(numbers: NumberSet([.red: [1, 2, 3, 4, 5, 6 + index], .blue: [7]]),
+            let ticket = Ticket(numbers: NumberSet([.red: reds[index], .blue: [blues[index]]]),
                                 entryLabel: "单式")
             let record = TicketRecord(id: String(format: "r%04d", index),
                                       batchId: "batch",
@@ -217,7 +234,7 @@ final class TicketCardPrizeTests: XCTestCase {
             return record
         }
         let card = try card(items)
-        XCTAssertTrue(card.whole.isEmpty, "三注互不相干的单式不该被当成复式")
+        XCTAssertTrue(card.whole.isEmpty, "三注互不相干的单式不该被当成复式或胆拖")
         XCTAssertEqual(card.count, 3)
     }
 
