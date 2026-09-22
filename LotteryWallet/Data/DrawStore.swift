@@ -121,10 +121,6 @@ final class DrawStore {
     private(set) var exhaustedHistory: Set<GameKey> = []
     /// 最近一次成功取数的来源，只用于诊断。
     private(set) var lastSource: LotteryDataSource?
-    /// 数据源体检结果。**只有用户打开「开奖数据」详情页才会有值。**
-    private(set) var health: DataSourceHealth?
-    private(set) var healthState: LoadState = .idle
-
     /// 服务端没给 `earliest_year` 时的兜底下限，防止无限往前探。
     /// 只在读旧镜像时才会用到。
     static let fallbackEarliestYear = 2003
@@ -340,36 +336,6 @@ final class DrawStore {
         }
     }
 
-    // MARK: - 数据源体检
-
-    /// 问一次数据源「你那边现在正不正常」。
-    ///
-    /// **绝不进冷启动。** 上一版每次启动都拉一次 health，
-    /// 而拉回来的东西从头到尾没有界面读过。
-    ///
-    /// ## 现在界面上没有入口，为什么还留着
-    ///
-    /// 「数据源状态」那一组已经从设置里去掉了（用户嫌用不到，确实如此：
-    /// 日常要判断的只是数据新不新，那看时间就够了）。这一层留着不是
-    /// 忘了删 —— 它是**唯一能发现「CloudBase 响应不再符合 V2 契约」的探针**。
-    /// 别的端点都走三级降级，CloudBase 一出问题就悄悄回落到 GitHub 镜像，
-    /// 界面上完全看不出来；只有 health 不兜底，问的就是主数据源自己。
-    ///
-    /// 契约校验和它那九条用例也一并留着。哪天需要重新露出来（比如又出现
-    /// 「开奖号怎么不更新」说不清是谁的锅），接上这个方法就行。
-    func loadHealth(force: Bool = false) async {
-        if !force, healthState == .loaded { return }
-        if healthState == .loading { return }
-        healthState = .loading
-        do {
-            health = try LotteryV2Mapper.health(await repository.health())
-            healthState = .loaded
-        } catch {
-            health = nil
-            healthState = .failed(message(for: error))
-        }
-    }
-
     // MARK: - 抓取状态
 
     /// 问一次后端「最近一班岗跑得怎么样」。
@@ -377,8 +343,9 @@ final class DrawStore {
     /// **失败时保留上一次成功的结果**，只把状态标成失败。这是契约里写明的：
     /// 网络抖一下就把界面变成「暂无执行记录」，用户会以为后端出事了。
     ///
-    /// 和 health 一样只打 CloudBase、不走兜底、不进缓存，也不是
-    /// `LotteryEndpoint` 的成员 —— 结构上进不了冷启动。
+    /// **只打 CloudBase、不走兜底、不进缓存**，也不是 `LotteryEndpoint`
+    /// 的成员 —— 结构上进不了冷启动。问的就是 CloudBase 那边的任务跑得
+    /// 怎么样，回落到一个静态镜像去问等于换了个人回答。
     func loadStatus(force: Bool = false) async {
         if !force, statusState == .loaded { return }
         if statusState == .loading { return }

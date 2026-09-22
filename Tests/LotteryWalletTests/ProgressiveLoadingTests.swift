@@ -60,7 +60,6 @@ final class ProgressiveLoadingTests: XCTestCase {
         XCTAssertFalse(paths.contains { $0.contains("/draws/") }, "冷启动不该拉任何彩种的最近开奖")
         XCTAssertFalse(paths.contains { $0.contains("/by-year/") }, "冷启动不该拉任何年度历史")
         XCTAssertFalse(paths.contains { $0.contains("/calendar/") }, "冷启动不该拉年度日历")
-        XCTAssertFalse(paths.contains { $0.contains("health") }, "冷启动不该拉 health")
         XCTAssertFalse(paths.contains { $0.contains("status") }, "冷启动不该拉 status")
     }
 
@@ -254,61 +253,10 @@ final class ProgressiveLoadingTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.count("v2/calendar/\(ChinaClock.year() + 1)"), 1)
     }
 
-    // MARK: - 数据源体检
-
-    /// health **只在显式调用时才请求**，而且只打 CloudBase。
-    ///
-    /// 界面上目前没有入口（「数据源状态」那一组已按用户要求去掉了），
-    /// 但这一层保留着：它是唯一能发现「CloudBase 响应不再符合 V2 契约」
-    /// 的探针 —— 别的端点走三级降级，GitHub 兜底会把主数据源的问题盖住，
-    /// 只有 health 不兜底。要重新露出来时接上 `loadHealth()` 即可。
-    func testHealthIsOnDemandAndCloudBaseOnly() async {
-        StubURLProtocol.stub("v2/bootstrap", body: LotteryV2Fixtures.bootstrap)
-        StubURLProtocol.stub("v2/health", body: LotteryV2Fixtures.health)
-        let store = makeStore()
-
-        await store.bootstrap()
-        XCTAssertEqual(StubURLProtocol.count("v2/health"), 0, "冷启动不该碰 health")
-        XCTAssertNil(store.health)
-
-        await store.loadHealth()
-        XCTAssertEqual(StubURLProtocol.count("v2/health"), 1)
-        XCTAssertEqual(store.health?.isHealthy, true)
-        // 它问的就是主数据源自己，不该回落到别处去问
-        XCTAssertEqual(StubURLProtocol.count("v2/health.json"), 0)
-    }
-
-    /// 已经查过就不重复查，除非明确要求。
-    func testHealthIsNotRefetched() async {
-        StubURLProtocol.stub("v2/health", body: LotteryV2Fixtures.health)
-        let store = makeStore()
-        await store.loadHealth()
-        await store.loadHealth()
-        XCTAssertEqual(StubURLProtocol.count("v2/health"), 1)
-
-        await store.loadHealth(force: true)
-        XCTAssertEqual(StubURLProtocol.count("v2/health"), 2)
-    }
-
-    /// 响应不符合契约时，界面上要看到**具体缺了什么**，而不是一句「未知」。
-    func testHealthContractViolationSurfacesTheReason() async {
-        StubURLProtocol.stub("v2/bootstrap", body: LotteryV2Fixtures.bootstrap)
-        // V1 那份 health.json 的形状：schema / version 都不对
-        StubURLProtocol.stub("v2/health", body: Data(LotteryV2Fixtures.legacyHealthJSON.utf8))
-        let store = makeStore()
-        await store.bootstrap()
-        await store.loadHealth()
-
-        XCTAssertNil(store.health, "不符合契约就不该产出一个「状态未知」的结果")
-        let reason = store.healthState.failureText
-        XCTAssertTrue(reason?.contains("schema") ?? false,
-                      "失败原因要说清是哪一项对不上，实际是 \(String(describing: reason))")
-        XCTAssertEqual(store.bootstrapState, .loaded, "诊断项出问题不该影响开奖数据")
-    }
-
     // MARK: - 抓取状态
 
-    /// `/v2/status` **只在显式调用时才请求**，和 health 一样只打 CloudBase。
+    /// `/v2/status` **只在显式调用时才请求**，而且只打 CloudBase：
+    /// 它问的就是那边的任务跑得怎么样，回落到静态镜像去问等于换了个人回答。
     func testStatusIsOnDemandAndCloudBaseOnly() async {
         StubURLProtocol.stub("v2/bootstrap", body: LotteryV2Fixtures.bootstrap)
         StubURLProtocol.stub("v2/status", body: LotteryV2Fixtures.status)
@@ -367,19 +315,6 @@ final class ProgressiveLoadingTests: XCTestCase {
 
         await store.bootstrap()
         XCTAssertNotNil(store.lastFetchedAt)
-    }
-
-    /// 查不到 health 不能影响别的东西 —— 它只是个诊断项。
-    func testHealthFailureIsContained() async {
-        StubURLProtocol.stub("v2/bootstrap", body: LotteryV2Fixtures.bootstrap)
-        let store = makeStore()
-        await store.bootstrap()
-        await store.loadHealth()   // 没配桩，必然失败
-
-        XCTAssertTrue(store.healthState.hasFailed)
-        XCTAssertNil(store.health)
-        XCTAssertEqual(store.bootstrapState, .loaded)
-        XCTAssertNotNil(store.latestDraw(for: .ssq))
     }
 
     // MARK: - 三级降级

@@ -50,26 +50,8 @@ actor LotteryAPIClient {
         }
     }
 
-    /// 数据源体检。**只打 CloudBase，不走 GitHub 兜底，也不进缓存。**
-    ///
-    /// 三个「不」都是有意的：
-    /// - 它问的就是 CloudBase 自己的状态，回落到别处问等于换了个人回答；
-    /// - GitHub 的 V2 镜像里根本没有这个文件（404）；
-    /// - 缓存一份体检报告毫无意义 —— 要的就是「此刻」。
-    ///
-    /// 它也**不是任何端点**（`LotteryEndpoint` 里没有 health 这一项），
-    /// 这样它在结构上就不可能被误接进冷启动。
-    func fetchHealth() async throws -> LotteryV2.Health {
-        let data = try await get(cloudBase.appendingPathComponent("v2/health"), timeout: 10)
-        do {
-            return try JSONDecoder().decode(LotteryV2.Health.self, from: data)
-        } catch {
-            throw LotteryDataError.decoding(String(describing: error))
-        }
-    }
-
-    /// 后端最近一次抓取任务的状态。**和 health 一样：只打 CloudBase，
-    /// 不走 GitHub 兜底，也不进缓存。**
+    /// 后端最近一次抓取任务的状态。**只打 CloudBase，不走 GitHub 兜底，
+    /// 也不进缓存。**
     ///
     /// 三个「不」同一套理由：问的就是 CloudBase 那边的任务跑得怎么样，
     /// 回落到一个静态镜像去问等于换了个人回答；镜像里也根本没有这个文件；
@@ -117,13 +99,6 @@ enum LotteryDataError: LocalizedError {
     case empty
     case decoding(String)
     case noData
-    /// 响应解出来了，但**不符合约定的契约**（必需字段缺失、固定值对不上）。
-    ///
-    /// 和 `decoding` 分开是有意的：解码失败是「读不懂」，契约违例是
-    /// 「读懂了，但不是说好的那个东西」。后者不能被当成普通的
-    /// 「暂时没数据」咽下去 —— 咽下去就成了一个永远显示「未知」的界面，
-    /// 而没有人知道该去查服务端还是查客户端。
-    case contractViolation(endpoint: String, problems: [String])
 
     var errorDescription: String? {
         switch self {
@@ -137,10 +112,6 @@ enum LotteryDataError: LocalizedError {
             "开奖数据格式不对"
         case .noData:
             "还没有可显示的开奖数据"
-        case .contractViolation(let endpoint, let problems):
-            // 这句是给人看的，而且**必须说清差在哪** —— 一句「格式不对」
-            // 没法判断该去查服务端还是查客户端。
-            "\(endpoint) 的响应不符合约定格式：\(problems.joined(separator: "、"))"
         }
     }
 
@@ -148,8 +119,6 @@ enum LotteryDataError: LocalizedError {
     var diagnostic: String {
         switch self {
         case .decoding(let detail): "解码失败：\(detail)"
-        case .contractViolation(let endpoint, let problems):
-            "契约违例 \(endpoint)：\(problems.joined(separator: "; "))"
         default: errorDescription ?? "未知错误"
         }
     }

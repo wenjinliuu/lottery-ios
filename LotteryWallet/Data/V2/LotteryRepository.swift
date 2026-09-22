@@ -112,12 +112,8 @@ actor LotteryRepository {
         }
     }
 
-    /// 数据源体检。**不缓存、不兜底、不属于任何端点**，理由见
-    /// `LotteryAPIClient.fetchHealth`。只有用户打开「开奖数据」详情页才会调。
-    func health() async throws -> LotteryV2.Health {
-        try await client.fetchHealth()
-    }
-
+    /// 抓取状态。**不缓存、不兜底、不属于任何端点**，理由见
+    /// `LotteryAPIClient.fetchStatus`。只有设置页才会调。
     func status() async throws -> LotteryV2.Status {
         try await client.fetchStatus()
     }
