@@ -23,6 +23,9 @@ on:
         type: number
         default: 12
 
+permissions:
+  contents: write # Reusable screenshots job requests this scope; simulator job downgrades to read.
+
 concurrency:
   group: agent-preview-${{ github.ref }}
   cancel-in-progress: true
