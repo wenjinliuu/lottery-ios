@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   release:
-    uses: wenjinliuu/ios-ci-workflows/.github/workflows/testflight-release.yml@1041aed9c6c57d266ce19e40bc2ffc9dbf615a5a
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/testflight-release.yml@89da677e072827be1229167b285c7363c2294363
     with:
       workdir: .
       project: LotteryWallet.xcodeproj
