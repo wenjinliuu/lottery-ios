@@ -81,6 +81,28 @@ final class DrawStore {
     /// 各彩种的开奖日程。V2 把它从每条开奖记录里挪了出来，一个彩种一份。
     private(set) var schedules: [GameKey: DrawSchedule] = [:]
     private(set) var latestUpdatedAt: String = ""
+    /// 数据源最后一次**抓到完整开奖数据**的时间（各彩种 `fetched_at` 的最大值）。
+    ///
+    /// 和 `latestUpdatedAt` 分开存，因为它们回答的是两个不同的问题：
+    /// `latestUpdatedAt` 是「这份数据文件什么时候拼出来的」——每次导出都变，
+    /// 哪怕后端一个号码都没抓到；`sourceFetchedAt` 是「后端什么时候真的把
+    /// 号码球和金额落进库里」。开奖号迟迟不更新的时候，能分清是谁没动的
+    /// 只有后者。
+    private(set) var sourceFetchedAt: String = ""
+    /// **这台设备**最近一次成功取到数据的时刻。
+    ///
+    /// 设置页「更新时间」显示的就是它 —— 回答的是「我这个 App 上一次
+    /// 去腾讯云拿数据是什么时候」，通常就是最近一次打开应用的时间。
+    /// 和后端那边的时间（`FetchStatus.executedAt`）是两个方向上的事：
+    /// 一个是本机去拿，一个是后端去抓。两个都看得见才分得清是谁没动。
+    private(set) var lastFetchedAt: Date?
+    /// 后端最近一次抓取任务的状态（`/v2/status`）。
+    ///
+    /// **取数失败时不清空** —— 契约要求保留上一次成功读到的状态。
+    /// 清空的话，网络抖一下界面就变成「暂无执行记录」，
+    /// 用户会以为后端出事了，而实际上只是这一次没问到。
+    private(set) var fetchStatus: FetchStatus?
+    private(set) var statusState: LoadState = .idle
     /// 年度开奖日历，按年存。
     private(set) var yearCalendars: [Int: DrawCalendarYear] = [:]
 
@@ -99,10 +121,6 @@ final class DrawStore {
     private(set) var exhaustedHistory: Set<GameKey> = []
     /// 最近一次成功取数的来源，只用于诊断。
     private(set) var lastSource: LotteryDataSource?
-    /// 数据源体检结果。**只有用户打开「开奖数据」详情页才会有值。**
-    private(set) var health: DataSourceHealth?
-    private(set) var healthState: LoadState = .idle
-
     /// 服务端没给 `earliest_year` 时的兜底下限，防止无限往前探。
     /// 只在读旧镜像时才会用到。
     static let fallbackEarliestYear = 2003
@@ -154,6 +172,8 @@ final class DrawStore {
         let result = LotteryV2Mapper.bootstrap(payload)
         schedules = result.schedules
         latestUpdatedAt = result.generatedAt.isEmpty ? DateText.day(updatedAt) : result.generatedAt
+        sourceFetchedAt = result.fetchedAt
+        lastFetchedAt = updatedAt
         lastSource = source
         merge(result.latest)
     }
@@ -316,22 +336,26 @@ final class DrawStore {
         }
     }
 
-    // MARK: - 数据源体检
+    // MARK: - 抓取状态
 
-    /// 问一次数据源「你那边现在正不正常」。
+    /// 问一次后端「最近一班岗跑得怎么样」。
     ///
-    /// **只能从「设置 → 开奖数据」这一个地方调，绝不进冷启动。**
-    /// 上一版每次启动都拉一次 health，而拉回来的东西从头到尾没有界面读过。
-    func loadHealth(force: Bool = false) async {
-        if !force, healthState == .loaded { return }
-        if healthState == .loading { return }
-        healthState = .loading
+    /// **失败时保留上一次成功的结果**，只把状态标成失败。这是契约里写明的：
+    /// 网络抖一下就把界面变成「暂无执行记录」，用户会以为后端出事了。
+    ///
+    /// **只打 CloudBase、不走兜底、不进缓存**，也不是 `LotteryEndpoint`
+    /// 的成员 —— 结构上进不了冷启动。问的就是 CloudBase 那边的任务跑得
+    /// 怎么样，回落到一个静态镜像去问等于换了个人回答。
+    func loadStatus(force: Bool = false) async {
+        if !force, statusState == .loaded { return }
+        if statusState == .loading { return }
+        statusState = .loading
         do {
-            health = try LotteryV2Mapper.health(await repository.health())
-            healthState = .loaded
+            fetchStatus = LotteryV2Mapper.status(try await repository.status())
+            statusState = .loaded
         } catch {
-            health = nil
-            healthState = .failed(message(for: error))
+            // 这里**不动** `fetchStatus`。
+            statusState = .failed(message(for: error))
         }
     }
 

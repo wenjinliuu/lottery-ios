@@ -121,6 +121,18 @@ enum DateText {
         return formatter
     }()
 
+    /// `09月22日 02:44` —— 月日**补零**。
+    ///
+    /// 和 `friendlyFormatter` 的 `M月d日` 差一个零，看着是小事，但设置页上
+    /// 那一行是固定格式的状态行，宽度跳来跳去很难看。
+    private static let paddedFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = chinaTimeZone
+        formatter.dateFormat = "MM月dd日 HH:mm"
+        return formatter
+    }()
+
     private static let friendlyFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
@@ -130,6 +142,20 @@ enum DateText {
     }()
 
     static func day(_ date: Date) -> String { dayFormatter.string(from: date) }
+
+    /// ISO-8601 原文 → `09月22日 02:44`（上海时区）。解析不出来就原样返回。
+    static func padded(_ raw: String) -> String {
+        guard let date = parse(raw) else { return raw }
+        return paddedFormatter.string(from: date)
+    }
+
+    /// 一个 `Date` 的「M月d日 HH:mm」。
+    ///
+    /// **不要写成 `friendly(day(date))`。** `day` 只产出 `yyyy-MM-dd`，
+    /// 时分秒在那一步就没了，再交给 `friendly` 解析出来永远是 0 点 0 分 ——
+    /// 备份列表上每一份都显示成「9月22日 00:00」正是这么来的。
+    /// 有 `Date` 就直接格式化，别绕字符串。
+    static func stamp(_ date: Date) -> String { friendlyFormatter.string(from: date) }
 
     /// "08-31" 形式，卡片副标题用。
     static func monthDay(_ raw: String) -> String {

@@ -225,71 +225,62 @@ extension LotteryV2 {
             case saleCloseTime = "sale_close_time"
         }
     }
-}
 
-// MARK: - 数据源健康
+    // MARK: - 抓取状态 /v2/status
 
-extension LotteryV2 {
-    /// `/v2/health`：**数据源自己的体检报告**，不是开奖数据。
+    /// 后端最近一次抓取任务跑得怎么样。
     ///
-    /// 用处只有一个场景：用户说「开奖号怎么没更新」时，用来分清是谁的锅 ——
-    /// 它说正常就是 App 这边的事（缓存没刷、请求失败），它说抓取卡住了就是
-    /// 后端的事，App 怎么重试都没用。
-    ///
-    /// **绝不进冷启动**，也没有 GitHub 兜底文件（文档 §3.5）。
-    /// 只有用户打开「设置 → 开奖数据」时才请求一次。
-    ///
-    /// ## 字段按正式契约写，不再猜
-    ///
-    /// 曾经这里是「`ok` 和 `status` 两套都认、`updated_at` 和 `generated_at`
-    /// 两套都认」—— 那是在文档还没给 schema 时照着 V1 的
-    /// `public_data/health.json` 猜的。**V2 明确不返回 `status`、`healthy`、
-    /// `updated_at`、`checked_at`、`message`**，所以那些替代字段全部去掉了。
-    ///
-    /// 留着猜测的害处不是解码失败，而是**解码成功但没意义**：认不出的键被
-    /// 忽略、缺失的键是 nil，界面于是永远显示「未知」，而你分不清那是数据源
-    /// 真的没给，还是我们字段写错了。现在必需字段缺一个就报契约错误。
-    struct Health: Decodable, Sendable {
-        var schema: String?
-        var version: Int?
-        /// **唯一的健康状态字段。**
-        var ok: Bool?
-        var generatedAt: String?
-        var source: String?
-        /// 按远端彩种标识给的最新一期。某个彩种没有记录时值是 `null`，
-        /// 同时 `ok` 为 `false` —— 所以这里必须能装下 `null`。
-        var latest: [String: LatestIssue]?
+    /// 问的是「你**上一班岗**干完了没有、干成了没有」—— 开奖号没更新时，
+    /// 用户要的不是一句「服务正常」，而是「02:44 跑过一次，成功，
+    /// 八个彩种里六个数据齐了」。
+    struct Status: Decodable, Sendable {
+        var latestExecution: Execution?
+        /// 按远端彩种标识给的每个彩种数据状态。
+        var lotteries: [String: LotteryStatus]?
 
         enum CodingKeys: String, CodingKey {
-            case schema, version, ok, source, latest
-            case generatedAt = "generated_at"
+            case lotteries
+            case latestExecution = "latest_execution"
         }
-
-        /// 契约规定的固定值。
-        static let expectedSchema = "duigehao.lottery.health"
-        static let expectedVersion = 2
     }
 
-    /// `latest` 里的一项。**可能整个是 `null`。**
-    ///
-    /// 没有写成 `[String: LatestIssue?]` —— 字典里装 Optional 依赖
-    /// `Optional` 的 Decodable 合成，那条路在不同 Swift 版本上表现不一致，
-    /// 踩中了就是整份 health 解码失败。自己吃掉 `null`：解出来是个空壳，
-    /// `isMissing` 为真，语义一点不丢。
-    struct LatestIssue: Decodable, Sendable {
-        var issue: FlexibleText? = nil
-        var date: String? = nil
+    struct Execution: Decodable, Sendable {
+        var executedAt: String?
+        var executionStatus: String?
 
-        enum CodingKeys: String, CodingKey { case issue, date }
+        enum CodingKeys: String, CodingKey {
+            case executedAt = "executed_at"
+            case executionStatus = "execution_status"
+        }
+
+        /// 契约里只有这两个值。**不认识的值一律不当成成功** ——
+        /// 把没见过的状态默认显示成「执行成功」是最坏的一种猜：
+        /// 真出事的时候界面上一片正常。
+        var isSuccess: Bool { executionStatus == "success" }
+        var isFailure: Bool { executionStatus == "failed" }
+    }
+
+    /// 单个彩种的数据状态。**可能整个是 `null`。**
+    ///
+    /// 没有写成 `[String: LotteryStatus?]` —— 字典里装 Optional 依赖
+    /// `Optional` 的 Decodable 合成，那条路在不同 Swift 版本上表现不一致，
+    /// 踩中了就是整份 status 解码失败。自己吃掉 `null`：解出来是个空壳，
+    /// `isCompleted` 为假，语义一点不丢。
+    struct LotteryStatus: Decodable, Sendable {
+        var dataStatus: String? = nil
+
+        enum CodingKeys: String, CodingKey { case dataStatus = "data_status" }
 
         init(from decoder: Decoder) throws {
             if let single = try? decoder.singleValueContainer(), single.decodeNil() { return }
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            issue = try container.decodeIfPresent(FlexibleText.self, forKey: .issue)
-            date = try container.decodeIfPresent(String.self, forKey: .date)
+            dataStatus = try container.decodeIfPresent(String.self, forKey: .dataStatus)
         }
 
-        /// `null`，或者给了对象但没有期号 —— 都算「这个彩种没有记录」。
-        var isMissing: Bool { (issue?.value ?? "").isEmpty }
+        /// **只有 `completed` 算数据完整。**
+        ///
+        /// `numbers_ready` 是只拿到号码、奖金还没回来；`waiting` 是还没开奖。
+        /// 两者都还不能用来核对奖金，所以都不计入。彩种整个缺失同理。
+        var isCompleted: Bool { dataStatus == "completed" }
     }
 }

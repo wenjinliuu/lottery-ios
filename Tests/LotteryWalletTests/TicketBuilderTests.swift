@@ -154,8 +154,17 @@ final class TicketBuilderTests: XCTestCase {
         guard let section = GameKey.k8.sections.first else { return XCTFail("快乐8 没有号码区") }
         XCTAssertEqual(GameKey.k8.pickCount(for: section, playMode: "5"), 5)
         XCTAssertEqual(GameKey.k8.pickCount(for: section, playMode: "10"), 10)
-        // 玩法缺失时退回开奖个数，不至于算出 0 注
-        XCTAssertEqual(GameKey.k8.pickCount(for: section, playMode: ""), section.count)
+
+        // 玩法缺失时退回**彩种默认玩法**（选十），不是开奖的 20 个。
+        //
+        // 这条断言以前写的是 `section.count`（20），理由是「不至于算出 0 注」。
+        // 那个理由成立，但 20 是个**永远无效**的答案：快乐8 一注最多选十，
+        // 20 个号凑不出任何一注合法投注 —— 号码盘会要求选 20 个，用户
+        // 永远选不完；`TicketBuilder.expand` 也会因为 `count != need`
+        // 直接返回空数组，一张玩法丢了的快乐8 票注数变成 0。
+        // 选十同样满足「不算出 0 注」，而且它本身是合法的。
+        XCTAssertEqual(GameKey.k8.pickCount(for: section, playMode: ""), 10)
+        XCTAssertEqual(GameKey.k8.defaultPlayMode, "10")
 
         let selections: [SectionKey: SectionSelection] = [.nums: SectionSelection(selected: [1, 2, 3, 4, 5])]
         XCTAssertEqual(

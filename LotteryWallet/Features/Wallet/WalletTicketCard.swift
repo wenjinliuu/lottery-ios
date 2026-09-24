@@ -13,8 +13,6 @@ struct WalletTicketCard: View {
     var onDelete: () -> Void
     /// 长按「修改」。打开的是录入页那套完整工作台。
     var onEdit: (() -> Void)? = nil
-    /// 点开一张已中奖的票时放烟花。
-    var onCelebrate: (() -> Void)?
     /// 这张票绑定期次的开奖号码，同样由外部提前取好。
     var draw: Draw?
 
@@ -26,7 +24,17 @@ struct WalletTicketCard: View {
     private static let collapsedLineLimit = 5
 
     private var game: GameKey { card.game }
-    private var isCollapsible: Bool { card.count > Self.collapsedLineLimit }
+
+    /// 点按能不能展开。
+    ///
+    /// **复式 / 胆拖一律可展开，跟注数无关。** 这两种票收起时只画整票那两行
+    /// 号码，逐注号码只有展开才有 —— 原来的判据只看「注数 > 5」，于是
+    /// 双色球 6 红 2 蓝（2 注）、2 胆 5 拖（5 注）、大乐透 1 胆 5 拖（5 注）
+    /// 这些常见票型**永远看不到自己那几注号码**，点了也没反应。
+    /// 常见胆拖有一半落在这个区间里。
+    private var isCollapsible: Bool {
+        card.count > Self.collapsedLineLimit || !card.whole.isEmpty
+    }
 
     private var visibleLines: [TicketCard.Line] {
         Array(card.lines.prefix(isExpanded ? TicketCard.lineLimit : Self.collapsedLineLimit))
@@ -70,11 +78,17 @@ struct WalletTicketCard: View {
             }
         }
         .contentShape(Rectangle())
-        // 烟花只在「刚核出中奖」那一瞬间放的话，基本没人看得到 ——
-        // 票一旦结算就再也不会重新变成中奖。点开一张已中奖的票也放一次，
-        // 这才是用户真正想看到它的时刻。
+        // 点按**只负责展开 / 收起**。
+        //
+        // 这里原来还会放一轮盖住整个屏幕的烟花。问题是中奖的票在票夹里
+        // 会一直待着，而展开收起是随手就点的动作 —— 于是每翻一次那张票
+        // 就全屏炸一次，第三次之后只剩烦。庆祝该出现在「刚核出中奖」
+        // 那一刻（见 `WalletView.check` / 扫描页 / 恢复备份后核对），
+        // 那是一次性的、确实值得庆祝的时刻。
+        //
+        // 卡片自己那层小火星（`TicketSparkleOverlay`）留着：它一直亮着，
+        // 只在卡片范围内，不打断任何操作。
         .onTapGesture {
-            if card.status == .won { onCelebrate?() }
             if isCollapsible { onToggle() }
         }
         .accessibilityElement(children: .contain)
@@ -172,12 +186,59 @@ struct WalletTicketCard: View {
                     wholeRow(zone, title: "拖", values: zone.selected.filter { !zone.dan.contains($0) })
                 }
             }
-            Text("共 \(card.count) 注 · 按每一注分别核对")
+            wholeSummary
+        }
+        .padding(.vertical, 10)
+    }
+
+    /// 整票底下那行小结。
+    ///
+    /// 复式 / 胆拖票按整票画，**没有逐注的「+¥X」可看** —— 单式票每一注后面
+    /// 都跟着金额，一眼就知道中了哪几注；复式票原来只在票尾给一个净收支，
+    /// 用户看到「+¥15」根本不知道那是中了 1 注 20 块还是 3 注各 5 块。
+    /// 一张 7+2 的复式展开是 14 注，中了几注是这张票最想知道的事。
+    @ViewBuilder
+    private var wholeSummary: some View {
+        let hits = card.wonCount + card.pendingPrizeCount
+        // 用 `Text` 相加而不是 HStack：这一行要能随字号换行，
+        // 「中 2 注」和它后面的奖金不能在中间被拆成两段对不上。
+        let head = Text("共 \(card.count) 注")
+        if card.status.hasResult && hits > 0 {
+            // 不要把这个局部量叫 `body` —— 会遮住 View 自己的 `body`。
+            let summary = head
+                + Text(" · ")
+                + Text("中 \(hits) 注").fontWeight(.semibold).foregroundStyle(Palette.profit)
+                + prizeText
+            summary
                 .font(.caption2)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .padding(.top, 1)
+        } else {
+            (head + Text(card.status.hasResult ? " · 均未中奖" : " · 按每一注分别核对"))
+                .font(.caption2)
+                .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .padding(.top, 1)
         }
-        .padding(.vertical, 10)
+    }
+
+    /// 奖金那一段。中了但金额还没公布的注**单独说** —— 并进奖金里
+    /// 会出现「中 3 注 · 奖金 ¥10」这种自相矛盾的话。
+    private var prizeText: Text {
+        var text = Text("")
+        if card.wonCount > 0 {
+            text = text + Text(" · ")
+                + Text("奖金 \(MoneyText.format(card.prize))")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Palette.profit)
+        }
+        if card.pendingPrizeCount > 0 {
+            text = text + Text(" · ")
+                + Text(card.wonCount > 0 ? "另 \(card.pendingPrizeCount) 注待公布" : "奖金待公布")
+                    .foregroundStyle(RecordStatus.prizeFloat.tint)
+        }
+        return text
     }
 
     private func wholeRow(_ zone: TicketCard.WholeZone, title: String, values: [Int]) -> some View {

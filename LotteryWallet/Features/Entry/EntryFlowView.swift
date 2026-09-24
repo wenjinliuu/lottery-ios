@@ -71,6 +71,12 @@ struct EntryFlowView: View {
     @State private var hasPrepared = false
     /// 票面照片放大看。对着照片敲号码时要能看清那几位小字。
     @State private var isReferenceZoomed = false
+    /// 正在逐注改号的那一注。`nil` 表示没在改。
+    ///
+    /// 用 `sheet(item:)` 而不是 `sheet(isPresented:)` + 一个下标：后者在
+    /// 连续改两注时会把上一注的内容带进来 —— SwiftUI 只在 `isPresented`
+    /// 翻转时重建内容，下标变了它不认。
+    @State private var editingLine: Int?
 
     private var target: DrawTarget {
         pickedIssue?.target(source: "manual_pick") ?? drawStore.nextDrawTarget(for: game)
@@ -241,6 +247,22 @@ struct EntryFlowView: View {
             .safeAreaInset(edge: .bottom) { saveBar }
             .fullScreenCover(isPresented: $isReferenceZoomed) {
                 if let image = reference?.image { PhotoZoomView(image: image) }
+            }
+            // 逐注改号。和扫描复核页、票夹修改用的是**同一个** `TicketLineEditor`，
+            // 「这个号码区要选几个」只有 `pickCount` 一个答案。
+            .sheet(item: Binding(get: { editingLine.map(EditingLine.init) },
+                                 set: { editingLine = $0?.index })) { item in
+                TicketLineEditor(
+                    game: game,
+                    playMode: playMode,
+                    title: "修改第 \(item.index + 1) 注",
+                    initial: candidates.indices.contains(item.index) ? candidates[item.index] : NumberSet(),
+                    onCancel: {},
+                    onDone: { numbers in
+                        guard candidates.indices.contains(item.index) else { return }
+                        candidates[item.index] = numbers
+                    }
+                )
             }
             .sheet(isPresented: $isIssuePickerPresented) {
                 IssuePickerSheet(game: game, current: target.expect) { issue in
@@ -537,7 +559,11 @@ struct EntryFlowView: View {
                               // 末尾那条可能是还没加入候选的当前选号，它不在
                               // `candidates` 里，给它一个减号只会点了没反应
                               removableCount: mode == .manual ? candidates.count : 0,
-                              onRemoveLine: mode == .manual ? removeCandidate : nil)
+                              onRemoveLine: mode == .manual ? removeCandidate : nil,
+                              // 改一注是「修改彩票」最常见的动作。没有它的时候
+                              // 用户只能删掉整注重录 —— 一张五注的票改错一个号，
+                              // 要重新点四十个球。
+                              onEditLine: mode == .manual ? { editingLine = $0 } : nil)
         } else {
             Text(mode == .manual
                  ? "选够号码后会在这里显示整张票的样子，可以一次攒好几注。"
@@ -800,4 +826,10 @@ struct EntryFlowView: View {
             saveError = "保存失败：\(error.localizedDescription)"
         }
     }
+}
+
+/// `sheet(item:)` 要一个 `Identifiable`，而「第几注」本身只是个 Int。
+private struct EditingLine: Identifiable {
+    let index: Int
+    var id: Int { index }
 }

@@ -1,73 +1,51 @@
 import SwiftUI
 
-/// 开奖数据详情。
+/// 数据状态详情。
 ///
-/// 设置页那一行只给一个**更新时间** —— 那是日常唯一要看的东西，
-/// 「数据是不是新的」一眼就能判断。剩下的（从哪儿取到的、数据源那边正不正常、
-/// 日历取到哪一年了）都是出问题时才关心的，进来看。
+/// 设置页那一行已经把最要紧的三件事说完了（什么时候跑的、成没成功、齐了几个）。
+/// 进来是为了看清**两个方向**上各自发生了什么：
 ///
-/// **「数据来源」这一行是这次迁移唯一能在真机上自证的地方。** CloudBase 和
-/// GitHub 兜底取回来的数据一模一样，界面上分不出来；没有这一行，用户装上
-/// 之后也说不清主数据源到底通没通。
+/// ```
+/// 更新时间        ← 这台设备上一次去腾讯云取数的时刻
+/// 数据来源        ← 取到的那一份是谁给的
+/// 数据源状态      ← 后端八个彩种齐了几个
+/// 数据源更新时间  ← 后端上一次抓取任务什么时候跑的、成没成功
+/// ```
+///
+/// 上面两行是**本机这边**，下面两行是**后端那边**。开奖号迟迟不更新时，
+/// 分清是谁没动全靠这个对照：上面新下面旧 = 后端没抓到，重试没用；
+/// 上面旧 = 这台设备没取到，点一下刷新就行。
+///
+/// **「数据来源」这一行是 V2 迁移唯一能在真机上自证的地方。** CloudBase 和
+/// GitHub 兜底取回来的数据一模一样，界面上分不出来。
 struct DrawDataView: View {
     @Environment(DrawStore.self) private var drawStore
-
-    @State private var isRefreshing = false
 
     var body: some View {
         Form {
             Section {
                 LabeledContent("更新时间") {
-                    Text(drawStore.latestUpdatedAt.isEmpty
-                         ? "暂无" : DateText.friendly(drawStore.latestUpdatedAt))
+                    Text(drawStore.lastFetchedAt.map(DateText.stamp) ?? "暂无")
                         .foregroundStyle(.secondary)
                 }
                 LabeledContent("数据来源") {
                     Text(drawStore.lastSource?.label ?? "尚未取数")
                         .foregroundStyle(sourceTint)
                 }
-                LabeledContent("已获取彩种") {
-                    Text("\(gamesWithLatest)/\(GameKey.ordered.count)")
+                LabeledContent("数据源状态") {
+                    Text(progressText)
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
+                }
+                LabeledContent("数据源更新时间") {
+                    Text(executionText)
+                        .foregroundStyle(executionTint)
+                        .multilineTextAlignment(.trailing)
                 }
             } header: {
                 Text("最新开奖")
             } footer: {
-                Text(sourceFooter)
-            }
-
-            Section {
-                LabeledContent("状态") {
-                    healthValue
-                }
-                if let health = drawStore.health {
-                    LabeledContent("检查于") {
-                        Text(DateText.friendly(health.generatedAt)).foregroundStyle(.secondary)
-                    }
-                    LabeledContent("后端存储") {
-                        Text(health.source).foregroundStyle(.secondary)
-                    }
-                    LabeledContent("有记录的彩种") {
-                        Text("\(health.reportedGames)")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                    if !health.missingGames.isEmpty {
-                        // 契约写明：某个彩种没有记录时它的值是 null，同时 ok 为 false。
-                        // 所以这一行基本就是「异常」的原因，比那两个字有用得多。
-                        LabeledContent("缺记录") {
-                            Text(health.missingGames.joined(separator: "、"))
-                                .font(.footnote)
-                                .foregroundStyle(Palette.warning)
-                                .multilineTextAlignment(.trailing)
-                        }
-                    }
-                }
-            } header: {
-                Text("数据源状态")
-            } footer: {
-                Text("这一项问的是**提供开奖数据的那一边**现在正不正常，不是这台设备。开奖号迟迟不更新时，用它分清是数据源还没抓到，还是应用这边没刷新。只有进入这一页时才会查询一次。")
+                Text(footerText)
             }
 
             Section {
@@ -88,50 +66,30 @@ struct DrawDataView: View {
             } footer: {
                 Text("日历是按年、按需取的：录入或扫描彩票、需要选择期号时才会加载当年那一份，跨年前后才会多取下一年。它决定了每一期的期号、开奖日和停售时刻。")
             }
-
-            Section {
-                Button {
-                    refresh()
-                } label: {
-                    HStack {
-                        Text("刷新开奖数据")
-                        Spacer()
-                        if isRefreshing { ProgressView() }
-                    }
-                }
-                .disabled(isRefreshing)
-            } footer: {
-                Text("重新获取各彩种的最新一期与开奖日程，并刷新你已经看过的那些彩种的往期。没打开过的彩种不会顺带下载。")
-            }
         }
-        .navigationTitle("开奖数据")
+        .navigationTitle("数据状态")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await drawStore.loadHealth() }
+        .task { await drawStore.loadStatus() }
     }
 
     // MARK: - 片段
 
-    @ViewBuilder
-    private var healthValue: some View {
-        switch drawStore.healthState {
-        case .idle, .loading:
-            ProgressView()
-        case .loaded:
-            if let health = drawStore.health {
-                Text(health.label)
-                    .foregroundStyle(health.isHealthy ? Color.secondary : Palette.warning)
-            }
-        case .failed(let reason):
-            // 查不到本身就是一条信息，而且**要说清是哪一种**：
-            // 网络不通（这一项不走 GitHub 兜底，问的就是主数据源自己），
-            // 还是响应不符合约定格式 —— 后者是服务端契约变了，重试没有用。
-            // 这里绝不退化成一句「未知」。
-            Text(reason)
-                .font(.footnote)
-                .foregroundStyle(Palette.warning)
-                .multilineTextAlignment(.trailing)
-                .textSelection(.enabled)
-        }
+    /// `6/8 数据完整`。读不到状态时不编一个分数出来。
+    private var progressText: String {
+        if let status = drawStore.fetchStatus { return status.progressText }
+        return drawStore.statusState.isLoading ? "读取中…" : "暂无"
+    }
+
+    /// `09月22日 02:44 · 执行成功`
+    private var executionText: String {
+        if let status = drawStore.fetchStatus { return status.executionText }
+        return drawStore.statusState.isLoading ? "读取中…" : "暂无执行记录"
+    }
+
+    /// 只有执行失败才标黄。数据没齐不标 —— 今天还没开奖的彩种
+    /// 本来就该是 waiting，画成警告等于每天一次假警报。
+    private var executionTint: Color {
+        drawStore.fetchStatus?.needsAttention == true ? Palette.warning : .secondary
     }
 
     private var sourceTint: Color {
@@ -142,8 +100,8 @@ struct DrawDataView: View {
         }
     }
 
-    private var sourceFooter: String {
-        switch drawStore.lastSource {
+    private var footerText: String {
+        let source = switch drawStore.lastSource {
         case .cloudBase:
             "取自主数据源。"
         case .githubFallback:
@@ -153,10 +111,7 @@ struct DrawDataView: View {
         case .none:
             "优先从主数据源取；取不到就用备用的公开镜像；都取不到就用本机缓存。应用只读取，不上传任何内容。"
         }
-    }
-
-    private var gamesWithLatest: Int {
-        GameKey.ordered.filter { drawStore.latestDraw(for: $0) != nil }.count
+        return source + "上面两行是这台设备取数的情况，下面两行是数据源那边抓取的情况。开奖号迟迟不更新时，看下面两行就知道是不是后端还没抓到 ——「数据完整」按八个彩种算，今天还没开奖的彩种不计入，所以白天看到 6/8 是正常的。"
     }
 
     private var calendarYears: [Int] {
@@ -165,15 +120,5 @@ struct DrawDataView: View {
 
     private func issueCount(_ year: Int) -> Int {
         GameKey.ordered.reduce(0) { $0 + drawStore.calendarIssues(for: $1, year: year).count }
-    }
-
-    private func refresh() {
-        Task {
-            isRefreshing = true
-            defer { isRefreshing = false }
-            await drawStore.refresh()
-            await drawStore.refreshLoadedRecents()
-            await drawStore.loadHealth(force: true)
-        }
     }
 }

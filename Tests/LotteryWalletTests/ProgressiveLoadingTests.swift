@@ -60,7 +60,7 @@ final class ProgressiveLoadingTests: XCTestCase {
         XCTAssertFalse(paths.contains { $0.contains("/draws/") }, "冷启动不该拉任何彩种的最近开奖")
         XCTAssertFalse(paths.contains { $0.contains("/by-year/") }, "冷启动不该拉任何年度历史")
         XCTAssertFalse(paths.contains { $0.contains("/calendar/") }, "冷启动不该拉年度日历")
-        XCTAssertFalse(paths.contains { $0.contains("health") }, "冷启动不该拉 health")
+        XCTAssertFalse(paths.contains { $0.contains("status") }, "冷启动不该拉 status")
     }
 
     /// 冷启动之后首页要的东西必须齐：八个彩种的最新一期和开奖日程。
@@ -253,64 +253,68 @@ final class ProgressiveLoadingTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.count("v2/calendar/\(ChinaClock.year() + 1)"), 1)
     }
 
-    // MARK: - 数据源体检
+    // MARK: - 抓取状态
 
-    /// health **只有用户打开「开奖数据」详情页才请求**，而且只打 CloudBase。
-    func testHealthIsOnDemandAndCloudBaseOnly() async {
+    /// `/v2/status` **只在显式调用时才请求**，而且只打 CloudBase：
+    /// 它问的就是那边的任务跑得怎么样，回落到静态镜像去问等于换了个人回答。
+    func testStatusIsOnDemandAndCloudBaseOnly() async {
         StubURLProtocol.stub("v2/bootstrap", body: LotteryV2Fixtures.bootstrap)
-        StubURLProtocol.stub("v2/health", body: LotteryV2Fixtures.health)
+        StubURLProtocol.stub("v2/status", body: LotteryV2Fixtures.status)
         let store = makeStore()
 
         await store.bootstrap()
-        XCTAssertEqual(StubURLProtocol.count("v2/health"), 0, "冷启动不该碰 health")
-        XCTAssertNil(store.health)
+        XCTAssertEqual(StubURLProtocol.count("v2/status"), 0, "冷启动不该碰 status")
+        XCTAssertNil(store.fetchStatus)
 
-        await store.loadHealth()
-        XCTAssertEqual(StubURLProtocol.count("v2/health"), 1)
-        XCTAssertEqual(store.health?.isHealthy, true)
-        // 它问的就是主数据源自己，不该回落到别处去问
-        XCTAssertEqual(StubURLProtocol.count("v2/health.json"), 0)
+        await store.loadStatus()
+        XCTAssertEqual(StubURLProtocol.count("v2/status"), 1)
+        XCTAssertEqual(store.fetchStatus?.completed, 6)
+        // 它问的就是 CloudBase 那边的任务，不该回落到静态镜像去问
+        XCTAssertEqual(StubURLProtocol.count("v2/status.json"), 0)
     }
 
-    /// 已经查过就不重复查，除非明确要求。
-    func testHealthIsNotRefetched() async {
-        StubURLProtocol.stub("v2/health", body: LotteryV2Fixtures.health)
+    /// **取数失败时保留上一次成功读到的状态。**
+    ///
+    /// 契约就是这么定的，理由也很实在：网络抖一下就把界面变成
+    /// 「暂无执行记录」，用户会以为后端出事了，而实际上只是这一次没问到。
+    func testStatusKeepsLastGoodValueOnFailure() async {
+        StubURLProtocol.stub("v2/status", body: LotteryV2Fixtures.status)
         let store = makeStore()
-        await store.loadHealth()
-        await store.loadHealth()
-        XCTAssertEqual(StubURLProtocol.count("v2/health"), 1)
+        await store.loadStatus()
+        XCTAssertEqual(store.fetchStatus?.completed, 6)
 
-        await store.loadHealth(force: true)
-        XCTAssertEqual(StubURLProtocol.count("v2/health"), 2)
+        // 换成 503，再强制刷一次。
+        // **必须先 reset**：桩是「先注册的先匹配」，直接再 stub 一次
+        // 同样的后缀只会排在后面，永远轮不到它 —— 那样这条用例会假过。
+        StubURLProtocol.reset()
+        StubURLProtocol.stub("v2/status", status: 503, body: Data())
+        await store.loadStatus(force: true)
+
+        XCTAssertTrue(store.statusState.hasFailed, "失败本身要记下来")
+        XCTAssertEqual(store.fetchStatus?.completed, 6, "但上一次成功的结果必须还在")
     }
 
-    /// 响应不符合契约时，界面上要看到**具体缺了什么**，而不是一句「未知」。
-    func testHealthContractViolationSurfacesTheReason() async {
-        StubURLProtocol.stub("v2/bootstrap", body: LotteryV2Fixtures.bootstrap)
-        // V1 那份 health.json 的形状：schema / version 都不对
-        StubURLProtocol.stub("v2/health", body: Data(LotteryV2Fixtures.legacyHealthJSON.utf8))
-        let store = makeStore()
-        await store.bootstrap()
-        await store.loadHealth()
-
-        XCTAssertNil(store.health, "不符合契约就不该产出一个「状态未知」的结果")
-        let reason = store.healthState.failureText
-        XCTAssertTrue(reason?.contains("schema") ?? false,
-                      "失败原因要说清是哪一项对不上，实际是 \(String(describing: reason))")
-        XCTAssertEqual(store.bootstrapState, .loaded, "诊断项出问题不该影响开奖数据")
-    }
-
-    /// 查不到 health 不能影响别的东西 —— 它只是个诊断项。
-    func testHealthFailureIsContained() async {
+    /// 查不到 status 不能影响开奖数据 —— 它只是个状态指示。
+    func testStatusFailureIsContained() async {
         StubURLProtocol.stub("v2/bootstrap", body: LotteryV2Fixtures.bootstrap)
         let store = makeStore()
         await store.bootstrap()
-        await store.loadHealth()   // 没配桩，必然失败
+        await store.loadStatus()   // 没配桩，必然失败
 
-        XCTAssertTrue(store.healthState.hasFailed)
-        XCTAssertNil(store.health)
+        XCTAssertTrue(store.statusState.hasFailed)
+        XCTAssertNil(store.fetchStatus, "一次都没成功过，就该是空的")
         XCTAssertEqual(store.bootstrapState, .loaded)
         XCTAssertNotNil(store.latestDraw(for: .ssq))
+    }
+
+    /// 冷启动之后「更新时间」要有值 —— 那是**这台设备**取数的时刻。
+    func testBootstrapRecordsLocalFetchTime() async {
+        StubURLProtocol.stub("v2/bootstrap", body: LotteryV2Fixtures.bootstrap)
+        let store = makeStore()
+        XCTAssertNil(store.lastFetchedAt)
+
+        await store.bootstrap()
+        XCTAssertNotNil(store.lastFetchedAt)
     }
 
     // MARK: - 三级降级

@@ -225,53 +225,90 @@ enum LotteryV2Fixtures {
         """.utf8)
     }
 
-    // MARK: - 数据源体检
+    // MARK: - 抓取状态
 
-    static var health: Data { Data(healthJSON.utf8) }
+    static var status: Data { Data(statusJSON.utf8) }
 
-    /// 正式 V2 契约（文档 §3.5）：`schema` / `version` / `ok` /
-    /// `generated_at` / `source` / `latest` 六项都是必需的。
-    static let healthJSON = """
+    /// 文档给的那份样例：六个 completed、一个 numbers_ready、一个 waiting。
+    /// 对应界面上的 `09月22日 02:44 · 执行成功 · 6/8 数据完整`。
+    static let statusJSON = """
     {
-      "schema": "duigehao.lottery.health",
-      "version": 2,
-      "ok": true,
-      "generated_at": "2026-09-21T11:31:00+08:00",
-      "source": "cloudbase_postgresql",
-      "latest": {
-        "ssq": {"issue": "2026109", "date": "2026-09-20"},
-        "kl8": {"issue": "2026253", "date": "2026-09-20"}
+      "latest_execution": {
+        "executed_at": "2026-09-22T02:44:00+08:00",
+        "execution_status": "success"
+      },
+      "lotteries": {
+        "ssq": {"data_status": "completed"},
+        "dlt": {"data_status": "completed"},
+        "fc3d": {"data_status": "completed"},
+        "pl3": {"data_status": "completed"},
+        "pl5": {"data_status": "completed"},
+        "qxc": {"data_status": "completed"},
+        "qlc": {"data_status": "numbers_ready"},
+        "kl8": {"data_status": "waiting"}
       }
     }
     """
 
-    /// 某个彩种没有记录：它的值是 `null`，同时 `ok` 为 `false`。
-    static let unhealthyJSON = """
+    /// 执行失败。
+    static let failedStatusJSON = """
     {
-      "schema": "duigehao.lottery.health",
-      "version": 2,
-      "ok": false,
-      "generated_at": "2026-09-21T11:31:00+08:00",
-      "source": "cloudbase_postgresql",
-      "latest": {
-        "ssq": {"issue": "2026109", "date": "2026-09-20"},
+      "latest_execution": {
+        "executed_at": "2026-09-22T02:44:00+08:00",
+        "execution_status": "failed"
+      },
+      "lotteries": {
+        "ssq": {"data_status": "completed"}
+      }
+    }
+    """
+
+    /// 还没有执行记录。界面上是「暂无执行记录」，不是「0/8」。
+    static let emptyStatusJSON = """
+    {
+      "latest_execution": null,
+      "lotteries": {}
+    }
+    """
+
+    /// 八个全齐。
+    static let completeStatusJSON = """
+    {
+      "latest_execution": {
+        "executed_at": "2026-09-22T02:44:00+08:00",
+        "execution_status": "success"
+      },
+      "lotteries": {
+        "ssq": {"data_status": "completed"},
+        "dlt": {"data_status": "completed"},
+        "kl8": {"data_status": "completed"},
+        "fc3d": {"data_status": "completed"},
+        "pl3": {"data_status": "completed"},
+        "pl5": {"data_status": "completed"},
+        "qxc": {"data_status": "completed"},
+        "qlc": {"data_status": "completed"}
+      }
+    }
+    """
+
+    /// 少了三个彩种、其中一个值是 `null`。
+    ///
+    /// **分母仍然是 8。** 跟着字典大小走的话这份会显示成 `5/5 数据完整`，
+    /// 恰好把「后端连记录都没有」这件事抹平。
+    static let sparseStatusJSON = """
+    {
+      "latest_execution": {
+        "executed_at": "2026-09-22T02:44:00+08:00",
+        "execution_status": "success"
+      },
+      "lotteries": {
+        "ssq": {"data_status": "completed"},
+        "dlt": {"data_status": "completed"},
+        "kl8": {"data_status": "completed"},
+        "fc3d": {"data_status": "completed"},
+        "pl3": {"data_status": "completed"},
         "qlc": null
       }
-    }
-    """
-
-    /// V1 `public_data/health.json` 的形状。
-    ///
-    /// **V2 明确不返回这些字段。** 留着它当兼容项，代价是解码「成功」却没有
-    /// 任何意义 —— 界面永远显示「未知」，而没人分得清是数据源没给还是
-    /// 我们字段写错了。所以这一份现在必须被判成契约违例。
-    static let legacyHealthJSON = """
-    {
-      "schema": "random_draw_agent_public_data_health",
-      "version": 1,
-      "ok": true,
-      "updated_at": "2026-09-21T00:52:29.144+08:00",
-      "message": "exported_from_cloudbase"
     }
     """
 

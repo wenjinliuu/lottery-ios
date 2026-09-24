@@ -81,11 +81,20 @@ struct ProfitSeries {
     /// 八个彩种的提取比例有四档，见 `GameKey.welfareRate`。
     var welfareTotal: Double = 0
     var settledCount: Int = 0
+    /// 已结算里中了奖的注数。
+    ///
+    /// **必须在这里累加，不能事后从 `days` 里加回来** —— `days` 会被
+    /// `downsample` 抽稀，点数超过 `maxChartPoints` 时会合并掉一部分，
+    /// 拿抽稀后的数组求和会少算。
+    var wonCount: Int = 0
     var closingBalance: Double = 0
     var rangeLabel: String = ""
 
     var netTotal: Double { prizeTotal - costTotal }
     var isEmpty: Bool { days.isEmpty }
+    /// 中奖率：中奖注数 / 已结算注数。待核对和奖金浮动的不计入分母，
+    /// 口径和 `settledCount` 一致。
+    var winRate: Double { settledCount > 0 ? Double(wonCount) / Double(settledCount) * 100 : 0 }
 }
 
 enum ProfitStats {
@@ -156,6 +165,7 @@ enum ProfitStats {
         var prizeTotal = 0.0
         var welfareTotal = 0.0
         var settledCount = 0
+        var wonTotal = 0
         for day in visible {
             let items = byDay[day] ?? []
             var cost = 0.0
@@ -177,6 +187,7 @@ enum ProfitStats {
             costTotal += cost
             prizeTotal += prize
             settledCount += items.count
+            wonTotal += won
             points.append(ProfitDay(date: day,
                                     day: DateText.parse(day) ?? Date(),
                                     close: balance,
@@ -192,6 +203,7 @@ enum ProfitStats {
                             prizeTotal: prizeTotal,
                             welfareTotal: welfareTotal,
                             settledCount: settledCount,
+                            wonCount: wonTotal,
                             closingBalance: balance,
                             rangeLabel: range.label)
     }
