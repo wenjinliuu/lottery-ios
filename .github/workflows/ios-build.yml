@@ -1,85 +1,46 @@
-name: Build & Test
+name: Build & Test / Agent Preview
 
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      simulator_name:
+        description: "iPhone simulator model"
+        type: string
+        default: iPhone 17 Pro
+      ios_runtime:
+        description: "Installed iOS runtime (for example 26)"
+        type: string
+        default: '26'
+      live_preview:
+        description: "Open authenticated browser preview (requires AGENT_PREVIEW_PASSWORD secret)"
+        type: boolean
+        default: false
+      preview_minutes:
+        description: "Live preview lifetime, 1-20 minutes"
+        type: number
+        default: 12
 
 concurrency:
-  group: build-${{ github.ref }}
+  group: agent-preview-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: macos-latest
-    timeout-minutes: 40
-
-    steps:
-      - uses: actions/checkout@v4
-
-      # Liquid Glass 需要 iOS 26 SDK，锁定最新正式版 Xcode
-      - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: Show toolchain
-        run: |
-          xcodebuild -version
-          xcodebuild -showsdks | grep -i iphoneos || true
-
-      - name: Install tools
-        run: brew install xcodegen xcbeautify
-
-      - name: Sync icon source artwork
-        run: bash Scripts/sync-app-icon.sh
-
-      - name: Generate project
-        run: xcodegen generate
-
-      # 模拟器机型随 runner 镜像变动，动态挑一台可用的 iPhone，避免写死机型名
-      - name: Pick simulator
-        id: sim
-        run: |
-          cat > /tmp/pick_sim.py <<'PYEOF'
-          import json, subprocess, sys
-
-          raw = subprocess.check_output(
-              ["xcrun", "simctl", "list", "devices", "available", "--json"]
-          )
-          devices = json.loads(raw)["devices"]
-          names = [
-              device["name"]
-              for runtime, items in devices.items()
-              if "iOS" in runtime
-              for device in items
-              if device["name"].startswith("iPhone")
-          ]
-          if not names:
-              sys.exit("找不到可用的 iPhone 模拟器")
-          print(sorted(names)[-1])
-          PYEOF
-          NAME=$(python3 /tmp/pick_sim.py)
-          echo "找到模拟器：$NAME"
-          echo "name=$NAME" >> "$GITHUB_OUTPUT"
-
-      - name: Build and test
-        env:
-          NSUnbufferedIO: YES
-        run: |
-          set -o pipefail
-          xcodebuild \
-            -project LotteryWallet.xcodeproj \
-            -scheme LotteryWallet \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }}" \
-            CODE_SIGNING_ALLOWED=NO \
-            clean test | xcbeautify --renderer github-actions
-
-      - name: Verify compiled App Icon
-        run: |
-          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -type d -path '*/Build/Products/Debug-iphonesimulator/LotteryWallet.app' -print -quit)
-          test -n "$APP_PATH"
-          test -f "$APP_PATH/Assets.car"
-          find "$APP_PATH" -maxdepth 1 -type f -name 'AppIcon*.png' -print -quit | grep -q .
+  preview:
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/agent-preview.yml@1041aed9c6c57d266ce19e40bc2ffc9dbf615a5a
+    with:
+      workdir: .
+      project: LotteryWallet.xcodeproj
+      scheme: LotteryWallet
+      bundle_id: com.wenjinliu.lotterywallet
+      sync_command: bash Scripts/sync-app-icon.sh
+      generate_command: xcodegen generate
+      simulator_name: ${{ inputs.simulator_name || 'iPhone 17 Pro' }}
+      ios_runtime: ${{ inputs.ios_runtime || '26' }}
+      live_preview: ${{ inputs.live_preview || false }}
+      preview_minutes: ${{ inputs.preview_minutes || 12 }}
+      ci_revision: 1041aed9c6c57d266ce19e40bc2ffc9dbf615a5a
+    secrets:
+      AGENT_PREVIEW_PASSWORD: ${{ secrets.AGENT_PREVIEW_PASSWORD }}
