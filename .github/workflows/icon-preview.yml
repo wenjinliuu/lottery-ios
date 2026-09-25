@@ -11,13 +11,16 @@ on:
       - ".github/workflows/icon-preview.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: app-icon-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   icon:
-    uses: wenjinliuu/ios-ci-workflows/.github/workflows/app-icon.yml@1041aed9c6c57d266ce19e40bc2ffc9dbf615a5a
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/app-icon.yml@1785ec85efe4d88c1a87b5a9125e5ca5125a10ca
     with:
       workdir: .
       project: LotteryWallet.xcodeproj
