@@ -11,6 +11,10 @@ on:
         description: "Marketing version override (blank: project default)"
         type: string
         required: false
+      lookup_only:
+        description: "Only verify Apple registration; do not archive or upload"
+        type: boolean
+        default: false
       dry_run:
         description: "Unsigned archive only; never upload"
         type: boolean
@@ -18,13 +22,16 @@ on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: read
+
 concurrency:
   group: lottery-ios-testflight
   cancel-in-progress: false
 
 jobs:
   release:
-    uses: wenjinliuu/ios-ci-workflows/.github/workflows/testflight-release.yml@89da677e072827be1229167b285c7363c2294363
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/testflight-release.yml@2db31de1f9ad8c5f2462c3af3e47721bf2ac5e0d
     with:
       workdir: .
       project: LotteryWallet.xcodeproj
@@ -34,7 +41,10 @@ jobs:
       generate_command: xcodegen generate
       build_number: ${{ inputs.build_number || '' }}
       marketing_version: ${{ inputs.marketing_version || '' }}
+      lookup_only: ${{ inputs.lookup_only || false }}
       dry_run: ${{ inputs.dry_run || false }}
+      artifact_prefix: lottery-ios-
+      ci_revision: 2db31de1f9ad8c5f2462c3af3e47721bf2ac5e0d
       entitlements_path: LotteryWallet/Resources/LotteryWallet.entitlements
       entitlement_mode: best-effort
       inspect_icloud: true
