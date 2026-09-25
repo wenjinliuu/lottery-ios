@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   preview:
-    uses: wenjinliuu/ios-ci-workflows/.github/workflows/agent-preview.yml@e8c0c76a38f237a4a30f653904d3bf7513c32953
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/agent-preview.yml@9ba04e81c47ca5727fb104f126e94a2e3f625aee
     with:
       workdir: .
       project: LotteryWallet.xcodeproj
@@ -44,6 +44,6 @@ jobs:
       ios_runtime: ${{ inputs.ios_runtime || '26' }}
       live_preview: ${{ inputs.live_preview || false }}
       preview_minutes: ${{ fromJSON(format('{0}', inputs.preview_minutes || '12')) }}
-      ci_revision: e8c0c76a38f237a4a30f653904d3bf7513c32953
+      ci_revision: 9ba04e81c47ca5727fb104f126e94a2e3f625aee
     secrets:
       AGENT_PREVIEW_PASSWORD: ${{ secrets.AGENT_PREVIEW_PASSWORD }}
