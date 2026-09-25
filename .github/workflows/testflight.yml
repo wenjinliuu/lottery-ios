@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   release:
-    uses: wenjinliuu/ios-ci-workflows/.github/workflows/testflight-release.yml@2db31de1f9ad8c5f2462c3af3e47721bf2ac5e0d
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/testflight-release.yml@2e7db029f79b1b3826793251562ed58b8fac0f5b
     with:
       workdir: .
       project: LotteryWallet.xcodeproj
@@ -44,10 +44,10 @@ jobs:
       lookup_only: ${{ inputs.lookup_only || false }}
       dry_run: ${{ inputs.dry_run || false }}
       artifact_prefix: lottery-ios-
-      ci_revision: 2db31de1f9ad8c5f2462c3af3e47721bf2ac5e0d
+      ci_revision: 2e7db029f79b1b3826793251562ed58b8fac0f5b
       entitlements_path: LotteryWallet/Resources/LotteryWallet.entitlements
-      entitlement_mode: best-effort
-      inspect_icloud: true
+      entitlement_mode: icloud-verified
+      icloud_container: iCloud.com.wenjinliu.lotterywallet
     secrets:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}

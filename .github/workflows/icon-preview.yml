@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   icon:
-    uses: wenjinliuu/ios-ci-workflows/.github/workflows/app-icon.yml@2db31de1f9ad8c5f2462c3af3e47721bf2ac5e0d
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/app-icon.yml@2e7db029f79b1b3826793251562ed58b8fac0f5b
     with:
       workdir: .
       project: LotteryWallet.xcodeproj
