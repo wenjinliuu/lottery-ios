@@ -11,15 +11,29 @@ import SwiftUI
 /// 页面代码一律走下面这些语义化修饰符。
 extension View {
 
-    /// 内容卡片：分组列表里的那种白底圆角块，不是玻璃。
+    /// 内容卡片：白底页面上的淡灰圆角块（颜色见 `Palette.card`），不是玻璃。
     func contentCard(cornerRadius: CGFloat = 16, padding: CGFloat = 16) -> some View {
         self
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Color(.secondarySystemGroupedBackground))
+                    .fill(Palette.card)
             )
+    }
+
+    /// 系统表单换成白底淡灰卡片，和其他页面同一套配色（见 `Palette.canvas`）。
+    ///
+    /// 挂在 Form 上；行背景要单独给，见 `cardRows()`。
+    func canvasForm() -> some View {
+        self
+            .scrollContentBackground(.hidden)
+            .background(Palette.canvas)
+    }
+
+    /// 表单里一组行的底色。挂在包住所有 Section 的 Group 上，逐行生效。
+    func cardRows() -> some View {
+        listRowBackground(Palette.card)
     }
 
     /// 胶囊玻璃：悬浮在内容之上的筛选 chip、分段控件。

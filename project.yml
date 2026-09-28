@@ -93,6 +93,7 @@ targets:
       - path: Tests/LotteryWalletUITests
         excludes:
           - "**/__Snapshots__/**"
+          - "Fixtures/**"
     dependencies:
       - target: LotteryWallet
     settings:

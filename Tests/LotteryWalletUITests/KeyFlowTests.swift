@@ -23,11 +23,11 @@ final class KeyFlowTests: XCTestCase {
         }
     }
 
-    /// 首页的累计收支来自示例票据：票面 530 元、奖金 781 元、结余 251 元
+    /// 首页的累计收支来自示例票据：票面 734 元、奖金 1,146 元、结余 412 元
     /// （Scripts/make-demo-data.py 生成时打印的数字）。
     func testHomeShowsDemoTotals() {
         XCTAssertTrue(app.staticTexts["累计收支"].waitForExistence(timeout: 10), "首页没有累计收支")
-        for text in ["251元", "530元", "781元"] {
+        for text in ["412元", "734元", "1,146元"] {
             XCTAssertTrue(app.staticTexts[text].firstMatch.waitForExistence(timeout: 10), "首页没有显示 \(text)")
         }
     }
@@ -35,7 +35,8 @@ final class KeyFlowTests: XCTestCase {
     /// 票夹里能看到示例票据的彩种。
     func testWalletListsDemoTickets() {
         app.tabBars.buttons["票夹"].tap()
-        let ticket = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "双色球", "大乐透")).firstMatch
+        let ticket = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@ OR label CONTAINS %@ OR label CONTAINS %@",
+                                                          "双色球", "大乐透", "七乐彩", "七星彩")).firstMatch
         XCTAssertTrue(ticket.waitForExistence(timeout: 10), "票夹里没有示例票据")
     }
 

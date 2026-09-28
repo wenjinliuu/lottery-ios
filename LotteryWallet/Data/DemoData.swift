@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+import UIKit
+import CoreImage
 
 /// `--demo-data` 启动时用的示例票据：截图、UI 测试和 Live Preview 都靠它。
 ///
@@ -41,6 +43,40 @@ enum DemoData {
             "lottery.lastBackupAt": Date().timeIntervalSince1970 - 3600,
         ])
     }
+
+    // MARK: - 扫描演示
+
+    /// UI 测试把一张票据照片的路径放在这个环境变量里，扫描页打开后直接拿它进裁切。
+    /// 只在示例模式下生效，正常启动时这条路径不存在。
+    static let scanImageEnvironment = "DEMO_SCAN_IMAGE"
+
+    static var scanImage: UIImage? {
+        guard isEnabled,
+              let path = ProcessInfo.processInfo.environment[scanImageEnvironment] else { return nil }
+        return UIImage(contentsOfFile: path)
+    }
+
+    /// 截图里要露出票面照片的地方，示例模式下一律整张打马赛克：
+    /// 票面上有序列号、销售网点这些不该公开的东西，号码也只该在识别结果里看。
+    /// 识别本身用的还是原图。
+    static func masked(_ image: UIImage) -> UIImage {
+        guard isEnabled else { return image }
+        let key = ObjectIdentifier(image)
+        if let cached = maskedCache[key] { return cached }
+        guard let input = CIImage(image: image),
+              let filter = CIFilter(name: "CIPixellate") else { return image }
+        let extent = input.extent
+        filter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)
+        filter.setValue(max(extent.width, extent.height) / 28, forKey: kCIInputScaleKey)
+        filter.setValue(CIVector(x: extent.midX, y: extent.midY), forKey: kCIInputCenterKey)
+        guard let output = filter.outputImage?.cropped(to: extent),
+              let cgImage = CIContext().createCGImage(output, from: extent) else { return image }
+        let result = UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
+        maskedCache[key] = result
+        return result
+    }
+
+    private static var maskedCache: [ObjectIdentifier: UIImage] = [:]
 
     // MARK: - 数据
 

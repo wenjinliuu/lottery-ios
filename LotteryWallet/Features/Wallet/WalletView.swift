@@ -141,7 +141,9 @@ struct WalletView: View {
             .background(Palette.canvas)
             // 导航栏不要自己糊底色，交给系统的 scroll edge effect。
             // 理由见 `HomeView` 里同一处那段注释。
-            .navigationTitle("票夹")
+            // 不写页面标题：标签栏已经说了这是哪一页，大标题只是把内容往下压了一大截。
+            // 导航栏只留右上角的按钮，内容从状态栏下面直接开始。
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

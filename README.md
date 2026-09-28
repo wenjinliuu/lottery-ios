@@ -119,13 +119,16 @@ AI 协作规则见 `AGENTS.md`。
 ### 示例数据与 App Store 截图
 
 `--demo-data` 启动参数让 App 换成一个内存里的示例库（`LotteryWallet/Data/DemoData.swift`），
-不碰本机数据库、不做自动备份：2026-06-01 至 09-27 每一期双色球、大乐透各一张票，
-开奖号码与奖金取自 lottery-data-repo，六成的票中奖，投入 530 元、奖金 781 元。
+不碰本机数据库、不做自动备份：2026-06-01 至 09-27 每一期双色球、大乐透、七乐彩、七星彩各一张票，
+开奖号码与奖金取自 lottery-data-repo，六成的票中奖；双色球和大乐透投入 530 元，
+七乐彩和七星彩投入 204 元，总奖金 1,146 元。
 数据由 `python3 Scripts/make-demo-data.py <lottery-data-repo 路径>` 生成。
 
-UI 测试都用这份数据启动。`AppStoreScreenshotTests` 截首页、票夹、设置三张 1320×2868 的整屏图
-（模拟器是 iPhone 17 Pro Max，正好是 6.9 英寸的上架尺寸）：手动运行 Build & Test 并勾选
+UI 测试都用这份数据启动。`AppStoreScreenshotTests` 截首页、票夹、统计、扫描复核、设置五张
+1320×2868 的整屏图（模拟器是 iPhone 17 Pro Max，正好是 6.9 英寸的上架尺寸）：手动运行 Build & Test 并勾选
 `record_snapshots`，CI 会把 PNG 提交到 `Tests/LotteryWalletUITests/__Snapshots__/AppStoreScreenshotTests/`。
+扫描复核那张用 `Tests/LotteryWalletUITests/Fixtures/review-ticket.jpg` 这张票据照片走一遍真实的裁切和识别，
+预览图在示例模式下整张打马赛克；没有这张照片时这一张会跳过。
 
 ### 发版验收
 
