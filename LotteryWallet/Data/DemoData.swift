@@ -71,7 +71,9 @@ enum DemoData {
     }
 
     /// 示例票对应的开奖。
-    static func draws(_ dataset: Dataset = dataset()) -> [Draw] {
+    static func draws() -> [Draw] { draws(dataset()) }
+
+    static func draws(_ dataset: Dataset) -> [Draw] {
         dataset.draws.compactMap { item in
             guard let game = GameKey(rawValue: item.game) else { return nil }
             var draw = Draw()
