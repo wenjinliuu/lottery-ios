@@ -638,7 +638,7 @@ struct TicketScanView: View {
                     isPhotoZoomPresented = true
                     zoomedImage = cropped
                 } label: {
-                    Image(uiImage: cropped)
+                    Image(uiImage: DemoData.masked(cropped))
                         .resizable()
                         .scaledToFit()
                         .frame(maxHeight: 132)
@@ -1091,10 +1091,10 @@ struct TicketScanView: View {
             if let lineIndex = target.lineIndex {
                 ScanLineEditor(ticket: $tickets[index],
                                lineIndex: lineIndex,
-                               image: ticketImages[target.ticketID])
+                               image: ticketImages[target.ticketID].map(DemoData.masked))
             } else if let key = target.key {
                 ScanZoneEditor(ticket: $tickets[index], key: key,
-                               image: ticketImages[target.ticketID])
+                               image: ticketImages[target.ticketID].map(DemoData.masked))
             }
         }
     }
@@ -1461,7 +1461,7 @@ struct PhotoZoomView: View {
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { dismiss() }
-            Image(uiImage: image)
+            Image(uiImage: DemoData.masked(image))
                 .resizable()
                 .scaledToFit()
                 .scaleEffect(scale)

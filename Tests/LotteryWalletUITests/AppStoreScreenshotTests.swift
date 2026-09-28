@@ -62,16 +62,12 @@ final class AppStoreScreenshotTests: XCTestCase {
         let recognize = app.buttons["识别这张"]
         XCTAssertTrue(recognize.waitForExistence(timeout: 15), "没有进入裁切")
         settle()
-        capture("debug-scan-crop")
         // 自动框选只是起点，对这张图容易框到票面里的一小块；用默认框（整张内缩 8%）更稳。
         app.buttons["重置"].tap()
         settle(1)
         recognize.tap()
 
-        guard app.navigationBars["核对识别结果"].waitForExistence(timeout: 60) else {
-            capture("debug-scan-failure")
-            return XCTFail("识别没有完成")
-        }
+        XCTAssertTrue(app.navigationBars["核对识别结果"].waitForExistence(timeout: 60), "识别没有完成")
         settle()
 
         // 预览图不要，往下滑到号码和票面合计完整露出来。
