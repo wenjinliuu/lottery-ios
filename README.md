@@ -29,6 +29,7 @@ LotteryWallet/
   Features/Settings             设置、备份、关于
 Engineering/                    识别系统文档（vision-system.md / vision-rebuild.md）与量票脚本
 Tests/LotteryWalletTests/       奖级、组合展开、票面解析、版式判据的单元测试
+Tests/LotteryWalletUITests/     关键流程、无障碍审计、App Store 截图（--demo-data 启动）
 ```
 
 ## 本地开发
@@ -47,7 +48,7 @@ brew install xcodegen
 原始图层在 `DesignAssets/AppIcon/`，可编译的分层包在
 `LotteryWallet/Resources/AppIcon.icon/`。三个 SVG 只保存几何与项目色，不预制圆角蒙版、高光、阴影或玻璃效果；这些材质由 `icon.json` 和 Apple Icon Composer 统一渲染。
 
-修改 `DesignAssets/AppIcon/` 的 SVG 后直接 push 即可：CI 会自动同步到 `.icon`，再由稳定版 Xcode 原生编译验证。`App Icon Preview` 还会用第三方工具尝试生成六种外观与营销 PNG Artifact，但该预览只作辅助；正式有效性以 Xcode Build/TestFlight 为准。维护细节见 [`docs/app-icon-workflow.md`](docs/app-icon-workflow.md)。
+修改 `DesignAssets/AppIcon/` 的 SVG 后直接 push 即可：CI 会自动同步到 `.icon`，再由稳定版 Xcode 原生编译验证。`App Icon` 工作流还会用第三方工具尝试生成六种外观与营销 PNG Artifact，但该预览只作辅助；正式有效性以 Xcode Build/TestFlight 为准。维护细节见 [`docs/app-icon-workflow.md`](docs/app-icon-workflow.md)。
 
 ## 开奖日历
 
@@ -104,36 +105,51 @@ SDK 若调整签名，改动范围锁在这一个文件里。
 
 ## CI
 
+编译、测试、签名上传都交给中央仓库 [ios-ci-workflows](https://github.com/wenjinliuu/ios-ci-workflows)（v1.0.0）。
+App 的设置全在根目录的 `.ios-ci.yml`，`.github/workflows/` 里只剩几个很薄的入口文件；
+AI 协作规则见 `AGENTS.md`。
+
 | Workflow | 触发 | 作用 |
 | --- | --- | --- |
-| `Build & Test` | push / PR | 生成工程、模拟器编译、跑单元测试 |
-| `App Icon Preview` | 图标变更 / 手动 | 用苹果 `ictool` 验证并导出六种图标外观 |
-| `TestFlight` | 手动 / `v*` tag | 归档、签名、上传 TestFlight |
+| `Build & Test` | push / PR / 手动 | 生成工程、编译、跑单元测试和 UI 测试（关键流程、无障碍审计、App Store 截图），写测试报告 |
+| `Live Preview` | 手动 | 在手机浏览器里操作模拟器，最长 20 分钟 |
+| `TestFlight` | 手动 / `v*` tag | 核对 Apple 注册 → 完整跑一次 Build & Test → 签名上传 → 开「发版验收」Issue |
+| `App Icon` | 图标素材变更 / 手动 | 原生编译验证 `.icon`，输出六种外观预览 |
 
-### TestFlight 需要的 Secrets
+### 示例数据与 App Store 截图
 
-在仓库 `Settings → Secrets and variables → Actions` 添加：
+`--demo-data` 启动参数让 App 换成一个内存里的示例库（`LotteryWallet/Data/DemoData.swift`），
+不碰本机数据库、不做自动备份：2026-06-01 至 09-27 每一期双色球、大乐透各一张票，
+开奖号码与奖金取自 lottery-data-repo，六成的票中奖，投入 530 元、奖金 781 元。
+数据由 `python3 Scripts/make-demo-data.py <lottery-data-repo 路径>` 生成。
 
-| Secret | 说明 |
-| --- | --- |
-| `APPLE_TEAM_ID` | 10 位 Team ID（开发者账号 Membership 页面） |
-| `APP_STORE_CONNECT_KEY_ID` | App Store Connect API 密钥 ID |
-| `APP_STORE_CONNECT_ISSUER_ID` | 同页面的 Issuer ID |
-| `APP_STORE_CONNECT_PRIVATE_KEY` | `.p8` 私钥文件的完整内容（含 BEGIN/END 行） |
+UI 测试都用这份数据启动。`AppStoreScreenshotTests` 截首页、票夹、设置三张 1320×2868 的整屏图
+（模拟器是 iPhone 17 Pro Max，正好是 6.9 英寸的上架尺寸）：手动运行 Build & Test 并勾选
+`record_snapshots`，CI 会把 PNG 提交到 `Tests/LotteryWalletUITests/__Snapshots__/AppStoreScreenshotTests/`。
+
+### 发版验收
+
+TestFlight 上传成功后会开一个「发版验收」Issue：固定项在 `.github/release-checklist.md`，
+这一版要额外看的写在 `.github/release-checklist-current.md`（每次发版前按改动更新）。
+
+### Secrets
+
+| Secret | 用于 | 说明 |
+| --- | --- | --- |
+| `APPLE_TEAM_ID` | TestFlight | 10 位 Team ID（开发者账号 Membership 页面） |
+| `APP_STORE_CONNECT_KEY_ID` | TestFlight | App Store Connect API 密钥 ID |
+| `APP_STORE_CONNECT_ISSUER_ID` | TestFlight | 同页面的 Issuer ID |
+| `APP_STORE_CONNECT_PRIVATE_KEY` | TestFlight | `.p8` 私钥文件的完整内容（含 BEGIN/END 行） |
+| `AGENT_PREVIEW_PASSWORD` | Live Preview | 预览密码，至少 12 位 |
+| `AGENT_PREVIEW_TUNNEL_TOKEN` | Live Preview | 可选，固定域名时才要 |
 
 API 密钥在 App Store Connect → 用户和访问 → 集成 → App Store Connect API 创建**团队密钥**，
-角色必须选 **Admin**。App Manager 不够：云端签名需要创建分发证书，而 App Store Connect
-只允许 Admin 角色管理证书，否则 `exportArchive` 会报 `Cloud signing permission error`。
-`.p8` 只能下载一次，注意保存。
+角色必须选 **Admin**：云端签名需要创建分发证书，App Manager 不够。
 
-上传前需要先在 App Store Connect 建好 App 记录，Bundle ID 用 `com.wenjinliu.lotterywallet`
-（要改的话同时改 `project.yml` 里的 `PRODUCT_BUNDLE_IDENTIFIER`）。
-
+Bundle ID 是 `com.wenjinliu.lotterywallet`，App 用 iCloud 备份，`.ios-ci.yml` 里是
+`entitlement_mode: icloud-verified`：App ID 上确实勾了 `iCloud.com.wenjinliu.lotterywallet`
+才把 iCloud 权限签进包里，否则跳过并警告（见 `ModelStore` 里 1.2.0 构建 59 那次事故）。
 构建号默认取 GitHub run number，手动触发时也可以指定。
-
-签名分两步走：归档时关闭签名，导出时才用 App Store 分发身份签名并上传。
-这么做是因为 Xcode 自动签名在归档阶段申请的是「开发」描述文件，而它必须绑定
-一台已注册设备 —— CI 上没有设备可绑，会直接失败。分发签名不需要注册设备。
 
 ## 与 web 版的关系
 

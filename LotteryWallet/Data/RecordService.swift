@@ -116,7 +116,23 @@ struct RecordService {
                                          ticket: record.ticket,
                                          draw: draw,
                                          multiple: record.multiple)
-        let status: RecordStatus = result.isFloating ? .prizeFloat : (result.amount > 0 ? .won : .lost)
+        // 结论没变就不写库，避免无谓的脏数据和界面刷新
+        guard record.status != Self.status(of: result)
+                || record.prizeAmount != result.amount
+                || record.prizeName != result.prizeName
+                || !record.hasMatches else { return false }
+
+        Self.write(result, from: draw, into: record)
+        return true
+    }
+
+    private static func status(of result: PrizeResult) -> RecordStatus {
+        result.isFloating ? .prizeFloat : (result.amount > 0 ? .won : .lost)
+    }
+
+    /// 把一次核对的结论写进记录。示例数据（`DemoData`）播种时也走这里，
+    /// 两边写出来的字段必须一模一样。
+    static func write(_ result: PrizeResult, from draw: Draw, into record: TicketRecord, at moment: Date = Date()) {
         let text: String
         if result.isFloating {
             text = "\(result.prizeName)，奖金浮动"
@@ -125,14 +141,7 @@ struct RecordService {
         } else {
             text = "未中奖"
         }
-
-        // 结论没变就不写库，避免无谓的脏数据和界面刷新
-        guard record.status != status
-                || record.prizeAmount != result.amount
-                || record.prizeName != result.prizeName
-                || !record.hasMatches else { return false }
-
-        record.status = status
+        record.status = status(of: result)
         record.resultText = text
         record.prizeAmount = result.amount
         record.prizeName = result.prizeName
@@ -141,8 +150,7 @@ struct RecordService {
         if !draw.openDate.isEmpty { record.targetOpenDate = draw.openDate }
         record.targetSourceDrawId = draw.id
         record.refreshProfitDay()
-        record.updatedAt = Date()
-        return true
+        record.updatedAt = moment
     }
 
     /// 批量核对。已经有最终结论的记录不再重复计算，

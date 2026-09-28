@@ -1,18 +1,19 @@
-name: App Icon Preview
+name: App Icon
 
 on:
   push:
     branches: [main]
     paths:
-      - "DesignAssets/AppIcon/*.svg"
-      - "LotteryWallet/Resources/AppIcon.icon/**"
-      - "project.yml"
-      - "Scripts/sync-app-icon.sh"
-      - ".github/workflows/icon-preview.yml"
+      - 'DesignAssets/AppIcon/**'
+      - '!DesignAssets/AppIcon/previews/**'
+      - 'LotteryWallet/Resources/AppIcon.icon/**'
+      - 'Scripts/sync-app-icon.sh'
+      - '.ios-ci.yml'
+      - '.github/workflows/icon-preview.yml'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: read    # app_icon.commit_previews 没开，不写仓库
 
 concurrency:
   group: app-icon-${{ github.ref }}
@@ -20,11 +21,4 @@ concurrency:
 
 jobs:
   icon:
-    uses: wenjinliuu/ios-ci-workflows/.github/workflows/app-icon.yml@1785ec85efe4d88c1a87b5a9125e5ca5125a10ca
-    with:
-      workdir: .
-      project: LotteryWallet.xcodeproj
-      scheme: LotteryWallet
-      icon_path: LotteryWallet/Resources/AppIcon.icon
-      sync_command: bash Scripts/sync-app-icon.sh
-      generate_command: xcodegen generate
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/app-icon.yml@0c7501dd52ac0c252678ce5a4a7ed61fb6633cfb # v1.0.0

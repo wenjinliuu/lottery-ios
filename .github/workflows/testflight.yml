@@ -1,29 +1,30 @@
 name: TestFlight
 
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
-      build_number:
-        description: "Build number (blank: GitHub run number)"
-        type: string
-        required: false
-      marketing_version:
-        description: "Marketing version override (blank: project default)"
-        type: string
-        required: false
       lookup_only:
-        description: "Only verify Apple registration; do not archive or upload"
+        description: 只核对 Apple 注册（Bundle ID、App），不打包
         type: boolean
         default: false
       dry_run:
-        description: "Unsigned archive only; never upload"
+        description: 跑测试并打包，但不签名不上传
         type: boolean
         default: false
-  push:
-    tags: ["v*"]
+      marketing_version:
+        description: 版本号（留空用工程里的）
+        type: string
+        default: ''
+      build_number:
+        description: 构建号（留空用运行编号）
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  issues: write     # 开发版验收 Issue；testflight.acceptance_issue 为 false 时可去掉
 
 concurrency:
   group: lottery-ios-testflight
@@ -31,23 +32,12 @@ concurrency:
 
 jobs:
   release:
-    uses: wenjinliuu/ios-ci-workflows/.github/workflows/testflight-release.yml@1785ec85efe4d88c1a87b5a9125e5ca5125a10ca
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/testflight-release.yml@0c7501dd52ac0c252678ce5a4a7ed61fb6633cfb # v1.0.0
     with:
-      workdir: .
-      project: LotteryWallet.xcodeproj
-      scheme: LotteryWallet
-      bundle_id: com.wenjinliu.lotterywallet
-      sync_command: bash Scripts/sync-app-icon.sh
-      generate_command: xcodegen generate
-      build_number: ${{ inputs.build_number || '' }}
-      marketing_version: ${{ inputs.marketing_version || '' }}
       lookup_only: ${{ inputs.lookup_only || false }}
       dry_run: ${{ inputs.dry_run || false }}
-      artifact_prefix: lottery-ios-
-      ci_revision: 1785ec85efe4d88c1a87b5a9125e5ca5125a10ca
-      entitlements_path: LotteryWallet/Resources/LotteryWallet.entitlements
-      entitlement_mode: icloud-verified
-      icloud_container: iCloud.com.wenjinliu.lotterywallet
+      marketing_version: ${{ inputs.marketing_version || '' }}
+      build_number: ${{ inputs.build_number || '' }}
     secrets:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}

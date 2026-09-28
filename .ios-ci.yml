@@ -1,0 +1,26 @@
+# ios-ci-workflows 的配置，说明见 https://github.com/wenjinliuu/ios-ci-workflows/blob/main/docs/config.md
+workdir: .
+project: LotteryWallet.xcodeproj
+scheme: LotteryWallet
+bundle_id: com.wenjinliu.lotterywallet
+display_name: 对个号
+sync_command: bash Scripts/sync-app-icon.sh
+generate_command: xcodegen generate
+icon_path: LotteryWallet/Resources/AppIcon.icon
+
+# 用 6.9 英寸的 Pro Max：UI 测试截出来的图是 1320×2868，正好是 App Store 要求的尺寸。
+toolchain:
+  xcode: '26.6'
+  simulator: iPhone 17 Pro Max
+  ios: '26.4'
+
+build_test:
+  accessibility_audit: warn
+  commit_recorded_snapshots: true
+
+testflight:
+  entitlement_mode: icloud-verified
+  entitlements_path: LotteryWallet/Resources/LotteryWallet.entitlements
+  icloud_container: iCloud.com.wenjinliu.lotterywallet
+  artifact_prefix: lottery-ios-
+  acceptance_issue: true
