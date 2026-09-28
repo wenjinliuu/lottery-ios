@@ -9,7 +9,7 @@ on:
       - 'LotteryWallet/Resources/AppIcon.icon/**'
       - 'Scripts/sync-app-icon.sh'
       - '.ios-ci.yml'
-      - '.github/workflows/app-icon.yml'
+      - '.github/workflows/icon-preview.yml'
   workflow_dispatch:
 
 permissions:
