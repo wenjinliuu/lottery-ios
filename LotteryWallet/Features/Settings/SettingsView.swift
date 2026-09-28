@@ -193,6 +193,11 @@ struct SettingsView: View {
 struct AboutView: View {
     static let privacyURL = URL(string: "https://wenjinliuu.github.io/lottery-ios/")!
     static let supportURL = URL(string: "https://wenjinliuu.github.io/lottery-ios/support.html")!
+    /// App 备案号。工信部要求在 App 显著位置标明；所有地区都显示，
+    /// 海外用户看到一行小字没有任何影响，按地区藏起来反而要引入 StoreKit 读商店地区。
+    static let icpFiling = "沪ICP备2026015335号-2A"
+    /// 工信部备案查询。点备案号跳这里，和网站底部备案号的通行做法一致。
+    static let icpLookupURL = URL(string: "https://beian.miit.gov.cn/")!
 
     private func linkRow(_ title: String, systemImage: String) -> some View {
         HStack(spacing: 10) {
@@ -221,7 +226,7 @@ struct AboutView: View {
                 Text("本应用仅用于记录和核对您已持有的实体彩票，不销售、不代购、不提供兑奖服务。开奖结果以官方渠道公布为准。购彩请通过当地合法、正规的线下彩票销售渠道，并理性参与、量力而行。")
                 Text("开奖数据")
                     .font(.headline)
-                Text("开奖号码与开奖日历读取自公开数据仓库 lottery-data-repo，应用只做只读访问。彩票照片的号码识别全部在本机完成，照片不会离开设备，也不会被保存。")
+                Text("开奖号码与开奖日历读取自公开的开奖数据接口（腾讯云 CloudBase），不可用时改读 GitHub 上的公开数据仓库 lottery-data-repo，应用只做只读访问，不上传任何票据。彩票照片的号码识别全部在本机完成，照片不会离开设备，也不会被保存。")
 
                 Divider()
                 // 隐私政策要能在 App 内点得到 —— 这是审核明确看的一项，
@@ -237,6 +242,17 @@ struct AboutView: View {
                 Text("以上两个链接会在浏览器中打开，页面为纯静态内容，不会收集任何信息。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                // 备案号：页面最底下一行小字，点了去工信部备案查询。
+                Link(destination: AboutView.icpLookupURL) {
+                    Text(AboutView.icpFiling)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .underline()
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 12)
+                .accessibilityHint("在浏览器中打开工信部备案查询")
             }
             .font(.subheadline)
             .padding(20)

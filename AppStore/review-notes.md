@@ -20,7 +20,7 @@ WHAT THIS APP DOES NOT DO (Guideline 5.3 / 5.3.4)
 - It does NOT sell, order, reserve, broker or facilitate the purchase of a ticket. There is no purchase entry point anywhere in the app, and no draw is ever shown as "on sale" or "closed".
 - It handles NO money: no payment, wager, balance, top-up, prize redemption or In-App Purchase. The binary contains no StoreKit code.
 - It does NOT predict or recommend numbers; no odds, trends or "hot/cold numbers".
-- The only outbound links are the Privacy Policy and Support pages, in Settings > About. No web view, no third-party SDK.
+- The only outbound links, all in Settings > About, are the Privacy Policy, Support, and the ICP filing number, which opens the MIIT filing lookup (beian.miit.gov.cn). No web view, no third-party SDK.
 - Every amount shown is either the amount printed on the user's ticket or the published prize of a ticket already drawn.
 
 ABOUT "随机填充" (FILL RANDOMLY)
@@ -54,7 +54,7 @@ Thank you for your review.
 | --- | --- |
 | 无第三方 SDK | `project.yml` 无 `packages:` 段 |
 | 无内购 / 无内嵌网页 | `grep -rn 'StoreKit\|WKWebView\|SFSafariViewController' LotteryWallet/` 为空 |
-| 仅有的外链是隐私政策与技术支持 | `grep -rn 'Link(destination\|openURL' LotteryWallet/` 只应命中 `SettingsView.swift` 的两条 |
+| 仅有的外链是隐私政策、技术支持和备案查询 | `grep -rn 'Link(destination\|openURL' LotteryWallet/` 只应命中 `SettingsView.swift` 的三条（`privacyURL`、`supportURL`、`icpLookupURL`） |
 | 网络端点只有两个，都是公开只读 GET | `LotteryWallet/Data/V2/LotteryAPIClient.swift`：`cloudBase`（腾讯云 CloudBase，上海）为主、`github`（raw.githubusercontent.com）兜底；无 Authorization 头、无任何参数带用户数据。隐私政策第 04 节写的是同一件事 |
 | 权限用途 | `project.yml` 的 NSCameraUsageDescription / NSPhotoLibraryUsageDescription |
 | 随机填充只填选号盘 | `EntryFlowView.fillRandomSelection()` → `TicketBuilder.randomDigits` |
@@ -72,3 +72,4 @@ Thank you for your review.
 | 扫描步骤里的「重置」 | 这张图自动框选会框到打码的二维码（`TicketImagePreprocessor.suggestedQuad` 取面积最大的矩形），点「重置」用整张内缩 8% 的默认框。自动框选修好后删掉这一句 |
 | 首次保存弹「理性购彩」 | 见上面「理性购彩弹窗两条保存路径都拦」 |
 | 附件 | 提交时附上 `Tests/LotteryWalletUITests/Fixtures/review-ticket.jpg` |
+| 备案号 | 关于页最底部 `AboutView.icpFiling`（沪ICP备2026015335号-2A），点了打开 beian.miit.gov.cn；所有地区都显示 |
