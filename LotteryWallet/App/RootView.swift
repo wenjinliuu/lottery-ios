@@ -136,7 +136,8 @@ struct RootView: View {
         // 静默执行：这一刻 App 已经不在前台，弹什么都没人看得见。
         // 真出问题时设置页那行「上次备份」不会往前走，那才是用户看得到的信号。
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .background, settings.autoBackupEnabled else { return }
+            // 示例模式的票据只在内存里，不该变成一份备份文件留在沙盒里
+            guard phase == .background, settings.autoBackupEnabled, !DemoData.isEnabled else { return }
             autoBackup()
         }
         .sheet(item: $activeSheet, onDismiss: {

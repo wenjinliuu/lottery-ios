@@ -85,15 +85,35 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CODE_SIGNING_ALLOWED: NO
 
+  # 关键流程 + 无障碍审计 + App Store 截图：用 --demo-data 启动，不读写用户数据。
+  LotteryWalletUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Tests/LotteryWalletUITests
+        excludes:
+          - "**/__Snapshots__/**"
+    dependencies:
+      - target: LotteryWallet
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wenjinliu.lotterywallet.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGNING_ALLOWED: NO
+        TEST_TARGET_NAME: LotteryWallet
+
 schemes:
   LotteryWallet:
     build:
       targets:
         LotteryWallet: all
         LotteryWalletTests: [test]
+        LotteryWalletUITests: [test]
     test:
       targets:
         - LotteryWalletTests
+        - LotteryWalletUITests
       gatherCoverageData: false
     run:
       config: Debug

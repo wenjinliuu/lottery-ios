@@ -5,7 +5,7 @@ import Observation
 @main
 struct LotteryWalletApp: App {
     @State private var drawStore = DrawStore()
-    @State private var settings = AppSettings()
+    @State private var settings: AppSettings
     /// 数据库的健康状态。建库和它一起产生，见 `ModelStore`。
     @State private var storeHealth: StoreHealth
     @State private var backupCenter = BackupCenter()
@@ -17,10 +17,19 @@ struct LotteryWalletApp: App {
     /// 权限，本地库就会被自动切成 CloudKit 同步，而 `TicketRecord` 上的
     /// `@Attribute(.unique)` 是 CloudKit 镜像不支持的。加一个权限就能让库
     /// 打不开，这种耦合必须断掉。理由全写在 `ModelStore` 里。
+    ///
+    /// `--demo-data` 启动时换成装着示例票据的内存库，见 `DemoData`。
     init() {
         let health = StoreHealth()
-        container = ModelStore.makeContainer(health: health)
+        if DemoData.isEnabled {
+            // 偏好的默认值要在 AppSettings 读取之前注册好
+            DemoData.registerDefaults()
+            container = DemoData.makeContainer()
+        } else {
+            container = ModelStore.makeContainer(health: health)
+        }
         _storeHealth = State(initialValue: health)
+        _settings = State(initialValue: AppSettings())
     }
 
     var body: some Scene {

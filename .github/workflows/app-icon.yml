@@ -1,0 +1,24 @@
+name: App Icon
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'DesignAssets/AppIcon/**'
+      - '!DesignAssets/AppIcon/previews/**'
+      - 'LotteryWallet/Resources/AppIcon.icon/**'
+      - 'Scripts/sync-app-icon.sh'
+      - '.ios-ci.yml'
+      - '.github/workflows/app-icon.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read    # app_icon.commit_previews 没开，不写仓库
+
+concurrency:
+  group: app-icon-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  icon:
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/app-icon.yml@0c7501dd52ac0c252678ce5a4a7ed61fb6633cfb # v1.0.0
