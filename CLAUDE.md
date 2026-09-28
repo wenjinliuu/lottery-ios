@@ -6,5 +6,6 @@
 - 涉及 CloudBase 时，先执行 `npx skills add tencentcloudbase/cloudbase-skills` 并读取 cloudbase-guidelines。
 - 部署只走 git → CI；MCP 只用来查数据、看日志、排查问题；AI 默认只连测试环境。
 - 更多细节见 ios-ci-workflows 的 Skill：skills/ios-ci-workflows/SKILL.md。
-- 截图和 UI 测试用 `--demo-data` 启动：内存里的示例票据（2026-06-01 至 09-27 的双色球、大乐透），数据由 `Scripts/make-demo-data.py` 生成，不要手改 `DemoDataset.swift`。
-- App Store 截图：手动运行 Build & Test 并勾选 record_snapshots，`AppStoreScreenshotTests` 会把三张图提交到 `Tests/LotteryWalletUITests/__Snapshots__/AppStoreScreenshotTests/`。
+- 截图和 UI 测试用 `--demo-data` 启动：内存里的示例票据（2026-06-01 至 09-27 的双色球、大乐透、七乐彩、七星彩），数据由 `Scripts/make-demo-data.py` 生成，不要手改 `DemoDataset.swift`。
+- App Store 截图：手动运行 Build & Test 并勾选 record_snapshots，`AppStoreScreenshotTests` 会把五张图（首页、票夹、统计、扫描复核、设置）提交到 `Tests/LotteryWalletUITests/__Snapshots__/AppStoreScreenshotTests/`。
+- 扫描复核截图要一张票据照片 `Tests/LotteryWalletUITests/Fixtures/review-ticket.jpg`；示例模式下预览图整张打马赛克。没有这张照片时扫描截图会跳过。

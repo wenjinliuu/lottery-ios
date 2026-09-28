@@ -146,6 +146,12 @@ struct TicketScanView: View {
         .onChange(of: stage) { _, value in
             detent = value == .intro ? .medium : .large
         }
+        // 示例模式：UI 测试给了一张票据照片，直接进裁切，省掉系统相册那一步。
+        .task {
+            guard stage == .intro, let image = DemoData.scanImage else { return }
+            preview = image
+            stage = .crop
+        }
         .fullScreenCover(isPresented: $isCameraPresented) {
             CameraPicker { image in
                 preview = image
@@ -309,7 +315,7 @@ struct TicketScanView: View {
     private var scanning: some View {
         ZStack {
             if let image = croppedPreview ?? preview {
-                Image(uiImage: image)
+                Image(uiImage: DemoData.masked(image))
                     .resizable()
                     .scaledToFill()
                     .blur(radius: 2)
@@ -318,7 +324,7 @@ struct TicketScanView: View {
             }
             VStack(spacing: 16) {
                 if let image = croppedPreview ?? preview {
-                    Image(uiImage: image)
+                    Image(uiImage: DemoData.masked(image))
                         .resizable()
                         .scaledToFit()
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -440,7 +446,7 @@ struct TicketScanView: View {
                     // **完整显示，不裁。**
                     // 这一张是"机器拿到的整张票"，用来确认框对没框对 ——
                     // 用 scaledToFill 裁掉边缘，恰恰把最该看的边界切没了。
-                    Image(uiImage: preview)
+                    Image(uiImage: DemoData.masked(preview))
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: .infinity)

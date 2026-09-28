@@ -87,7 +87,9 @@ struct HomeView: View {
             // 渐变模糊，那才是这一版该有的观感。偶发的标题错位是轮播每 4 秒
             // 用全局 withAnimation 写 @State 引起的，已经在下面 TabView 那里
             // 把动画作用域收窄解决了，跟导航栏背景没关系。
-            .navigationTitle("首页")
+            // 不写页面标题：标签栏已经说了这是哪一页，大标题只是把内容往下压了一大截。
+            // 导航栏只留右上角的按钮，内容从状态栏下面直接开始。
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {

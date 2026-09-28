@@ -23,50 +23,54 @@ struct DrawDataView: View {
 
     var body: some View {
         Form {
-            Section {
-                LabeledContent("更新时间") {
-                    Text(drawStore.lastFetchedAt.map(DateText.stamp) ?? "暂无")
-                        .foregroundStyle(.secondary)
+            Group {
+                Section {
+                    LabeledContent("更新时间") {
+                        Text(drawStore.lastFetchedAt.map(DateText.stamp) ?? "暂无")
+                            .foregroundStyle(.secondary)
+                    }
+                    LabeledContent("数据来源") {
+                        Text(drawStore.lastSource?.label ?? "尚未取数")
+                            .foregroundStyle(sourceTint)
+                    }
+                    LabeledContent("数据源状态") {
+                        Text(progressText)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    LabeledContent("数据源更新时间") {
+                        Text(executionText)
+                            .foregroundStyle(executionTint)
+                            .multilineTextAlignment(.trailing)
+                    }
+                } header: {
+                    Text("最新开奖")
+                } footer: {
+                    Text(footerText)
                 }
-                LabeledContent("数据来源") {
-                    Text(drawStore.lastSource?.label ?? "尚未取数")
-                        .foregroundStyle(sourceTint)
-                }
-                LabeledContent("数据源状态") {
-                    Text(progressText)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-                LabeledContent("数据源更新时间") {
-                    Text(executionText)
-                        .foregroundStyle(executionTint)
-                        .multilineTextAlignment(.trailing)
-                }
-            } header: {
-                Text("最新开奖")
-            } footer: {
-                Text(footerText)
-            }
 
-            Section {
-                if calendarYears.isEmpty {
-                    Text("尚未获取")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(calendarYears, id: \.self) { year in
-                        LabeledContent("\(String(year)) 年") {
-                            Text("\(issueCount(year)) 期")
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
+                Section {
+                    if calendarYears.isEmpty {
+                        Text("尚未获取")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(calendarYears, id: \.self) { year in
+                            LabeledContent("\(String(year)) 年") {
+                                Text("\(issueCount(year)) 期")
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
+                } header: {
+                    Text("开奖日历")
+                } footer: {
+                    Text("日历是按年、按需取的：录入或扫描彩票、需要选择期号时才会加载当年那一份，跨年前后才会多取下一年。它决定了每一期的期号、开奖日和停售时刻。")
                 }
-            } header: {
-                Text("开奖日历")
-            } footer: {
-                Text("日历是按年、按需取的：录入或扫描彩票、需要选择期号时才会加载当年那一份，跨年前后才会多取下一年。它决定了每一期的期号、开奖日和停售时刻。")
             }
+            .cardRows()
         }
+        .canvasForm()
         .navigationTitle("数据状态")
         .navigationBarTitleDisplayMode(.inline)
         .task { await drawStore.loadStatus() }

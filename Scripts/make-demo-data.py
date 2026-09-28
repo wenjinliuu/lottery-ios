@@ -46,6 +46,19 @@ LOSE_SHAPES = {
 # 每张票几注：权重。中奖的票注数偏少，免得奖金把盈亏抬得太离谱。
 LINE_COUNTS = {True: [(1, 30), (2, 45), (3, 25)], False: [(2, 25), (3, 40), (5, 35)]}
 
+# 七乐彩、七星彩单独生成（自己的随机数，不影响上面两个彩种已经定下来的数据）。
+EXTRA_GAMES = ("qlc", "qxc")
+EXTRA_SEED = 20260928
+# 七乐彩：(基本号命中数, 是否含特别号)；七星彩：(前六位按位命中数, 特别号是否命中)
+EXTRA_WIN = {
+    "qlc": [((4, False), 88), ((4, True), 12)],
+    "qxc": [((3, False), 60), ((2, True), 20), ((1, True), 17), ((4, False), 3)],
+}
+EXTRA_LOSE = {
+    "qlc": [(1, False), (2, False), (3, False), (2, True), (3, True)],
+    "qxc": [(0, False), (1, False), (2, False), (2, False)],
+}
+
 
 def pick(rng, population, weights):
     return rng.choices(population, weights=weights, k=1)[0]
@@ -72,6 +85,43 @@ def prize_name(game, hits):
                  (4, 0): "五等奖", (3, 2): "五等奖", (3, 1): "六等奖", (2, 2): "六等奖",
                  (3, 0): "七等奖", (2, 1): "七等奖", (1, 2): "七等奖", (0, 2): "七等奖"}
     return table.get(hits)
+
+
+def qlc_line(rng, draw, hits):
+    basic, special = draw["numbers"]["basic"], draw["numbers"]["special"]
+    count, with_special = hits
+    line = rng.sample(sorted(basic), count)
+    if with_special:
+        line.append(special)
+    others = [n for n in range(1, 31) if n not in basic and n != special]
+    line += rng.sample(others, 7 - len(line))
+    name = {(4, True): "六等奖", (4, False): "七等奖"}.get(hits)
+    return {"nums7": sorted(line)}, name
+
+
+def qxc_line(rng, draw, hits):
+    digits = draw["numbers"]["digits"]
+    main, tail = digits[:6], digits[6]
+    count, tail_hit = hits
+    hit_at = set(rng.sample(range(6), count))
+    line = [main[i] if i in hit_at else rng.choice([d for d in range(10) if d != main[i]]) for i in range(6)]
+    back = tail if tail_hit else rng.choice([d for d in range(15) if d != tail])
+    if count == 4 or (count == 3 and tail_hit):
+        name = "五等奖"
+    elif count == 3 or tail_hit:
+        name = "六等奖"
+    else:
+        name = None
+    return {"nums6": line, "tail": [back]}, name
+
+
+def app_numbers(game, numbers):
+    """开奖号换成 App 里的号码区键名（和 LotteryV2Mapper 一致）。"""
+    if game == "qlc":
+        return {"nums7": numbers["basic"], "special": [numbers["special"]]}
+    if game == "qxc":
+        return {"nums6": numbers["digits"][:6], "tail": numbers["digits"][6:7]}
+    return numbers
 
 
 def amount(draw, name):
@@ -121,6 +171,32 @@ def main():
                     expected += amount(draw, name)
             tickets.append({"game": game, "issue": draw["issue"], "lines": lines, "expected": expected})
 
+    rng = random.Random(EXTRA_SEED)
+    periods = []
+    for game in EXTRA_GAMES:
+        data = json.loads((repo / f"public_data/v2/by-year/{game}/2026.json").read_text())
+        periods += [(game, d) for d in data["draws"] if START <= d["date"] <= END]
+    periods.sort(key=lambda item: (item[1]["date"], item[0]))
+    winners = set(rng.sample(range(len(periods)), round(len(periods) * WIN_RATE)))
+    for index, (game, draw) in enumerate(periods):
+        draws.append({
+            "game": game,
+            "issue": draw["issue"],
+            "date": draw["date"],
+            "numbers": app_numbers(game, draw["numbers"]),
+            "prizes": [{"name": p["name"], "amount": p.get("amount", "")} for p in draw["prizes"]],
+        })
+        options = EXTRA_WIN[game] if index in winners else [(h, 1) for h in EXTRA_LOSE[game]]
+        hits = pick(rng, [h for h, _ in options], [w for _, w in options])
+        line, name = (qlc_line if game == "qlc" else qxc_line)(rng, draw, hits)
+        tickets.append({"game": game, "issue": draw["issue"], "lines": [line],
+                        "expected": amount(draw, name) if name else 0.0})
+
+    for group in (("ssq", "dlt"), EXTRA_GAMES):
+        part = [t for t in tickets if t["game"] in group]
+        print(f"  {'/'.join(group)}：{len(part)} 张，投入 {sum(2 * len(t['lines']) for t in part)} 元，"
+              f"奖金 {sum(t['expected'] for t in part):.0f} 元")
+
     cost = sum(2 * len(t["lines"]) for t in tickets)
     prize = sum(t["expected"] for t in tickets)
     won = sum(1 for t in tickets if t["expected"] > 0)
@@ -136,7 +212,7 @@ def main():
     payload = payload.replace("},{\"game\"", "},\n{\"game\"")
     OUT.write_text(
         "// 由 Scripts/make-demo-data.py 生成，不要手改。\n"
-        "// 开奖号码与奖金来自 lottery-data-repo（2026-06-01 至 2026-09-27 的双色球、大乐透）。\n\n"
+        "// 开奖号码与奖金来自 lottery-data-repo（2026-06-01 至 2026-09-27 的双色球、大乐透、七乐彩、七星彩）。\n\n"
         "enum DemoDataset {\n"
         "    static let json = #\"\"\"\n"
         f"{payload}\n"

@@ -38,104 +38,108 @@ struct BackupView: View {
         @Bindable var settings = settings
 
         Form {
-            if !storeHealth.isHealthy { storeWarning }
+            Group {
+                if !storeHealth.isHealthy { storeWarning }
 
-            Section {
-                Toggle(isOn: $settings.autoBackupEnabled) {
-                    row("clock.arrow.circlepath", .blue, "自动备份")
+                Section {
+                    Toggle(isOn: $settings.autoBackupEnabled) {
+                        row("clock.arrow.circlepath", .blue, "自动备份")
+                    }
+                    Toggle(isOn: Binding(get: { settings.iCloudBackupEnabled },
+                                         set: { toggleICloud($0) })) {
+                        row("icloud.fill", .cyan, "存到 iCloud")
+                    }
+                } header: {
+                    Text("自动")
+                } footer: {
+                    Text(autoFooter)
                 }
-                Toggle(isOn: Binding(get: { settings.iCloudBackupEnabled },
-                                     set: { toggleICloud($0) })) {
-                    row("icloud.fill", .cyan, "存到 iCloud")
-                }
-            } header: {
-                Text("自动")
-            } footer: {
-                Text(autoFooter)
-            }
 
-            Section {
-                Button { createSnapshot() } label: {
-                    row("plus.circle.fill", .green, "立即备份")
-                }
-                .disabled(isBusy || records.isEmpty)
+                Section {
+                    Button { createSnapshot() } label: {
+                        row("plus.circle.fill", .green, "立即备份")
+                    }
+                    .disabled(isBusy || records.isEmpty)
 
-                // 「导出」和「立即备份」不是一回事，两个都得有。
+                    // 「导出」和「立即备份」不是一回事，两个都得有。
+                    //
+                    // 立即备份写进 App 自己管的那个列表（iCloud 或沙盒），
+                    // 归 App 管、也归 App 删；导出是**把文件交出去** ——
+                    // 存到「文件」、发给自己、丢进网盘，从此和 App 无关。
+                    // 换手机、卸载重装、想留个长期存档，靠的是后者。
+                    Button { startExport() } label: {
+                        row("square.and.arrow.up.fill", .indigo, "导出数据…")
+                    }
+                    .disabled(isBusy || records.isEmpty)
+
+                    Button { isImporting = true } label: {
+                        row("square.and.arrow.down.fill", .orange, "从文件导入…")
+                    }
+                    .disabled(isBusy)
+                } footer: {
+                    Text(records.isEmpty
+                         ? "现在没有记录可以备份。"
+                         : "现在有 \(records.count) 条记录。手动备份永远不会被自动清理。导出的文件由你自己保管，和这里的备份列表互不影响，任何时候都能用「从文件导入」读回来。")
+                }
+
+                Section {
+                    if center.isLoading && center.items.isEmpty {
+                        HStack {
+                            ProgressView()
+                            Text("正在读取…").foregroundStyle(.secondary)
+                        }
+                    } else if center.items.isEmpty {
+                        Text("还没有任何备份")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(center.items) { item in
+                            backupRow(item)
+                        }
+                    }
+                } header: {
+                    Text("全部备份")
+                } footer: {
+                    Text(listFooter)
+                }
+
+                // 清空全部记录放在这一页，紧挨着备份列表。
                 //
-                // 立即备份写进 App 自己管的那个列表（iCloud 或沙盒），
-                // 归 App 管、也归 App 删；导出是**把文件交出去** ——
-                // 存到「文件」、发给自己、丢进网盘，从此和 App 无关。
-                // 换手机、卸载重装、想留个长期存档，靠的是后者。
-                Button { startExport() } label: {
-                    row("square.and.arrow.up.fill", .indigo, "导出数据…")
-                }
-                .disabled(isBusy || records.isEmpty)
-
-                Button { isImporting = true } label: {
-                    row("square.and.arrow.down.fill", .orange, "从文件导入…")
-                }
-                .disabled(isBusy)
-            } footer: {
-                Text(records.isEmpty
-                     ? "现在没有记录可以备份。"
-                     : "现在有 \(records.count) 条记录。手动备份永远不会被自动清理。导出的文件由你自己保管，和这里的备份列表互不影响，任何时候都能用「从文件导入」读回来。")
-            }
-
-            Section {
-                if center.isLoading && center.items.isEmpty {
-                    HStack {
-                        ProgressView()
-                        Text("正在读取…").foregroundStyle(.secondary)
+                // 它是**备份的反面**：唯一一个会让数据永久消失的按钮。放在设置页
+                // 的列表里，用户点它的时候看不到自己有没有备份；放在这儿，
+                // 上面那几行就是他的后路，点之前一眼看得见。
+                Section {
+                    Button(role: .destructive) {
+                        isClearConfirmPresented = true
+                    } label: {
+                        row("trash.fill", .red, "清空全部记录")
                     }
-                } else if center.items.isEmpty {
-                    Text("还没有任何备份")
+                    .disabled(isBusy || records.isEmpty)
+                } footer: {
+                    Text(records.isEmpty
+                         ? "现在没有记录。"
+                         : "会把这台设备上的 \(records.count) 条记录全部删除。上面列出的备份不受影响，清空之后仍然可以从它们恢复。")
+                }
+
+                // 诊断**不藏**。上一版把它放在一个只有 iCloud 开关打开才出现的
+                // 子页里，于是恰恰在开关打不开的时候，用来查原因的东西也不见了。
+                Section {
+                    Text(diagnostic)
+                        .font(.footnote.monospaced())
                         .foregroundStyle(.secondary)
-                } else {
-                    ForEach(center.items) { item in
-                        backupRow(item)
+                        .textSelection(.enabled)
+                    Button {
+                        UIPasteboard.general.string = diagnostic
+                        showToast("已复制诊断信息", symbol: "doc.on.doc", feedback: .success)
+                    } label: {
+                        Label("复制诊断信息", systemImage: "doc.on.doc")
                     }
+                } header: {
+                    Text("诊断")
                 }
-            } header: {
-                Text("全部备份")
-            } footer: {
-                Text(listFooter)
             }
-
-            // 清空全部记录放在这一页，紧挨着备份列表。
-            //
-            // 它是**备份的反面**：唯一一个会让数据永久消失的按钮。放在设置页
-            // 的列表里，用户点它的时候看不到自己有没有备份；放在这儿，
-            // 上面那几行就是他的后路，点之前一眼看得见。
-            Section {
-                Button(role: .destructive) {
-                    isClearConfirmPresented = true
-                } label: {
-                    row("trash.fill", .red, "清空全部记录")
-                }
-                .disabled(isBusy || records.isEmpty)
-            } footer: {
-                Text(records.isEmpty
-                     ? "现在没有记录。"
-                     : "会把这台设备上的 \(records.count) 条记录全部删除。上面列出的备份不受影响，清空之后仍然可以从它们恢复。")
-            }
-
-            // 诊断**不藏**。上一版把它放在一个只有 iCloud 开关打开才出现的
-            // 子页里，于是恰恰在开关打不开的时候，用来查原因的东西也不见了。
-            Section {
-                Text(diagnostic)
-                    .font(.footnote.monospaced())
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                Button {
-                    UIPasteboard.general.string = diagnostic
-                    showToast("已复制诊断信息", symbol: "doc.on.doc", feedback: .success)
-                } label: {
-                    Label("复制诊断信息", systemImage: "doc.on.doc")
-                }
-            } header: {
-                Text("诊断")
-            }
+            .cardRows()
         }
+        .canvasForm()
         .formStyle(.grouped)
         .navigationTitle("备份与恢复")
         .navigationBarTitleDisplayMode(.inline)

@@ -14,123 +14,127 @@ struct SettingsView: View {
 
         NavigationStack {
             Form {
-                Section {
-                    Toggle(isOn: $settings.autoCheck) {
-                        row("checkmark.circle.fill", .green, "开奖后自动核对")
-                    }
-                } footer: {
-                    Text("每次打开应用并拿到新开奖数据时，自动核对待开奖的票据。")
-                }
-
-                Section {
-                    Picker(selection: $settings.appearance) {
-                        ForEach(AppSettings.Appearance.allCases) { item in
-                            Label(item.label, systemImage: item.symbol).tag(item)
+                Group {
+                    Section {
+                        Toggle(isOn: $settings.autoCheck) {
+                            row("checkmark.circle.fill", .green, "开奖后自动核对")
                         }
-                    } label: {
-                        row("circle.lefthalf.filled", .indigo, "外观")
+                    } footer: {
+                        Text("每次打开应用并拿到新开奖数据时，自动核对待开奖的票据。")
                     }
-                }
 
-                // 数据只有**一组**，三行。
-                //
-                // 原来是分开的两组：「数据状态」（开奖数据、开奖日历、往期缓存、
-                // 刷新）和「数据」（本机记录、备份）。可是在用户心里它们是同一
-                // 件事 —— 我的数据现在什么样、怎么带走、怎么清掉。分成两组只是
-                // 因为它们是分两次做出来的。
-                //
-                // 每一行只留一句话，细节都在各自的详情页里：
-                // 开奖数据的来源和日历进 `DrawDataView`，备份和清空进 `BackupView`。
-                Section {
-                    NavigationLink {
-                        DrawDataView()
-                    } label: {
-                        LabeledContent {
-                            // 一行把三件事说完：后端什么时候跑的、跑成了没有、
-                            // 八个彩种齐了几个。开奖号没更新时要的就是这三件事。
-                            Text(statusSummary)
-                                .font(.footnote)
-                                .foregroundStyle(statusTint)
-                                .multilineTextAlignment(.trailing)
+                    Section {
+                        Picker(selection: $settings.appearance) {
+                            ForEach(AppSettings.Appearance.allCases) { item in
+                                Label(item.label, systemImage: item.symbol).tag(item)
+                            }
                         } label: {
-                            row("checkmark.seal.fill", .blue, "数据状态")
+                            row("circle.lefthalf.filled", .indigo, "外观")
                         }
                     }
 
-                    LabeledContent {
-                        Text("\(records.count) 条")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } label: {
-                        row("tray.full.fill", .orange, "本机记录")
-                    }
-
-                    // 刷新摆在**设置主页**，不在开奖数据详情页里。
+                    // 数据只有**一组**，三行。
                     //
-                    // 这是唯一一个「想到就要用」的动作：用户发现号码没更新，
-                    // 第一反应是找个地方点一下刷新，而不是先进详情页看时间戳。
-                    // 藏在二级页里等于把最常用的那一下多挡了一层。
-                    Button {
-                        refresh()
-                    } label: {
-                        LabeledContent {
-                            if isRefreshing { ProgressView() }
+                    // 原来是分开的两组：「数据状态」（开奖数据、开奖日历、往期缓存、
+                    // 刷新）和「数据」（本机记录、备份）。可是在用户心里它们是同一
+                    // 件事 —— 我的数据现在什么样、怎么带走、怎么清掉。分成两组只是
+                    // 因为它们是分两次做出来的。
+                    //
+                    // 每一行只留一句话，细节都在各自的详情页里：
+                    // 开奖数据的来源和日历进 `DrawDataView`，备份和清空进 `BackupView`。
+                    Section {
+                        NavigationLink {
+                            DrawDataView()
                         } label: {
-                            row("arrow.clockwise.circle.fill", .teal, "刷新开奖数据")
+                            LabeledContent {
+                                // 一行把三件事说完：后端什么时候跑的、跑成了没有、
+                                // 八个彩种齐了几个。开奖号没更新时要的就是这三件事。
+                                Text(statusSummary)
+                                    .font(.footnote)
+                                    .foregroundStyle(statusTint)
+                                    .multilineTextAlignment(.trailing)
+                            } label: {
+                                row("checkmark.seal.fill", .blue, "数据状态")
+                            }
+                        }
+
+                        LabeledContent {
+                            Text("\(records.count) 条")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } label: {
+                            row("tray.full.fill", .orange, "本机记录")
+                        }
+
+                        // 刷新摆在**设置主页**，不在开奖数据详情页里。
+                        //
+                        // 这是唯一一个「想到就要用」的动作：用户发现号码没更新，
+                        // 第一反应是找个地方点一下刷新，而不是先进详情页看时间戳。
+                        // 藏在二级页里等于把最常用的那一下多挡了一层。
+                        Button {
+                            refresh()
+                        } label: {
+                            LabeledContent {
+                                if isRefreshing { ProgressView() }
+                            } label: {
+                                row("arrow.clockwise.circle.fill", .teal, "刷新开奖数据")
+                            }
+                        }
+                        .disabled(isRefreshing)
+
+                        // 清空全部记录也在这里面。它是**备份的反面**，
+                        // 和备份放在一起，点之前一眼就能看到旁边那份备份在不在。
+                        NavigationLink {
+                            BackupView()
+                        } label: {
+                            row("externaldrive.fill.badge.icloud", .blue, "备份与恢复")
+                        }
+                    } header: {
+                        Text("数据")
+                    } footer: {
+                        Text(backupFooter)
+                    }
+
+                    Section {
+                        Toggle(isOn: $settings.debugVision) {
+                            row("ruler.fill", .teal, "识别调试图")
+                        }
+                    } header: {
+                        Text("扫描识别")
+                    } footer: {
+                        Text("打开后，扫描的复核页会多出一张标注图：绿线是票面上找到的基准（号码区上下那两条虚线），蓝框是配准后的号码区，粉格是每一个号码格子。号码认错时截这张图，就能看出是基准找歪了还是格子划错了。平时不用打开。")
+                    }
+
+                    Section {
+                        NavigationLink {
+                            PrizeTableView()
+                        } label: {
+                            row("tablecells", .indigo, "奖级对照表")
+                        }
+                    } header: {
+                        Text("彩种资料")
+                    } footer: {
+                        Text("各彩种的中奖条件与单注奖金，整理自官方公布的游戏规则，仅供参考。")
+                    }
+
+                    Section {
+                        LabeledContent {
+                            Text("\(AppInfo.version) (\(AppInfo.build))")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } label: {
+                            row("app.badge.fill", .purple, "版本")
+                        }
+                        NavigationLink {
+                            AboutView()
+                        } label: {
+                            row("info.circle.fill", .gray, "关于与免责声明")
                         }
                     }
-                    .disabled(isRefreshing)
-
-                    // 清空全部记录也在这里面。它是**备份的反面**，
-                    // 和备份放在一起，点之前一眼就能看到旁边那份备份在不在。
-                    NavigationLink {
-                        BackupView()
-                    } label: {
-                        row("externaldrive.fill.badge.icloud", .blue, "备份与恢复")
-                    }
-                } header: {
-                    Text("数据")
-                } footer: {
-                    Text(backupFooter)
                 }
-
-                Section {
-                    Toggle(isOn: $settings.debugVision) {
-                        row("ruler.fill", .teal, "识别调试图")
-                    }
-                } header: {
-                    Text("扫描识别")
-                } footer: {
-                    Text("打开后，扫描的复核页会多出一张标注图：绿线是票面上找到的基准（号码区上下那两条虚线），蓝框是配准后的号码区，粉格是每一个号码格子。号码认错时截这张图，就能看出是基准找歪了还是格子划错了。平时不用打开。")
-                }
-
-                Section {
-                    NavigationLink {
-                        PrizeTableView()
-                    } label: {
-                        row("tablecells", .indigo, "奖级对照表")
-                    }
-                } header: {
-                    Text("彩种资料")
-                } footer: {
-                    Text("各彩种的中奖条件与单注奖金，整理自官方公布的游戏规则，仅供参考。")
-                }
-
-                Section {
-                    LabeledContent {
-                        Text("\(AppInfo.version) (\(AppInfo.build))")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } label: {
-                        row("app.badge.fill", .purple, "版本")
-                    }
-                    NavigationLink {
-                        AboutView()
-                    } label: {
-                        row("info.circle.fill", .gray, "关于与免责声明")
-                    }
-                }
+                .cardRows()
             }
+            .canvasForm()
             // 导航栏不要自己糊底色，交给系统的 scroll edge effect。
             // 理由见 `HomeView` 里同一处那段注释。
             .navigationTitle("设置")

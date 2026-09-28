@@ -3,7 +3,8 @@ import SwiftData
 @testable import LotteryWallet
 
 /// `--demo-data` 的示例票据。截图、UI 测试都靠它，所以把它答应过的几件事锁住：
-/// 只有双色球和大乐透、覆盖 6 月 1 日到 9 月 27 日、六成的票中奖、投入五六百、整体赚钱，
+/// 双色球、大乐透、七乐彩、七星彩四个彩种，覆盖 6 月 1 日到 9 月 27 日，六成的票中奖；
+/// 双色球和大乐透投入五六百，七乐彩和七星彩两百来块；整体赚钱；
 /// 而且奖级是 App 自己的 `PrizeRules` 按真实开奖号码判出来的。
 @MainActor
 final class DemoDataTests: XCTestCase {
@@ -11,9 +12,9 @@ final class DemoDataTests: XCTestCase {
     private lazy var records = DemoData.records()
     private lazy var draws = DemoData.draws()
 
-    func testOnlyDoubleColorAndSuperLotto() {
+    func testFourGames() {
         XCTAssertFalse(records.isEmpty)
-        XCTAssertEqual(Set(records.map(\.game)), [.ssq, .dlt])
+        XCTAssertEqual(Set(records.map(\.game)), [.ssq, .dlt, .qlc, .qxc])
     }
 
     /// 每一期都有一张票，一期不落，也不越出 6-01 到 9-27。
@@ -34,13 +35,15 @@ final class DemoDataTests: XCTestCase {
         XCTAssertEqual(Double(won) / Double(batches.count), 0.6, accuracy: 0.02)
     }
 
-    /// 投入五六百块，整体是赚的。
-    func testSpendsFiveToSixHundredAndEndsInProfit() {
-        let cost = records.reduce(0) { $0 + $1.cost }
+    /// 双色球和大乐透投入五六百，七乐彩和七星彩两百来块，整体是赚的。
+    func testSpendingByGameGroupAndEndsInProfit() {
+        func cost(_ games: Set<GameKey>) -> Double {
+            records.filter { games.contains($0.game) }.reduce(0) { $0 + $1.cost }
+        }
+        XCTAssertEqual(cost([.ssq, .dlt]), 550, accuracy: 50)
+        XCTAssertEqual(cost([.qlc, .qxc]), 200, accuracy: 30)
         let prize = records.reduce(0) { $0 + $1.prizeAmount }
-        XCTAssertGreaterThanOrEqual(cost, 500)
-        XCTAssertLessThanOrEqual(cost, 600)
-        XCTAssertGreaterThan(prize - cost, 0)
+        XCTAssertGreaterThan(prize - cost([.ssq, .dlt, .qlc, .qxc]), 0)
     }
 
     /// 全部已结算、带逐球命中标记，奖金都是确定值，不会停在「奖金待公布」。
