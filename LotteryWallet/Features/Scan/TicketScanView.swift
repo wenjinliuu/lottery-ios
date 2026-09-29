@@ -780,7 +780,19 @@ struct TicketScanView: View {
                             .frame(width: 42, alignment: .leading)
                             .padding(.top, 3)
                         if row.values.isEmpty {
-                            Text("—").font(.caption).foregroundStyle(.tertiary).padding(.top, 3)
+                            // **这一区没认出来时必须能补。** 原来只画一个「—」，
+                            // 选号盘只能从号码球点开 —— 一颗球都没有就是死路：
+                            // 双色球复式票红球认出来、蓝球是空的，用户手里明明有票也导不进去。
+                            Button {
+                                zoneEditorTarget = ZoneEditorTarget(ticketID: ticket.id, key: row.key)
+                            } label: {
+                                Label("没认出来，点这里补上", systemImage: "plus.circle")
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.top, 3)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(ticket.game.accent.accentColor)
+                            .accessibilityLabel("补上\(row.label)的号码")
                         } else {
                             BallRowView(values: row.values, color: row.color, size: 26) { _ in
                                 zoneEditorTarget = ZoneEditorTarget(ticketID: ticket.id, key: row.key)

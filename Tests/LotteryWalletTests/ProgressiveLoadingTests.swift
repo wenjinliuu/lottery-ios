@@ -33,7 +33,7 @@ final class ProgressiveLoadingTests: XCTestCase {
             }
         }
         for year in (ChinaClock.year() - 1)...(ChinaClock.year() + 1) {
-            StubURLProtocol.stub("v2/calendar/\(year)", body: LotteryV2Fixtures.calendar)
+            StubURLProtocol.stub("v2/calendar/\(year)", body: LotteryV2Fixtures.fullCalendar(year: year))
         }
     }
 
@@ -251,6 +251,40 @@ final class ProgressiveLoadingTests: XCTestCase {
 
         XCTAssertEqual(StubURLProtocol.count("v2/calendar/\(ChinaClock.year())"), 1)
         XCTAssertEqual(StubURLProtocol.count("v2/calendar/\(ChinaClock.year() + 1)"), 1)
+    }
+
+    /// CloudBase 只回了半年的日历（单次最多 1000 行）：改用 GitHub 那一份完整的。
+    /// 不这么做，期次选择器翻到下半年就全是空格子，一期都选不了。
+    func testIncompleteCloudBaseCalendarFallsBackToGitHub() async {
+        let year = ChinaClock.year()
+        StubURLProtocol.stub("v2/calendar/\(year).json", body: LotteryV2Fixtures.fullCalendar(year: year))
+        StubURLProtocol.stub("v2/calendar/\(year)", body: LotteryV2Fixtures.calendar)
+        let store = makeStore()
+        await store.loadCalendar(year: year)
+
+        XCTAssertEqual(store.lastSource, .githubFallback)
+        XCTAssertEqual(store.calendarIssues(for: .ssq, year: year).last?.drawDate, "\(year)-12-31")
+    }
+
+    /// 两边都不完整时，照样用 CloudBase 那一份 —— 有半年总比一期都没有强。
+    func testIncompleteCalendarEverywhereKeepsCloudBase() async {
+        let year = ChinaClock.year()
+        StubURLProtocol.stub("v2/calendar/\(year).json", body: LotteryV2Fixtures.calendar)
+        StubURLProtocol.stub("v2/calendar/\(year)", body: LotteryV2Fixtures.calendar)
+        let store = makeStore()
+        await store.loadCalendar(year: year)
+
+        XCTAssertEqual(store.lastSource, .cloudBase)
+        XCTAssertFalse(store.calendarIssues(for: .ssq, year: year).isEmpty)
+    }
+
+    func testCalendarCoverageNeedsLateDecember() throws {
+        let decoder = JSONDecoder()
+        let short = try decoder.decode(LotteryV2.CalendarPayload.self, from: LotteryV2Fixtures.calendar)
+        let full = try decoder.decode(LotteryV2.CalendarPayload.self, from: LotteryV2Fixtures.fullCalendar(year: 2026))
+        XCTAssertFalse(LotteryV2Mapper.calendarCoversYear(short, year: 2026))
+        XCTAssertTrue(LotteryV2Mapper.calendarCoversYear(full, year: 2026))
+        XCTAssertFalse(LotteryV2Mapper.calendarCoversYear(full, year: 2027))
     }
 
     // MARK: - 抓取状态

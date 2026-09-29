@@ -164,12 +164,11 @@ enum Palette {
         return neutral
     }
 
-    /// 页面底色。**浅色下是纯白**，卡片反过来用一层很淡的灰 ——
-    /// 和系统分组列表的「灰底白卡」正好反转，整页更干净，不像又一个设置页。
-    /// 深色下保持系统的做法：接近纯黑的底、深灰卡片。
-    static let canvas = Color(light: 0xFFFFFF, dark: 0x000000)
-    /// 卡片底色。浅色下是淡灰，深色下和系统分组卡片同色。
-    static let card = Color(light: 0xF4F5F7, dark: 0x1C1C1E)
+    /// 页面底色。浅色下是**比系统分组灰（#F2F2F7）更白的一层浅灰**：
+    /// 白卡片要靠底色托出来，但系统那层灰放满一屏发闷。深色下保持系统的近黑。
+    static let canvas = Color(light: 0xF7F8FA, dark: 0x000000)
+    /// 卡片底色。浅色下纯白，深色下和系统分组卡片同色。
+    static let card = Color(light: 0xFFFFFF, dark: 0x1C1C1E)
     /// 分隔线。
     static let separator = Color(.separator)
 }

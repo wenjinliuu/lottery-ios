@@ -65,15 +65,7 @@ final class AppSettings {
         didSet { defaults.set(lastBackupAt?.timeIntervalSince1970 ?? 0, forKey: Keys.lastBackup) }
     }
 
-    /// 自动备份。**默认打开，但默认只写本机。**
-    ///
-    /// 写进 App 自己的沙盒不涉及任何隐私取舍，却能挡住这次这种事故；
-    /// 默认关着才是危险的默认值 —— 用户通常在丢了数据之后才会想起它。
-    var autoBackupEnabled: Bool {
-        didSet { defaults.set(autoBackupEnabled, forKey: Keys.autoBackup) }
-    }
-
-    /// 备份是否同时放一份到 iCloud。**默认关闭** —— 数据出不出这台设备
+    /// 自动备份存到 iCloud。**默认关闭** —— 数据出不出这台设备
     /// 是用户的选择，不该由我们替他决定，隐私政策也是照着这个写的。
     var iCloudBackupEnabled: Bool {
         didSet { defaults.set(iCloudBackupEnabled, forKey: Keys.iCloudBackup) }
@@ -112,7 +104,6 @@ final class AppSettings {
         static let seenBackfilled = "lottery.resultSeenBackfilled.v1"
         static let debugVision = "lottery.debugVision"
         static let iCloudBackup = "lottery.iCloudBackup"
-        static let autoBackup = "lottery.autoBackup"
     }
 
     init() {
@@ -124,7 +115,6 @@ final class AppSettings {
         seenBackfilled = defaults.bool(forKey: Keys.seenBackfilled)
         debugVision = defaults.bool(forKey: Keys.debugVision)
         iCloudBackupEnabled = defaults.bool(forKey: Keys.iCloudBackup)
-        autoBackupEnabled = defaults.object(forKey: Keys.autoBackup) as? Bool ?? true
     }
 
     var colorScheme: ColorScheme? {

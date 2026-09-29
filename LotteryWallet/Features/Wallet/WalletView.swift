@@ -141,8 +141,9 @@ struct WalletView: View {
             .background(Palette.canvas)
             // 导航栏不要自己糊底色，交给系统的 scroll edge effect。
             // 理由见 `HomeView` 里同一处那段注释。
-            // 不写页面标题：标签栏已经说了这是哪一页，大标题只是把内容往下压了一大截。
-            // 导航栏只留右上角的按钮，内容从状态栏下面直接开始。
+            // 只要导航栏里那行小标题，不要页面上的大标题：大标题把内容往下压了一大截。
+            // 小标题得留着 —— 往下滑的时候顶上要有一条带标题的栏，和设置页一样。
+            .navigationTitle("票夹")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

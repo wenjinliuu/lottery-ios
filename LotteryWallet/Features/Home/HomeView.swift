@@ -87,8 +87,9 @@ struct HomeView: View {
             // 渐变模糊，那才是这一版该有的观感。偶发的标题错位是轮播每 4 秒
             // 用全局 withAnimation 写 @State 引起的，已经在下面 TabView 那里
             // 把动画作用域收窄解决了，跟导航栏背景没关系。
-            // 不写页面标题：标签栏已经说了这是哪一页，大标题只是把内容往下压了一大截。
-            // 导航栏只留右上角的按钮，内容从状态栏下面直接开始。
+            // 只要导航栏里那行小标题，不要页面上的大标题：大标题把内容往下压了一大截。
+            // 小标题得留着 —— 往下滑的时候顶上要有一条带标题的栏，和设置页一样。
+            .navigationTitle("首页")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -140,53 +141,90 @@ struct HomeView: View {
 
     // MARK: - 累计收支
 
+    /// 从上到下一条线：标签和范围 → 大数字 → 两个小指标 → 方格图 → 四格明细。
+    ///
+    /// 中奖率和「最好的一天」紧跟在大数字下面：它们是对这个数字的**解读**
+    /// （这笔钱是怎么来的、哪天最好），放在明细里跟流水数字挤在一起就看不出主次。
+    /// 票面金额、奖金、公益金、已结算这四个流水数排成两行两列，每格有底色，
+    /// 比原来一行五个挤在一起好读得多。
     private var profitCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
                     Text("累计收支")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Text(MoneyText.format(series.netTotal))
+                    rangeMenu
+                    Spacer(minLength: 0)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(MoneyText.grouped(series.netTotal))
                         // 大号字要收紧字距 —— 字号越大，字母间那点默认间隙看着越松。
-                        .font(.system(.largeTitle, design: .rounded, weight: .bold))
-                        .tracking(-0.8)
+                        .font(.system(size: 44, weight: .bold, design: .rounded))
+                        .tracking(-1)
                         .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .foregroundStyle(Palette.profitColor(series.netTotal))
                         .contentTransition(.numericText())
+                    Text("元")
+                        .font(.system(.title3, design: .rounded, weight: .semibold))
                 }
-                Spacer(minLength: 8)
-                Picker("范围", selection: $range) {
-                    ForEach(ProfitRange.allCases) { Text($0.label).tag($0) }
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .foregroundStyle(Palette.profitColor(series.netTotal))
+                .accessibilityElement(children: .combine)
+
+                HStack(spacing: 8) {
+                    inlineStat("中奖率", winRateText, tint: series.settledCount > 0 ? Palette.profit : .secondary)
+                    if let best = bestDayNet {
+                        Rectangle()
+                            .fill(Palette.separator)
+                            .frame(width: 1, height: 11)
+                        inlineStat("最好的一天", "+\(MoneyText.grouped(best)) 元", tint: Palette.profit)
+                    }
                 }
-                .pickerStyle(.menu)
-                .tint(.secondary)
-                .fixedSize()
             }
 
-            ProfitHeatmap(days: series.days, range: range)
+            ProfitHeatmap(days: series.days, range: range,
+                          width: screenWidth - HomeLayout.pagePadding * 2 - 32)
 
-            Divider()
-
-            // 中奖率摆在正中间。
-            //
-            // 它和左右两边不是一类数：票面金额、奖金、公益金、已结算都是
-            // 「花了多少 / 回来多少」的流水，中奖率是**结果**。放在中间，
-            // 两边的流水正好把它夹住 —— 左边是投入，右边是产出规模，
-            // 中间是这些投入里有多少变成了中奖。
-            HStack(alignment: .top, spacing: 8) {
-                statPair("票面金额", MoneyText.format(series.costTotal))
-                statPair("奖金", MoneyText.format(series.prizeTotal))
-                statPair("中奖率", winRateText, tint: Palette.profit)
-                // 公益金逐条按彩种计提，比例见 `GameKey.welfareRate` ——
-                // 原来固定乘 0.36，八个彩种里五个是错的。
-                statPair("公益金", MoneyText.format(series.welfareTotal))
-                statPair("已结算", "\(series.settledCount) 注")
+            // 公益金逐条按彩种计提，比例见 `GameKey.welfareRate` ——
+            // 原来固定乘 0.36，八个彩种里五个是错的。
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
+                      spacing: 10) {
+                statTile("票面金额", MoneyText.grouped(series.costTotal), unit: "元")
+                statTile("奖金", MoneyText.grouped(series.prizeTotal), unit: "元", tint: Palette.profit)
+                statTile("公益金", MoneyText.grouped(series.welfareTotal), unit: "元")
+                statTile("已结算", "\(series.settledCount)", unit: "注")
             }
         }
         .contentCard()
+    }
+
+    /// 范围选择做成一颗小胶囊，贴在「累计收支」后面 —— 它改的就是这个数。
+    private var rangeMenu: some View {
+        Menu {
+            Picker("范围", selection: $range) {
+                ForEach(ProfitRange.allCases) { Text($0.label).tag($0) }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(range.label)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Color.primary.opacity(0.06), in: Capsule())
+        }
+        .accessibilityLabel("统计范围：\(range.label)")
+    }
+
+    /// 这个范围里收益最高的那一天；一天都没赚过就不显示。
+    private var bestDayNet: Double? {
+        guard let best = series.days.filter({ $0.count > 0 }).max(by: { $0.net < $1.net }),
+              best.net > 0 else { return nil }
+        return best.net
     }
 
     /// 一注都还没结算时，中奖率是 0/0 —— 那不是「中奖率 0%」，
@@ -195,20 +233,39 @@ struct HomeView: View {
         series.settledCount > 0 ? String(format: "%.0f%%", series.winRate) : "—"
     }
 
-    private func statPair(_ title: String, _ value: String, tint: Color = .primary) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+    private func inlineStat(_ title: String, _ value: String, tint: Color) -> some View {
+        HStack(spacing: 4) {
             Text(title)
-                .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
-                .lineLimit(1)
-                // 五列之后每列只有 60pt 上下，长金额必须缩得下去。
-                .minimumScaleFactor(0.6)
                 .foregroundStyle(tint)
         }
+        .font(.footnote)
+        .lineLimit(1)
+    }
+
+    private func statTile(_ title: String, _ value: String, unit: String, tint: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value)
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                    .monospacedDigit()
+                Text(unit)
+                    .font(.footnote)
+            }
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - 最新开奖
@@ -508,8 +565,29 @@ struct ProfitHeatmap: View {
     let range: ProfitRange
 
     /// 一格的边长和间距。7 行（一周七天）纵向排，按周横向铺开。
-    private let cell: CGFloat = 13
-    private let gap: CGFloat = 3
+    ///
+    /// 格子**按宽度铺满**：周数少时格子大（一眼看得清每一天），周数多到放不下时
+    /// 格子收到 `minCell`、改成横向滚动。原来固定 13pt，记录只有几个月时
+    /// 右边挤着一小块、左边一大片空格子。
+    private let cell: CGFloat
+    private static let gapSize: CGFloat = 4
+    private var gap: CGFloat { Self.gapSize }
+    private static let minCell: CGFloat = 11
+    private static let maxCell: CGFloat = 26
+
+    /// 一次算好的网格，见 `Grid` 的注释。
+    private let grid: Grid
+
+    /// - Parameter width: 方格图能用的宽度。
+    init(days: [ProfitDay], range: ProfitRange, width: CGFloat) {
+        self.days = days
+        self.range = range
+        let grid = Self.buildGrid(days: days, range: range)
+        self.grid = grid
+        let columns = CGFloat(Swift.max(grid.weeks.count, 1))
+        let fitted = (width - Self.gapSize * (columns - 1)) / columns
+        self.cell = Swift.min(Swift.max(fitted.rounded(.down), Self.minCell), Self.maxCell)
+    }
 
     /// 有记录的那些天，以及要画的周列。
     ///
@@ -541,7 +619,14 @@ struct ProfitHeatmap: View {
 
     @State private var selectedWeek: Int?
 
-    private var grid: Grid { Self.buildGrid(days: days, range: range) }
+    /// 「全部」画多少天：从第一条记录往前再留两周，最少 16 周、最多一年。
+    /// 固定画一整年的话，只有几个月记录的人看到的是一大片空格子。
+    private static func span(range: ProfitRange, days: [ProfitDay], today: Date) -> Int {
+        guard range == .all else { return range.gridSpan }
+        guard let first = days.filter({ $0.count > 0 }).map(\.day).min() else { return 16 * 7 }
+        let recorded = (Calendar.chinaCalendar.dateComponents([.day], from: first, to: today).day ?? 0) + 14
+        return Swift.min(Swift.max(recorded, 16 * 7), 365)
+    }
 
     private static func buildGrid(days: [ProfitDay], range: ProfitRange) -> Grid {
         var byDay: [String: ProfitDay] = [:]
@@ -550,7 +635,8 @@ struct ProfitHeatmap: View {
 
         let calendar = Calendar.chinaCalendar
         let today = Date()
-        guard let start = calendar.date(byAdding: .day, value: -(range.gridSpan - 1), to: today) else {
+        let span = Self.span(range: range, days: days, today: today)
+        guard let start = calendar.date(byAdding: .day, value: -(span - 1), to: today) else {
             return Grid(byDay: byDay, weeks: [], monthLabels: [])
         }
         // 回退到那一周的周一，列才不会错位
@@ -611,10 +697,8 @@ struct ProfitHeatmap: View {
     var body: some View {
         // 一次算好，下面所有格子和月份刻度都读这一份
         let grid = self.grid
+        // 图例不再单独占一行：红赚绿亏写在首页那行说明里，「最好的一天」挪到大数字下面。
         return VStack(alignment: .leading, spacing: 7) {
-            // 图例和「最好的一天」放在图**上面**：先看懂颜色的含义，再看图。
-            // 放在下面等于让人看完一遍图再回头找说明。
-            topBar
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(alignment: .top, spacing: gap) {
@@ -657,7 +741,7 @@ struct ProfitHeatmap: View {
                     HStack(alignment: .top, spacing: gap) {
                         ForEach(Array(grid.monthLabels.enumerated()), id: \.offset) { _, label in
                             Text(label)
-                                .scaledFont(9)
+                                .scaledFont(10)
                                 .foregroundStyle(.secondary)
                                 .fixedSize()
                                 .frame(width: cell, alignment: .leading)
@@ -729,7 +813,7 @@ struct ProfitHeatmap: View {
 
     @ViewBuilder
     private func cellView(for date: Date?, byDay: [String: ProfitDay]) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 3, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: cell > 18 ? 5 : 3, style: .continuous)
         if let date, let day = byDay[DateText.day(date)] {
             shape
                 .fill(color(for: day))
@@ -748,42 +832,6 @@ struct ProfitHeatmap: View {
     private func color(for day: ProfitDay) -> Color {
         let level = 0.30 + 0.70 * intensity(for: day)
         return (day.net >= 0 ? Palette.profit : Palette.loss).opacity(level)
-    }
-
-    /// 图例 + 最好的一天。
-    ///
-    /// 图例的字收成「支 / 收」两个字。原来写「全亏 / 大赚」是想说明色阶的
-    /// 两端，但色块本身已经从浅到深排开了，浓度的含义一眼就看得出来，
-    /// 那两个字只是把一行挤窄。
-    private var topBar: some View {
-        HStack(spacing: 6) {
-            Text("支")
-                .scaledFont(10)
-                .foregroundStyle(.secondary)
-            ForEach([1.0, 0.55, 0.25], id: \.self) { level in
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(Palette.loss.opacity(0.30 + 0.70 * level))
-                    .frame(width: 9, height: 9)
-            }
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(Color.primary.opacity(0.06))
-                .frame(width: 9, height: 9)
-            ForEach([0.25, 0.55, 1.0], id: \.self) { level in
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(Palette.profit.opacity(0.30 + 0.70 * level))
-                    .frame(width: 9, height: 9)
-            }
-            Text("收")
-                .scaledFont(10)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 8)
-            if let best = days.filter({ $0.count > 0 }).max(by: { $0.net < $1.net }), best.net > 0 {
-                Text("最好的一天 \(MoneyText.format(best.net))")
-                    .scaledFont(10)
-                    .foregroundStyle(Palette.profit)
-                    .lineLimit(1)
-            }
-        }
     }
 }
 

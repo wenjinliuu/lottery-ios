@@ -314,7 +314,8 @@ final class DrawStore {
         if state == .loaded || state == .loading { return }
         calendarStates[year] = .loading
         do {
-            let loaded = try await repository.load(.calendar(year), as: LotteryV2.CalendarPayload.self)
+            let loaded = try await repository.load(.calendar(year), as: LotteryV2.CalendarPayload.self,
+                                                   accept: { LotteryV2Mapper.calendarCoversYear($0, year: year) })
             lastSource = loaded.source
             yearCalendars[year] = LotteryV2Mapper.calendarYear(loaded.value, year: year)
             calendarStates[year] = .loaded
@@ -361,8 +362,10 @@ final class DrawStore {
 
     // MARK: - 合并与索引
 
-    /// 去重后按开奖时间倒序，顺带重建索引。
-    private func merge(_ incoming: [Draw]) {
+    /// 去重后按开奖时间倒序，顺带重建索引。同一期后到的覆盖先到的 ——
+    /// 奖金更正（先回号码、后回奖金）就是靠这一点传到核对里去的。
+    /// 不设 private：测试要直接放开奖数据进来。
+    func merge(_ incoming: [Draw]) {
         guard !incoming.isEmpty else { return }
         var map = Dictionary(draws.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for draw in incoming where !draw.expect.isEmpty {
