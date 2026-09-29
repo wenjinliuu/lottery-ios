@@ -278,6 +278,42 @@ final class ProgressiveLoadingTests: XCTestCase {
         XCTAssertFalse(store.calendarIssues(for: .ssq, year: year).isEmpty)
     }
 
+    /// 十天前缓存的完整日历直接用，一个请求都不发。
+    func testCompleteCalendarCacheSkipsNetwork() async throws {
+        let year = ChinaClock.year()
+        let folder = UUID().uuidString
+        let cache = LotteryCache(folder: "tests/\(folder)")
+        await cache.write(LotteryV2Fixtures.fullCalendar(year: year), for: .calendar(year))
+        try backdate(folder: folder, endpoint: .calendar(year), days: 10)
+        StubURLProtocol.stub("v2/calendar/\(year)", body: LotteryV2Fixtures.fullCalendar(year: year))
+
+        let store = makeStore(cacheFolder: folder)
+        await store.loadCalendar(year: year)
+        XCTAssertEqual(StubURLProtocol.requestCount, 0, "\(StubURLProtocol.requestedPaths)")
+        XCTAssertEqual(store.calendarIssues(for: .ssq, year: year).last?.drawDate, "\(year)-12-31")
+    }
+
+    /// 缓存里是半年的日历（旧版接口留下的），再新也不算数，去 CloudBase 重拉完整的。
+    func testIncompleteCalendarCacheIsRefetched() async throws {
+        let year = ChinaClock.year()
+        let folder = UUID().uuidString
+        await LotteryCache(folder: "tests/\(folder)").write(LotteryV2Fixtures.calendar, for: .calendar(year))
+        StubURLProtocol.stub("v2/calendar/\(year)", body: LotteryV2Fixtures.fullCalendar(year: year))
+
+        let store = makeStore(cacheFolder: folder)
+        await store.loadCalendar(year: year)
+        XCTAssertEqual(StubURLProtocol.count("v2/calendar/\(year)"), 1)
+        XCTAssertEqual(store.lastSource, .cloudBase)
+        XCTAssertEqual(store.calendarIssues(for: .ssq, year: year).last?.drawDate, "\(year)-12-31")
+    }
+
+    private func backdate(folder: String, endpoint: LotteryEndpoint, days: Double) throws {
+        let file = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("tests/\(folder)/\(endpoint.cacheKey).json")
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-days * 86_400)],
+                                              ofItemAtPath: file.path)
+    }
+
     func testCalendarCoverageNeedsLateDecember() throws {
         let decoder = JSONDecoder()
         let short = try decoder.decode(LotteryV2.CalendarPayload.self, from: LotteryV2Fixtures.calendar)

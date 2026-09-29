@@ -59,6 +59,9 @@ enum LotteryEndpoint: Hashable, Sendable {
     /// **过期只表示「该刷了」，不表示「这份不能用了」。** 刷新失败时照样拿它
     /// 显示，见 `LotteryRepository`。已经结束的年份几乎不会再变，给一整周；
     /// 当年的数据还在长，按天刷。
+    ///
+    /// 开奖日历一年发一次，平时只有休市调整才会动：当年（和明年）一个月刷一次，
+    /// 往年一年刷一次。不完整的日历缓存不算数，见 `DrawStore.loadCalendar`。
     var freshness: TimeInterval {
         switch self {
         case .bootstrap, .recentDraws:
@@ -66,7 +69,7 @@ enum LotteryEndpoint: Hashable, Sendable {
         case .yearDraws(_, let year):
             year < ChinaClock.year() ? 7 * 24 * 3600 : 3600
         case .calendar(let year):
-            year < ChinaClock.year() ? 30 * 24 * 3600 : 24 * 3600
+            year < ChinaClock.year() ? 365 * 24 * 3600 : 30 * 24 * 3600
         }
     }
 }
