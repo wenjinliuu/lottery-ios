@@ -366,7 +366,7 @@ struct WalletView: View {
             ContentUnavailableView {
                 Label("票夹是空的", systemImage: "wallet.bifold")
             } description: {
-                Text("拍下你手里的实体彩票，或照着票面手动录入 —— 右下角那颗加号就是入口")
+                Text("拍下你手里的实体票，或照着票面手动录入 —— 右下角那颗加号就是入口")
             }
             .padding(.top, 50)
         } else {

@@ -97,7 +97,7 @@ struct BackupService {
         var errorDescription: String? {
             switch self {
             case .malformed: return "备份文件格式不正确"
-            case .empty: return "备份文件里没有彩票记录"
+            case .empty: return "备份文件里没有票据记录"
             }
         }
     }

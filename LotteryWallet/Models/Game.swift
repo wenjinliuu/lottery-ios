@@ -66,7 +66,7 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         case .ssq: "双色球"
         case .dlt: "大乐透"
         case .k8: "快乐8"
-        case .fc3d: "福彩3D"
+        case .fc3d: "3D"
         case .pl3: "排列3"
         case .qlc: "七乐彩"
         case .qxc: "七星彩"

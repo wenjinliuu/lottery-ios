@@ -106,18 +106,6 @@ struct SettingsView: View {
                     }
 
                     Section {
-                        NavigationLink {
-                            PrizeTableView()
-                        } label: {
-                            row("tablecells", .indigo, "奖级对照表")
-                        }
-                    } header: {
-                        Text("彩种资料")
-                    } footer: {
-                        Text("各彩种的中奖条件与单注奖金，整理自官方公布的游戏规则，仅供参考。")
-                    }
-
-                    Section {
                         LabeledContent {
                             Text("\(AppInfo.version) (\(AppInfo.build))")
                                 .font(.footnote)
@@ -219,14 +207,14 @@ struct AboutView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("对个号")
                     .font(.largeTitle.weight(.bold))
-                Text("本地优先的实体彩票票据记录与核对工具。所有票据只保存在这台设备上，不上传服务器，也没有账号体系。")
+                Text("本地优先的个人票据记录与核对工具，由个人独立开发，与任何彩票发行或销售机构均无关联。所有票据只保存在这台设备上，不上传服务器，也没有账号体系。")
                 Divider()
                 Text("免责声明")
                     .font(.headline)
-                Text("本应用仅用于记录和核对您已持有的实体彩票，不销售、不代购、不提供兑奖服务。开奖结果以官方渠道公布为准。购彩请通过当地合法、正规的线下彩票销售渠道，并理性参与、量力而行。")
+                Text("本应用仅用于记录和核对您手里已有的实体票，不销售、不代购，也不处理任何奖金。应用内的开奖信息和核对结果仅供个人参考，一切以实体票为准。请理性、量力而行。")
                 Text("开奖数据")
                     .font(.headline)
-                Text("开奖号码与开奖日历整理自官方公布的开奖信息，仅供核对参考，一切以官方公布为准。彩票照片的号码识别全部在本机完成，照片不会离开设备，也不会被保存。")
+                Text("开奖号码与开奖日历整理自公开的开奖信息，仅供核对参考。票据照片的号码识别全部在本机完成，照片不会离开设备，也不会被保存。")
 
                 Divider()
                 // 隐私政策要能在 App 内点得到 —— 这是审核明确看的一项，

@@ -11,35 +11,36 @@
 
 ## 可直接粘贴的正文
 
-DEMO ACCOUNT: Not required. The app has no accounts and no login; every feature works on first launch.
+DEMO ACCOUNT: Not required. No accounts or login; every feature works on first launch.
 
 WHAT THIS APP IS
-"对个号" is a local-first record-keeping utility for paper lottery tickets. The user types in, or photographs, the numbers printed on tickets they have ALREADY bought at licensed retail outlets in China. The app checks those numbers against published draw results and summarises the user's own spending. A notebook and a calculator, nothing more. Every entry field is labelled as a transcription of the physical ticket ("票面玩法", "票面倍数", "票面金额" = the play type, multiplier and amount printed on the ticket).
+"对个号" is a local-first personal record-keeping utility, built by an independent developer with no affiliation to any lottery operator, issuer or government entity. The user types in, or photographs, the numbers printed on paper tickets they ALREADY own, bought in person at retail outlets. The app checks those numbers against published draw results and summarises the user's own spending. A notebook and a calculator, nothing more.
 
 WHAT THIS APP DOES NOT DO (Guideline 5.3 / 5.3.4)
-- It does NOT sell, order, reserve, broker or facilitate the purchase of a ticket. There is no purchase entry point anywhere in the app, and no draw is ever shown as "on sale" or "closed".
-- It handles NO money: no payment, wager, balance, top-up, prize redemption or In-App Purchase. The binary contains no StoreKit code.
-- It does NOT predict or recommend numbers; no odds, trends or "hot/cold numbers".
+- It does NOT sell, order, reserve, broker or facilitate the purchase of a ticket. No purchase entry point anywhere; no draw is shown as "on sale" or "closed".
+- It handles NO money: no payment, wager, balance, prize redemption or In-App Purchase (no StoreKit code).
+- No number prediction, odds, trends or "hot/cold numbers".
 - The only outbound links, all in Settings > About, are the Privacy Policy, Support, and the ICP filing number, which opens the MIIT filing lookup (beian.miit.gov.cn). No web view, no third-party SDK.
-- Every amount shown is either the amount printed on the user's ticket or the published prize of a ticket already drawn.
+- Every amount shown is either printed on the user's ticket or the published prize of a drawn ticket.
+- It does NOT present itself as, or on behalf of, any lottery operator: no operator names, logos or emblems, and no rules or prize tables republished from operators. Game names appear only as plain text, so entries match what is printed on the user's own ticket.
 
 ABOUT "随机填充" (FILL RANDOMLY)
-It only fills the on-screen number pad to save tapping while copying a ticket. Every number stays editable and nothing is submitted. A typing convenience, not a recommendation.
+It only fills the number pad to save tapping while copying a ticket. Every number stays editable; nothing is submitted. Not a recommendation.
 
 HOW TO TEST
-A. Scan (sample ticket attached): save the attached image, marked "审核测试用票" (review test ticket, not a real ticket), to Photos. Tap the camera button at the right of the tab bar > "从相册选择" (Choose from Photos) and pick it. On the crop screen tap "重置" (Reset) so the frame covers the whole ticket, then "识别这张" (Recognise). The review screen shows Super Lotto issue 26082, 3 lines, add-on, x2, total 18 yuan, and confirms it matches the printed total. Tap "加入票夹" (Add to wallet). That draw is already published, so the Wallet shows the result immediately (this ticket did not win; matched numbers are highlighted).
+A. Scan (sample ticket attached): save the attached image, marked "审核测试用票" (review test ticket, not a real ticket), to Photos. Tap the camera button at the right of the tab bar > "从相册选择" (Choose from Photos) and pick it. On the crop screen tap "重置" (Reset) so the frame covers the whole ticket, then "识别这张" (Recognise). The review screen shows Super Lotto issue 26082, 3 lines, add-on, x2, total 18 yuan. Tap "加入票夹" (Add to wallet). That draw is already published, so the Wallet shows the result immediately (no win; matched numbers highlighted).
 B. Manual entry: camera button > "手动录入号码" (Manual entry). Choose a game, tap the numbers, pick an issue marked "已开奖" (drawn) to see a result right away, then "加入票夹".
-The first save shows a "理性购彩" (play responsibly) notice that must be acknowledged.
+The first save shows a "使用提示" (usage notice) that must be acknowledged. It says the app only records tickets the user already owns, does not sell or handle any money, and asks the user to spend responsibly.
 
 PERMISSIONS
-Camera and Photos are requested only from the scan button. Text recognition runs entirely on-device with Apple's Vision framework. Photos are never uploaded or stored.
+Camera and Photos are requested only from the scan button. Recognition runs on-device (Apple Vision). Photos are never uploaded or stored.
 
 NETWORKING AND PRIVACY
-The app downloads public draw results and the yearly draw calendar with unauthenticated HTTPS GET requests: first from our read-only public data endpoint on Tencent CloudBase (ap-shanghai.app.tcloudbase.com), falling back to a static mirror on raw.githubusercontent.com. These requests carry no user data, identifiers or tickets. There is no analytics, advertising or account system, hence "Data Not Collected".
-Tickets are stored only on the device (SwiftData, CloudKit explicitly off). Backups are JSON files in the app's own sandbox; optionally ("存到 iCloud", off by default) the same file goes to the user's own iCloud Drive (iCloud Documents only, no CloudKit).
+The app downloads public draw results and the yearly draw calendar via unauthenticated HTTPS GET: first from our read-only endpoint on Tencent CloudBase (ap-shanghai.app.tcloudbase.com), falling back to a static mirror on raw.githubusercontent.com. They carry no user data, identifiers or tickets. No analytics, ads or accounts, hence "Data Not Collected".
+Tickets are stored only on the device (SwiftData, CloudKit explicitly off). Backups are JSON files in the app's own sandbox; optionally ("自动备份到 iCloud", off by default) the same file goes to the user's own iCloud Drive (iCloud Documents only, no CloudKit).
 
 DISCLAIMERS
-Shown wherever numbers appear: under the draw numbers on Home, on every ticket card, on the scan, crop and review screens, and above the save button. They say recognition can be wrong, the physical ticket and official claim process govern any prize, and the app does not sell, buy or redeem tickets. Settings > About repeats this and asks users to buy only through licensed retail channels and play responsibly.
+Shown under the draw numbers on Home, on every ticket card, on the scan, crop and review screens, and above the save button. They say recognition can be wrong, the physical ticket is authoritative, results are for personal reference only, and the app does not sell, buy or handle any money. Settings > About repeats this and states that the app is an independent personal tool not affiliated with any lottery operator.
 
 Support: https://wenjinliuu.github.io/lottery-ios/support.html
 Privacy Policy: https://wenjinliuu.github.io/lottery-ios/
@@ -62,14 +63,15 @@ Thank you for your review.
 | 保存按钮写的是「加入票夹」 | `grep -rn '加入票夹' LotteryWallet/` 命中 `EntryFlowView.swift` 与 `TicketScanView.swift` |
 | 界面不出现销售状态 | `grep -rn '停售\|已截止\|可购买\|在售\|投注' LotteryWallet/ --include=*.swift` 只应命中注释与内部字段名，无用户可见字符串 |
 | 票面类型三条路径同源 | `EntryMode.shape` / `ScanPlay.shape` / `EntryKind.shape` 全部返回 `TicketShape`，显示名只在 `Models/TicketShape.swift` |
-| 理性购彩弹窗两条保存路径都拦 | `grep -rn 'responsibleAcknowledged' LotteryWallet/` 应同时命中 `EntryFlowView.swift` 与 `TicketScanView.swift` |
+| 首次保存「使用提示」两条保存路径都拦 | `grep -rn 'responsibleAcknowledged' LotteryWallet/` 应同时命中 `EntryFlowView.swift` 与 `TicketScanView.swift` |
 | 公益金按彩种计提 | `GameKey.welfareRate`，比例由 `Tests/` 里的真实样票反推 |
-| 「存到 iCloud」默认关闭 | `AppSettings.iCloudBackupEnabled` 初值来自 `defaults.bool`，未设置即 false |
+| 「自动备份到 iCloud」默认关闭 | `AppSettings.iCloudBackupEnabled` 初值来自 `defaults.bool`，未设置即 false |
 | 数据库不做任何云同步 | `ModelStore.makeContainer` 显式传 `cloudKitDatabase: .none` |
 | iCloud 只用 Documents，不用 CloudKit | `LotteryWallet.entitlements` 的 `icloud-services` 只有 `CloudDocuments` |
-| 奖级对照表不参与判奖 | `grep -rn 'PrizeTable' LotteryWallet/` 只应命中 `Features/Settings/` 下两个文件 |
+| 不再提供奖级对照表 | `grep -rn 'PrizeTable' LotteryWallet/` 为空（1.2.0 (70) 因 5.2.1 被拒后删除） |
+| 不点名发行机构、不说「官方」「兑奖」「购彩」 | `grep -rn '福彩\|体彩\|官方\|兑奖\|购彩' LotteryWallet/ --include=*.swift` 在用户可见字符串里为空（票面识别规则、注释除外）；「福彩3D」显示为「3D」 |
 | 测试票导入后当场出结果 | 附件「审核测试用票」是大乐透 26082 期（2026-07-22 已开奖，开奖号 16 26 27 28 34 + 02 06）：三注分别中 1+0、1+0、0+0，**未中奖**；追加 2 倍、合计 18 元 |
 | 扫描步骤里的「重置」 | 这张图自动框选会框到打码的二维码（`TicketImagePreprocessor.suggestedQuad` 取面积最大的矩形），点「重置」用整张内缩 8% 的默认框。自动框选修好后删掉这一句 |
-| 首次保存弹「理性购彩」 | 见上面「理性购彩弹窗两条保存路径都拦」 |
+| 首次保存弹「使用提示」 | 见上面「首次保存「使用提示」两条保存路径都拦」 |
 | 附件 | 提交时附上 `Tests/LotteryWalletUITests/Fixtures/review-ticket.jpg` |
 | 备案号 | 关于页最底部 `AboutView.icpFiling`（沪ICP备2026015335号-2A），点了打开 beian.miit.gov.cn；所有地区都显示 |

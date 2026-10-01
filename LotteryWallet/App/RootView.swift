@@ -111,7 +111,7 @@ struct RootView: View {
             }
             // 这个位置在系统眼里仍然是「标签」，读屏会念成标签而不是按钮。
             // 用无障碍标签把它的实际作用说清楚。
-            .accessibilityLabel("扫描彩票")
+            .accessibilityLabel("扫描票据")
         }
 
         // **抽屉用回系统 sheet。**
