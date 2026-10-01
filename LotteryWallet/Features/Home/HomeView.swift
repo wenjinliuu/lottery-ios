@@ -116,14 +116,14 @@ struct HomeView: View {
     private func recompute() {
         entries = ProfitStats.snapshot(records)
         recomputeSeries()
-        let now = Date()
+        let now = AppClock.now
         let year = Calendar.chinaCalendar.component(.year, from: now)
         let month = Calendar.chinaCalendar.component(.month, from: now)
         monthStats = ProfitStats.period(entries: ProfitStats.snapshotAll(records), year: year, month: month)
     }
 
     private func recomputeSeries() {
-        series = ProfitStats.series(entries: entries, range: range)
+        series = ProfitStats.series(entries: entries, range: range, now: AppClock.now)
     }
 
     private func refreshSchedule() {
@@ -436,7 +436,7 @@ struct HomeView: View {
     // MARK: - 本月概览
 
     private var monthlyCard: some View {
-        let month = Calendar.chinaCalendar.component(.month, from: Date())
+        let month = Calendar.chinaCalendar.component(.month, from: AppClock.now)
         return VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "\(month) 月概览", subtitle: "本机记录 · \(monthStats.ticketCount) 注")
 
@@ -634,7 +634,7 @@ struct ProfitHeatmap: View {
         for day in days where day.count > 0 { byDay[day.date] = day }
 
         let calendar = Calendar.chinaCalendar
-        let today = Date()
+        let today = AppClock.now
         let span = Self.span(range: range, days: days, today: today)
         guard let start = calendar.date(byAdding: .day, value: -(span - 1), to: today) else {
             return Grid(byDay: byDay, weeks: [], monthLabels: [])
