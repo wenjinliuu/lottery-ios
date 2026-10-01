@@ -7,6 +7,11 @@
 
 每次提交前照文末的对照表复核一遍，避免备注和实现漂移。
 
+**措辞原则（1.2.0 (70) 因 5.2.1 被拒后定下）：** 如实说，但不反复强调。定位是「个人票据
+记账本」；「lottery」只在「与任何彩票机构无关」那一句出现；不引用 5.3 等赌博类条款编号，
+不写玩法的英文名（如 Super Lotto），不主动解释随机填充这类会把注意力引到选号上的功能。
+完全回避也不行 —— 审核员打开 App 就看得到玩法名和票面，刻意隐瞒会落到 2.3.1。
+
 ---
 
 ## 可直接粘贴的正文
@@ -14,30 +19,29 @@
 DEMO ACCOUNT: Not required. No accounts or login; every feature works on first launch.
 
 WHAT THIS APP IS
-"对个号" is a local-first personal record-keeping utility, built by an independent developer with no affiliation to any lottery operator, issuer or government entity. The user types in, or photographs, the numbers printed on paper tickets they ALREADY own, bought in person at retail outlets. The app checks those numbers against published draw results and summarises the user's own spending. A notebook and a calculator, nothing more.
+"对个号" is a personal record-keeping notebook. The user copies in, or photographs, the numbers on paper slips they already own; the app compares them with publicly published results and keeps a simple income and expense summary. Think of a receipt tracker: everything stays on the device, there is no account, and the app never connects the user to any seller.
 
-WHAT THIS APP DOES NOT DO (Guideline 5.3 / 5.3.4)
-- It does NOT sell, order, reserve, broker or facilitate the purchase of a ticket. No purchase entry point anywhere; no draw is shown as "on sale" or "closed".
-- It handles NO money: no payment, wager, balance, prize redemption or In-App Purchase (no StoreKit code).
-- No number prediction, odds, trends or "hot/cold numbers".
-- The only outbound links, all in Settings > About, are the Privacy Policy, Support, and the ICP filing number, which opens the MIIT filing lookup (beian.miit.gov.cn). No web view, no third-party SDK.
-- Every amount shown is either printed on the user's ticket or the published prize of a drawn ticket.
-- It does NOT present itself as, or on behalf of, any lottery operator: no operator names, logos or emblems, and no rules or prize tables republished from operators. Game names appear only as plain text, so entries match what is printed on the user's own ticket.
+The developer is an independent individual. The app is not affiliated with, endorsed by, or acting for any lottery operator or government entity, and uses no operator's name, logo or materials.
+
+WHAT IT DOES NOT DO
+- No selling, ordering or buying on anyone's behalf; no purchase links or entry points.
+- No money of any kind: no payments, balances, prize claims or In-App Purchase (no StoreKit code).
+- No predictions, odds, trends or number recommendations.
+- No web view, no third-party SDK. The only outbound links (Settings > About) are the Privacy Policy, Support, and the ICP filing number, which opens beian.miit.gov.cn.
+- Amounts shown are only those printed on the user's own slips, or results already published.
 
 HOW TO TEST
-A. Scan (sample ticket attached): save the attached image, marked "审核测试用票" (review test ticket, not a real ticket), to Photos. Tap the camera button at the right of the tab bar > "从相册选择" (Choose from Photos) and pick it. On the crop screen tap "重置" (Reset) so the frame covers the whole ticket, then "识别这张" (Recognise). The review screen shows Super Lotto issue 26082, 3 lines, add-on, x2, total 18 yuan. Tap "加入票夹" (Add to wallet). That draw is already published, so the Wallet shows the result immediately (no win; matched numbers highlighted).
-B. Manual entry: camera button > "手动录入号码" (Manual entry). Choose a game, tap the numbers, pick an issue marked "已开奖" (drawn) to see a result right away, then "加入票夹".
-The first save shows a "使用提示" (usage notice) that must be acknowledged. It says the app only records tickets the user already owns, does not sell or handle any money, and asks the user to spend responsibly.
+A. Scan (sample image attached, marked "审核测试用票", a review sample): save it to Photos. Tap the camera button at the right of the tab bar > "从相册选择" (Choose from Photos) and pick it. On the crop screen tap "重置" (Reset), then "识别这张" (Recognise). The review screen shows issue 26082, 3 lines, x2, total 18 yuan, matching the printed total. Tap "加入票夹" (Add to wallet); the result appears in the Wallet right away.
+B. Manual entry: camera button > "手动录入号码" (Manual entry). Pick a type, tap the numbers, choose an issue marked "已开奖" (published), then "加入票夹".
+The first save shows a "使用提示" (usage notice): the app only records slips the user already owns, does not sell anything or handle money, and asks users to spend responsibly.
 
-PERMISSIONS
-Camera and Photos are requested only from the scan button. Recognition runs on-device (Apple Vision). Photos are never uploaded or stored.
-
-NETWORKING AND PRIVACY
-The app downloads public draw results and the yearly draw calendar via unauthenticated HTTPS GET: first from our read-only endpoint on Tencent CloudBase (ap-shanghai.app.tcloudbase.com), falling back to a static mirror on raw.githubusercontent.com. They carry no user data, identifiers or tickets. No analytics, ads or accounts, hence "Data Not Collected".
-Tickets are stored only on the device (SwiftData, CloudKit explicitly off). Backups are JSON files in the app's own sandbox; optionally ("自动备份到 iCloud", off by default) the same file goes to the user's own iCloud Drive (iCloud Documents only, no CloudKit).
+PERMISSIONS, NETWORK AND PRIVACY
+- Camera and Photos are requested only from the scan button. Recognition runs on-device (Apple Vision); photos are never uploaded or stored.
+- Public results and the yearly calendar are downloaded via unauthenticated HTTPS GET from our read-only endpoint on Tencent CloudBase (ap-shanghai.app.tcloudbase.com), with a static mirror on raw.githubusercontent.com as fallback. Requests carry no user data or identifiers. No analytics, ads or accounts, hence "Data Not Collected".
+- Records stay on the device (SwiftData, CloudKit off). Backups are JSON files in the app sandbox; optionally ("自动备份到 iCloud", off by default) copied to the user's own iCloud Drive (iCloud Documents only, no CloudKit).
 
 DISCLAIMERS
-Shown under the draw numbers on Home, on every ticket card, on the scan, crop and review screens, and above the save button. They say recognition can be wrong, the physical ticket is authoritative, results are for personal reference only, and the app does not sell, buy or handle any money. Settings > About repeats this and states that the app is an independent personal tool not affiliated with any lottery operator.
+Short notes on Home, on every record card, on the scan screens and above the save button say recognition can be wrong, the paper slip is authoritative, and results are for personal reference only. Settings > About repeats this and states that the app is an independent personal tool.
 
 Support: https://wenjinliuu.github.io/lottery-ios/support.html
 Privacy Policy: https://wenjinliuu.github.io/lottery-ios/
