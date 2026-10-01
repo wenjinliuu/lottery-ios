@@ -221,6 +221,16 @@ enum LotteryV2Mapper {
         return DrawCalendarYear(year: Int(payload.year.text) ?? year, lotteries: lotteries)
     }
 
+    /// 这一份日历有没有排到年底。
+    ///
+    /// CloudBase 的数据库单次查询最多回 1000 行，而一年八个彩种有两千多期 ——
+    /// 接口按日期升序取，拿回来的只到 7 月初。期次选择器翻到后半年就全是空格子，
+    /// 一期都选不了。每个彩种一年最后一期都在 12 月下旬之后，以此判断是否完整。
+    static func calendarCoversYear(_ payload: LotteryV2.CalendarPayload, year: Int) -> Bool {
+        let last = (payload.entries ?? []).compactMap(\.date).max() ?? ""
+        return last >= "\(year)-12-20"
+    }
+
     /// `"2026-01-01"` + `"21:15:00"` → `"2026-01-01 21:15:00"`。
     /// 时刻缺失或者已经是完整时刻时原样返回，不制造半截字符串。
     static func joinDateTime(_ date: String, _ clock: String) -> String {

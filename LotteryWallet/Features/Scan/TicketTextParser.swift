@@ -1161,7 +1161,7 @@ enum TicketTextParser {
     static func summary(for tickets: [ScannedTicket]) -> [String] {
         var warnings: [String] = []
         if tickets.isEmpty {
-            warnings.append("没认出彩票。目前支持双色球、大乐透、七乐彩、快乐8、福彩3D、排列3、排列5、七星彩的单式票，以及双色球和大乐透的复式、胆拖票。")
+            warnings.append("没认出票面号码。目前支持双色球、大乐透、七乐彩、快乐8、3D、排列3、排列5、七星彩的单式票，以及双色球和大乐透的复式、胆拖票。")
         } else if tickets.count > 1 {
             warnings.append("这张照片里认出了 \(tickets.count) 张票，请逐张核对。")
         }

@@ -237,7 +237,7 @@ struct EntryFlowView: View {
             .background(Palette.canvas)
             .toolbarBackground(Palette.canvas, for: .navigationBar)
             .toolbarBackgroundVisibility(.visible, for: .navigationBar)
-            .navigationTitle(draft == nil ? "添加彩票" : "修改彩票")
+            .navigationTitle(draft == nil ? "添加一张票" : "修改这张票")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -269,11 +269,11 @@ struct EntryFlowView: View {
                     pickedIssue = issue
                 }
             }
-            .alert("理性购彩", isPresented: $isResponsibleAlertPresented) {
+            .alert(Disclaimer.noticeTitle, isPresented: $isResponsibleAlertPresented) {
                 Button("我已了解", action: { settings.responsibleAcknowledged = true; save() })
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("本应用仅用于记录和核对你已持有的实体彩票，不销售、不代购、不提供兑奖服务。请理性参与，量力而行。")
+                Text(Disclaimer.notice)
             }
             .alert("无法保存", isPresented: .init(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
                 Button("好", role: .cancel) { saveError = nil }

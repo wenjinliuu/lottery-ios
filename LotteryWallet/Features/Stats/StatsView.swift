@@ -6,8 +6,8 @@ import Charts
 struct StatsView: View {
     @Query(sort: \TicketRecord.createdAt, order: .reverse) private var records: [TicketRecord]
 
-    @State private var year = Calendar.chinaCalendar.component(.year, from: Date())
-    @State private var month: Int? = Calendar.chinaCalendar.component(.month, from: Date())
+    @State private var year = Calendar.chinaCalendar.component(.year, from: AppClock.now)
+    @State private var month: Int? = Calendar.chinaCalendar.component(.month, from: AppClock.now)
     @State private var entries: [SettledEntry] = []
     @State private var stats = ProfitStats.PeriodStats()
     @State private var years: [Int] = []

@@ -63,7 +63,7 @@ struct TicketCropView: View {
 
     private var header: some View {
         VStack(spacing: 4) {
-            Text("框出这张彩票")
+            Text("框出这张票")
                 .font(.headline)
                 .foregroundStyle(.white)
             Text("拖动四个角对齐票面边缘，斜着拍的会自动摆正")

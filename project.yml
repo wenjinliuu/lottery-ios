@@ -52,8 +52,8 @@ targets:
           UIColorName: LaunchBackground
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-        NSCameraUsageDescription: 用于拍摄纸质彩票并在本机识别号码，照片不会离开设备。
-        NSPhotoLibraryUsageDescription: 用于从相册选择彩票照片并在本机识别号码，照片不会离开设备。
+        NSCameraUsageDescription: 用于拍摄纸质票据并在本机识别号码，照片不会离开设备。
+        NSPhotoLibraryUsageDescription: 用于从相册选择票据照片并在本机识别号码，照片不会离开设备。
         ITSAppUsesNonExemptEncryption: false
         # 让本机备份在「文件」App 里看得见、拷得走。
         #

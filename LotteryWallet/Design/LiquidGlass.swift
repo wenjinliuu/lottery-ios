@@ -11,7 +11,7 @@ import SwiftUI
 /// 页面代码一律走下面这些语义化修饰符。
 extension View {
 
-    /// 内容卡片：白底页面上的淡灰圆角块（颜色见 `Palette.card`），不是玻璃。
+    /// 内容卡片：浅灰底上的白色圆角块（颜色见 `Palette.card`），不是玻璃。
     func contentCard(cornerRadius: CGFloat = 16, padding: CGFloat = 16) -> some View {
         self
             .padding(padding)
@@ -22,7 +22,7 @@ extension View {
             )
     }
 
-    /// 系统表单换成白底淡灰卡片，和其他页面同一套配色（见 `Palette.canvas`）。
+    /// 系统表单换成和其他页面同一套配色：近白浅灰底、白卡片（见 `Palette.canvas`）。
     ///
     /// 挂在 Form 上；行背景要单独给，见 `cardRows()`。
     func canvasForm() -> some View {

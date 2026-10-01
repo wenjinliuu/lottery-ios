@@ -98,4 +98,12 @@ final class LotteryEndpointTests: XCTestCase {
         XCTAssertGreaterThan(LotteryEndpoint.calendar(current).freshness,
                              LotteryEndpoint.recentDraws(.ssq).freshness)
     }
+
+    /// 开奖日历一年一发，不该每天都去拉一遍两百多 KB。
+    func testCalendarIsCachedForWeeks() {
+        let current = ChinaClock.year()
+        XCTAssertGreaterThanOrEqual(LotteryEndpoint.calendar(current).freshness, 30 * 24 * 3600)
+        XCTAssertGreaterThanOrEqual(LotteryEndpoint.calendar(current + 1).freshness, 30 * 24 * 3600)
+        XCTAssertGreaterThanOrEqual(LotteryEndpoint.calendar(current - 1).freshness, 365 * 24 * 3600)
+    }
 }

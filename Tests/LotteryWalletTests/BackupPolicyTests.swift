@@ -98,4 +98,17 @@ final class BackupPolicyTests: XCTestCase {
         let local = BackupItem(name: name, location: .local, kind: .manual, modifiedAt: Date(), size: 1)
         XCTAssertNotEqual(cloud.id, local.id)
     }
+
+    // MARK: - 一天一次
+
+    func testAutoBackupAtMostOncePerDay() {
+        XCTAssertTrue(BackupCenter.shouldAutoBackup(today: "2026-09-29", lastDay: nil))
+        XCTAssertTrue(BackupCenter.shouldAutoBackup(today: "2026-09-29", lastDay: "2026-09-28"))
+        XCTAssertFalse(BackupCenter.shouldAutoBackup(today: "2026-09-29", lastDay: "2026-09-29"))
+    }
+
+    /// 自动备份留两份：出事那天还有前一天的那份可退。
+    func testAutoBackupKeepsTwo() {
+        XCTAssertEqual(BackupPolicy.autoKeep, 2)
+    }
 }

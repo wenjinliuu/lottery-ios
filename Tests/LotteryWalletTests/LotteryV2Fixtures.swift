@@ -19,6 +19,18 @@ enum LotteryV2Fixtures {
     static var legacyYearDraws: Data { Data(legacyYearJSON.utf8) }
     static var calendar: Data { Data(calendarJSON.utf8) }
 
+    /// 排到年底的一份：上面那几期再加上这一年的 12 月 31 日。
+    ///
+    /// 只到年初的日历会被当成「不完整」（CloudBase 单次最多回 1000 行，见
+    /// `LotteryV2Mapper.calendarCoversYear`），于是多打一次 GitHub —— 数请求的用例要用这份。
+    static func fullCalendar(year: Int) -> Data {
+        let yearEnd = """
+        {"lottery_type": "ssq", "issue": "\(year)153", "date": "\(year)-12-31",
+         "draw_time": "21:15:00", "sale_close_time": "20:00:00"},
+        """
+        return Data(calendarJSON.replacingOccurrences(of: "\"entries\": [", with: "\"entries\": [\n" + yearEnd).utf8)
+    }
+
     static let bootstrapJSON = """
     {
       "schema": "duigehao.lottery.bootstrap",

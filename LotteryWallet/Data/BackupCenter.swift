@@ -5,7 +5,7 @@ import SwiftData
 ///
 /// 这些数字不是随便定的，每一条都对应一次真实的坑：
 ///
-/// - **自动备份只留最新一份。** 每次自动备份覆盖上一份。
+/// - **自动备份一天最多一次，只留最近两份。** 本机和 iCloud 合起来算，不是各留两份。
 /// - **空库永远不写自动备份。** 见下面那段，这是保住上面那条的前提。
 /// - **手动备份永不自动删除。** 用户自己点的那一下代表「这一份我要留着」，
 ///   程序没有资格替他回收。导出的文件更是完全在 App 管辖之外。
@@ -31,9 +31,15 @@ import SwiftData
 ///
 /// 剩下的残余风险是「记录被改坏但没变空」时覆盖掉好的那一份。对着这个，
 /// 用户的退路是手动备份和导出文件 —— 它们永不自动删除。
+///
+/// ## 后来又改成「一天一次、留两份」
+///
+/// 一份的毛病是出事那天没有退路：今天改坏了、今天的自动备份又把昨天那份盖掉。
+/// 留两份、一天最多写一次，最坏也还有前一天的那份；而一天一次又不会像当初
+/// 那样攒出十几份长得差不多的文件。
 enum BackupPolicy {
-    /// 自动备份保留几份。**1 = 每次覆盖上一份。** 理由见上面那段。
-    static let autoKeep = 1
+    /// 自动备份保留几份（本机和 iCloud 合计）。
+    static let autoKeep = 2
     /// 恢复前快照保留几份。
     ///
     /// **刻意比自动备份多。** 这三份是「恢复之后发现恢复错了」时唯一的退路，
@@ -57,6 +63,12 @@ final class BackupCenter {
     private(set) var isLoading = false
     /// iCloud 现在为什么用不了。nil 表示可用。
     private(set) var cloudIssue: String?
+
+    /// 上一次自动备份是哪一天（yyyy-MM-dd）。同一天不再写第二份。
+    private var lastAutoDay: String? {
+        get { UserDefaults.standard.string(forKey: "lottery.backup.lastAutoDay") }
+        set { UserDefaults.standard.set(newValue, forKey: "lottery.backup.lastAutoDay") }
+    }
 
     /// 上一次自动备份时的记录指纹。没变就不重复写。
     private var lastAutoFingerprint: String? {
@@ -124,17 +136,26 @@ final class BackupCenter {
 
     /// 退到后台时的自动备份。
     ///
-    /// 两道闸：记录没变过不写（省得云上堆一堆一模一样的文件），
-    /// 库是空的不写（见 `BackupPolicy`）。
+    /// 三道闸：库是空的不写（见 `BackupPolicy`），今天已经写过不写，
+    /// 记录没变过不写（省得堆一堆一模一样的文件）。
     func autoBackup(records: [TicketRecord],
                     context: ModelContext,
-                    preferring preferred: BackupItem.Location) async {
+                    preferring preferred: BackupItem.Location,
+                    now: Date = Date()) async {
         guard !records.isEmpty else { return }
+        let today = DateText.day(now)
+        guard Self.shouldAutoBackup(today: today, lastDay: lastAutoDay) else { return }
         let fingerprint = Self.fingerprint(records)
         guard fingerprint != lastAutoFingerprint else { return }
         guard let data = try? BackupService(context: context).exportData(records: records) else { return }
         guard (try? await create(kind: .auto, data: data, preferring: preferred)) != nil else { return }
         lastAutoFingerprint = fingerprint
+        lastAutoDay = today
+    }
+
+    /// 一天最多一份。抽出来单独测。
+    nonisolated static func shouldAutoBackup(today: String, lastDay: String?) -> Bool {
+        lastDay != today
     }
 
     /// 记录集合的指纹：条数 + 最后更新时间。够用来判断「有没有变过」。
@@ -180,14 +201,19 @@ final class BackupCenter {
     // MARK: - 回收
 
     /// 按策略回收：自动备份和恢复前快照各保留最近几份，手动备份一份不动。
+    ///
+    /// **本机和 iCloud 合起来算。** 分开算的话，打开 iCloud 之后本机两份、
+    /// iCloud 两份，列表里就是四份自动备份。
     private func prune() async {
         let cloudStore = cloud
         let localStore = local
         await Task.detached {
-            for candidate in [cloudStore, localStore] {
-                guard candidate.unavailableReason() == nil,
-                      let all = try? candidate.list() else { continue }
-                Self.expired(in: all).forEach { try? candidate.delete($0) }
+            let stores = [cloudStore, localStore].filter { $0.unavailableReason() == nil }
+            let all = stores.flatMap { (try? $0.list()) ?? [] }
+            for item in Self.expired(in: all) {
+                if let store = stores.first(where: { $0.location == item.location }) {
+                    try? store.delete(item)
+                }
             }
         }.value
     }

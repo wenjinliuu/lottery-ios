@@ -27,8 +27,11 @@ final class KeyFlowTests: XCTestCase {
     /// （Scripts/make-demo-data.py 生成时打印的数字）。
     func testHomeShowsDemoTotals() {
         XCTAssertTrue(app.staticTexts["累计收支"].waitForExistence(timeout: 10), "首页没有累计收支")
-        for text in ["412元", "734元", "1,146元"] {
-            XCTAssertTrue(app.staticTexts[text].firstMatch.waitForExistence(timeout: 10), "首页没有显示 \(text)")
+        // 金额和「元」是分开的两段字（「元」小一号），按数字找
+        for text in ["412", "734", "1,146"] {
+            let element = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+            XCTAssertTrue(element.waitForExistence(timeout: 10), "首页没有显示 \(text)")
         }
     }
 

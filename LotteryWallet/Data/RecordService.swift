@@ -161,9 +161,16 @@ struct RecordService {
     /// —— 原本指望重新核对补上，但这里的 guard 又把已结算的记录跳过去了，
     /// 于是那批票的命中标记永远补不回来。票面渲染拿"有没有命中标记"当
     /// "有没有核对过"，结果导入的老票整排号码球全是满色，看起来像全中了。
+    ///
+    /// 第四种：**最近开奖、已经判了中奖的票**。开奖数据常常是先回号码、后回奖金，
+    /// 或者奖金第一次回的是个占位值、后来才更正（大乐透七等奖先写 5 元、后改 7 元）。
+    /// 原来判过一次「中奖」就再也不看，票面上就一直挂着那个错的金额。
+    /// 现在最近 `recheckDays` 天内开奖的中奖票每次都按最新数据重算，没变就不写库；
+    /// 改金额不算「新中奖」，不会再放一次烟花。
     @discardableResult
-    func checkAll(_ records: [TicketRecord]? = nil) throws -> (checked: Int, won: Int) {
+    func checkAll(_ records: [TicketRecord]? = nil, now: Date = Date()) throws -> (checked: Int, won: Int) {
         let targets = records ?? allRecords()
+        let recheckSince = Self.recheckSince(now)
         var checked = 0
         var won = 0
         var repaired = 0
@@ -174,10 +181,21 @@ struct RecordService {
                 if record.status == .won { won += 1 }
             } else if !record.hasMatches {
                 if repairMatches(record) { repaired += 1 }
+            } else if record.status == .won, record.targetOpenDate >= recheckSince,
+                      // 示例票据的金额是截图和 UI 测试的固定答案，不跟着线上数据变
+                      !DemoData.isEnabled {
+                if apply(record) { checked += 1 }
             }
         }
         if checked > 0 || repaired > 0 { try context.save() }
         return (checked, won)
+    }
+
+    /// 已中奖的票在开奖后多少天内还会跟着开奖数据更正奖金。
+    static let recheckDays = 30
+
+    static func recheckSince(_ now: Date) -> String {
+        DateText.day(now.addingTimeInterval(-Double(recheckDays) * 86_400))
     }
 
     // MARK: - 已读
@@ -250,10 +268,14 @@ struct RecordService {
     ///
     /// 通常是一两个彩种。**这就是「冷启动只读 bootstrap」和「启动自动核对」
     /// 能同时成立的原因** —— 不需要把八个彩种一次拉满。
-    func gamesAwaitingDraws() -> Set<GameKey> {
+    func gamesAwaitingDraws(now: Date = Date()) -> Set<GameKey> {
         var games: Set<GameKey> = []
-        for record in allRecords() where record.status == .pending || record.status == .prizeFloat {
-            guard drawStore.draw(matching: record) == nil else { continue }
+        let recheckSince = Self.recheckSince(now)
+        for record in allRecords() {
+            // 最近中奖的票也要拿到那一期的最新数据，奖金更正才核对得到（见 `checkAll`）
+            let recentWin = record.status == .won && record.targetOpenDate >= recheckSince
+            guard record.status == .pending || record.status == .prizeFloat || recentWin,
+                  drawStore.draw(matching: record) == nil else { continue }
             games.insert(record.game)
         }
         return games

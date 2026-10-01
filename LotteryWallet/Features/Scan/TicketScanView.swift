@@ -110,7 +110,7 @@ struct TicketScanView: View {
             // 导航栏也别自己糊一层材质，否则顶部又是一条色差
             .toolbarBackground(Palette.canvas, for: .navigationBar)
             .toolbarBackgroundVisibility(.visible, for: .navigationBar)
-            .navigationTitle(stage == .review ? "核对识别结果" : "扫描彩票")
+            .navigationTitle(stage == .review ? "核对识别结果" : "扫描票据")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarVisibility(stage == .crop ? .hidden : .automatic, for: .navigationBar)
             .toolbar {
@@ -193,11 +193,11 @@ struct TicketScanView: View {
         } message: { request in
             Text("单式票、复式票、胆拖票的号码结构不一样，已经识别出来的号码没法直接换成\(request.shape.label)。接下来会打开手动录入，票面照片和期号都带过去，你对照票面把号码重录一遍即可。不想改就返回，这张票原样保留。")
         }
-        .alert("理性购彩", isPresented: $isResponsibleAlertPresented) {
+        .alert(Disclaimer.noticeTitle, isPresented: $isResponsibleAlertPresented) {
             Button("我已了解") { settings.responsibleAcknowledged = true; importAll() }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("本应用仅用于记录和核对你已持有的实体彩票，不销售、不代购、不提供兑奖服务。请理性参与，量力而行。")
+            Text(Disclaimer.notice)
         }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
@@ -236,9 +236,9 @@ struct TicketScanView: View {
                 .font(.system(size: 44))
                 .foregroundStyle(Color.accentColor)
             VStack(spacing: 6) {
-                Text("把整张彩票放进取景框")
+                Text("把整张票放进取景框")
                     .font(.headline)
-                Text("识别全部在这台设备上完成，照片不上传也不保存。双色球、大乐透支持单式、复式、胆拖；七乐彩、快乐8、七星彩、排列3、排列5、福彩3D 目前支持单式票。\n拍好之后框一下票面，一次认一张。")
+                Text("识别全部在这台设备上完成，照片不上传也不保存。双色球、大乐透支持单式、复式、胆拖；七乐彩、快乐8、七星彩、排列3、排列5、3D 目前支持单式票。\n拍好之后框一下票面，一次认一张。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -260,7 +260,7 @@ struct TicketScanView: View {
             Spacer(minLength: 0)
 
             VStack(spacing: 10) {
-                Button("拍摄彩票") { isCameraPresented = true }
+                Button("拍摄票据") { isCameraPresented = true }
                     .buttonStyle(ProminentGlassButton(tint: .accentColor))
                     .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
 
@@ -357,7 +357,7 @@ struct TicketScanView: View {
                     photoCard
                     debugCard
                     ContentUnavailableView {
-                        Label("没有识别出彩票", systemImage: "doc.questionmark")
+                        Label("没有识别出票面号码", systemImage: "doc.questionmark")
                     } description: {
                         Text(rawText.isEmpty
                              ? "这张图上一个字都没认出来。多半是太糊或光线太暗，换个角度重拍试试。"
@@ -780,7 +780,19 @@ struct TicketScanView: View {
                             .frame(width: 42, alignment: .leading)
                             .padding(.top, 3)
                         if row.values.isEmpty {
-                            Text("—").font(.caption).foregroundStyle(.tertiary).padding(.top, 3)
+                            // **这一区没认出来时必须能补。** 原来只画一个「—」，
+                            // 选号盘只能从号码球点开 —— 一颗球都没有就是死路：
+                            // 双色球复式票红球认出来、蓝球是空的，用户手里明明有票也导不进去。
+                            Button {
+                                zoneEditorTarget = ZoneEditorTarget(ticketID: ticket.id, key: row.key)
+                            } label: {
+                                Label("没认出来，点这里补上", systemImage: "plus.circle")
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.top, 3)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(ticket.game.accent.accentColor)
+                            .accessibilityLabel("补上\(row.label)的号码")
                         } else {
                             BallRowView(values: row.values, color: row.color, size: 26) { _ in
                                 zoneEditorTarget = ZoneEditorTarget(ticketID: ticket.id, key: row.key)

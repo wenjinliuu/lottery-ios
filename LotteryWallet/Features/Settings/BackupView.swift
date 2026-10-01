@@ -35,22 +35,20 @@ struct BackupView: View {
     @State private var isClearConfirmPresented = false
 
     var body: some View {
-        @Bindable var settings = settings
-
         Form {
             Group {
                 if !storeHealth.isHealthy { storeWarning }
 
+                // 自动备份本身常开，只剩一个开关：存本机还是存 iCloud。
+                // 原来「自动备份」「存到 iCloud」两个开关，打开 iCloud 本来就意味着要自动备份，
+                // 两个开关只是让人多想一步「这两个是什么关系」。
                 Section {
-                    Toggle(isOn: $settings.autoBackupEnabled) {
-                        row("clock.arrow.circlepath", .blue, "自动备份")
-                    }
                     Toggle(isOn: Binding(get: { settings.iCloudBackupEnabled },
                                          set: { toggleICloud($0) })) {
-                        row("icloud.fill", .cyan, "存到 iCloud")
+                        row("icloud.fill", .cyan, "自动备份到 iCloud")
                     }
                 } header: {
-                    Text("自动")
+                    Text("自动备份")
                 } footer: {
                     Text(autoFooter)
                 }
@@ -118,23 +116,6 @@ struct BackupView: View {
                     Text(records.isEmpty
                          ? "现在没有记录。"
                          : "会把这台设备上的 \(records.count) 条记录全部删除。上面列出的备份不受影响，清空之后仍然可以从它们恢复。")
-                }
-
-                // 诊断**不藏**。上一版把它放在一个只有 iCloud 开关打开才出现的
-                // 子页里，于是恰恰在开关打不开的时候，用来查原因的东西也不见了。
-                Section {
-                    Text(diagnostic)
-                        .font(.footnote.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                    Button {
-                        UIPasteboard.general.string = diagnostic
-                        showToast("已复制诊断信息", symbol: "doc.on.doc", feedback: .success)
-                    } label: {
-                        Label("复制诊断信息", systemImage: "doc.on.doc")
-                    }
-                } header: {
-                    Text("诊断")
                 }
             }
             .cardRows()
@@ -254,12 +235,10 @@ struct BackupView: View {
     }
 
     private var autoFooter: String {
-        var text = settings.autoBackupEnabled
-            ? "每次退到后台、且记录有过变化时自动存一份，**只保留最新的一份**，新的覆盖旧的。想长期留着某一份，用「立即备份」或「导出数据」——那两种永远不会被自动清理。"
-            : "关掉之后不再自动备份。手动备份和导出不受影响。"
-        text += settings.iCloudBackupEnabled
-            ? "\n\n备份优先写进你自己的 iCloud 云盘（「文件」App 里的「对个号」文件夹）；iCloud 用不了时自动落到本机，不会因此漏掉一次备份。"
-            : "\n\n备份只存在这台设备上，不会离开手机。打开上面那个开关才会同时放一份到你自己的 iCloud。"
+        var text = settings.iCloudBackupEnabled
+            ? "每天自动备份一次，存进你自己的 iCloud 云盘（「文件」App 里的「对个号」文件夹），换手机也找得回来。iCloud 用不了时先存在本机，不会漏掉一次。"
+            : "每天自动在这台设备上备份一次，不会离开手机。打开后改存到你自己的 iCloud 云盘，换手机也找得回来。"
+        text += "\n\n自动备份最多保留最近 \(BackupPolicy.autoKeep) 份，更早的自动删掉。想长期留着某一份，用「立即备份」或「导出数据」，那两种永远不会被自动清理。"
         if let issue = center.cloudIssue, settings.iCloudBackupEnabled {
             text += "\n\niCloud 现在用不了：\(issue)"
         }
@@ -272,11 +251,6 @@ struct BackupView: View {
             text += "\n「恢复前快照」是每次恢复之前自动存的当前状态，保留最近 \(BackupPolicy.safetyKeep) 份。"
         }
         return text
-    }
-
-    private var diagnostic: String {
-        storeHealth.summary(recordCount: records.count)
-            + "\n\n" + ICloudBackupService.diagnosticSummary()
     }
 
     private var busyOverlay: some View {

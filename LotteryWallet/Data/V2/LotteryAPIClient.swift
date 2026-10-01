@@ -50,6 +50,12 @@ actor LotteryAPIClient {
         }
     }
 
+    /// 只取 GitHub 那一份。CloudBase 返回了、但内容不完整时用（见 `LotteryRepository.load` 的 `accept`）。
+    func fetchFallback(_ endpoint: LotteryEndpoint) async throws -> Response {
+        let data = try await get(github.appendingPathComponent(endpoint.githubPath))
+        return Response(data: data, source: .githubFallback)
+    }
+
     /// 后端最近一次抓取任务的状态。**只打 CloudBase，不走 GitHub 兜底，
     /// 也不进缓存。**
     ///

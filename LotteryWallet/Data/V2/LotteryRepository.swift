@@ -61,19 +61,30 @@ actor LotteryRepository {
     ///
     /// - Parameter forceRefresh: 下拉刷新用。跳过「缓存还新鲜」这一步，
     ///   但网络失败时**仍然**回落缓存 —— 用户下拉刷新失败，不该换来一个空列表。
+    /// - Parameter accept: 内容是否完整。**请求成功不等于数据完整**：CloudBase 的数据库
+    ///   单次查询最多回 1000 行，一整年的开奖日历有两千多期，接口只给到年中。
+    ///   不完整的新鲜缓存当没有；CloudBase 给的不完整就改取 GitHub 那一份。
     func load<T: Decodable & Sendable>(_ endpoint: LotteryEndpoint,
                                        as type: T.Type,
-                                       forceRefresh: Bool = false) async throws -> Loaded<T> {
+                                       forceRefresh: Bool = false,
+                                       accept: (@Sendable (T) -> Bool)? = nil) async throws -> Loaded<T> {
         if !forceRefresh,
            let entry = await cache.read(endpoint),
            entry.isFresh(for: endpoint),
-           let value = try? decoder.decode(T.self, from: entry.data) {
+           let value = try? decoder.decode(T.self, from: entry.data),
+           accept?(value) ?? true {
             return Loaded(value: value, source: .localCache, savedAt: entry.savedAt)
         }
 
         do {
-            let (data, source) = try await fetch(endpoint)
-            let value = try decodeOrThrow(T.self, from: data)
+            var (data, source) = try await fetch(endpoint)
+            var value = try decodeOrThrow(T.self, from: data)
+            if let accept, !accept(value), source == .cloudBase,
+               let fallback = try? await client.fetchFallback(endpoint),
+               let complete = try? decodeOrThrow(T.self, from: fallback.data),
+               accept(complete) {
+                (data, source, value) = (fallback.data, fallback.source, complete)
+            }
             // 解码成功了才写缓存。**先写后解**的话，服务端某天改了字段名，
             // 我们会把一份解不出来的东西存进磁盘，然后离线时连旧数据都没了。
             await cache.write(data, for: endpoint)
