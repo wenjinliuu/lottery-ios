@@ -24,9 +24,6 @@ WHAT THIS APP DOES NOT DO (Guideline 5.3 / 5.3.4)
 - Every amount shown is either printed on the user's ticket or the published prize of a drawn ticket.
 - It does NOT present itself as, or on behalf of, any lottery operator: no operator names, logos or emblems, and no rules or prize tables republished from operators. Game names appear only as plain text, so entries match what is printed on the user's own ticket.
 
-ABOUT "随机填充" (FILL RANDOMLY)
-It only fills the number pad to save tapping while copying a ticket. Every number stays editable; nothing is submitted. Not a recommendation.
-
 HOW TO TEST
 A. Scan (sample ticket attached): save the attached image, marked "审核测试用票" (review test ticket, not a real ticket), to Photos. Tap the camera button at the right of the tab bar > "从相册选择" (Choose from Photos) and pick it. On the crop screen tap "重置" (Reset) so the frame covers the whole ticket, then "识别这张" (Recognise). The review screen shows Super Lotto issue 26082, 3 lines, add-on, x2, total 18 yuan. Tap "加入票夹" (Add to wallet). That draw is already published, so the Wallet shows the result immediately (no win; matched numbers highlighted).
 B. Manual entry: camera button > "手动录入号码" (Manual entry). Choose a game, tap the numbers, pick an issue marked "已开奖" (drawn) to see a result right away, then "加入票夹".
@@ -58,7 +55,6 @@ Thank you for your review.
 | 仅有的外链是隐私政策、技术支持和备案查询 | `grep -rn 'Link(destination\|openURL' LotteryWallet/` 只应命中 `SettingsView.swift` 的三条（`privacyURL`、`supportURL`、`icpLookupURL`） |
 | 网络端点只有两个，都是公开只读 GET | `LotteryWallet/Data/V2/LotteryAPIClient.swift`：`cloudBase`（腾讯云 CloudBase，上海）为主、`github`（raw.githubusercontent.com）兜底；无 Authorization 头、无任何参数带用户数据。隐私政策第 04 节写的是同一件事 |
 | 权限用途 | `project.yml` 的 NSCameraUsageDescription / NSPhotoLibraryUsageDescription |
-| 随机填充只填选号盘 | `EntryFlowView.fillRandomSelection()` → `TicketBuilder.randomDigits` |
 | 各处免责声明 | `grep -rn 'Disclaimer\.' LotteryWallet/`，文案集中在 `Design/Disclaimer.swift` |
 | 保存按钮写的是「加入票夹」 | `grep -rn '加入票夹' LotteryWallet/` 命中 `EntryFlowView.swift` 与 `TicketScanView.swift` |
 | 界面不出现销售状态 | `grep -rn '停售\|已截止\|可购买\|在售\|投注' LotteryWallet/ --include=*.swift` 只应命中注释与内部字段名，无用户可见字符串 |
