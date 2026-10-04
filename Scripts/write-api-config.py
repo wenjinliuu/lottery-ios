@@ -8,7 +8,7 @@ import sys
 
 
 def main():
-    key = os.environ.get("APP_RUNTIME_API_KEY", "")
+    key = os.environ.get("APP_RUNTIME_API_KEY", "").strip()
     archive = bool(os.environ.get("DEVELOPMENT_TEAM"))
     if archive and not key:
         sys.exit("Set LOTTERY_READ_API_KEY in this repository's Actions Secrets before TestFlight.")

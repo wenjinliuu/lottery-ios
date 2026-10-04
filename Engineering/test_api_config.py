@@ -45,3 +45,10 @@ class APIConfigTests(unittest.TestCase):
             result, target = self.run_generator(key=key)
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(target.exists())
+
+    def test_copied_secret_whitespace_is_normalized(self):
+        key = "unit-test-only-read-key-not-for-production"
+        result, target = self.run_generator(key=" \n" + key + "\n", team="TESTTEAM")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('static let value: String? = "' + key + '"', target.read_text())
+        self.assertNotIn(key, result.stdout + result.stderr)

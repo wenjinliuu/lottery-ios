@@ -21,6 +21,7 @@
 ## 读取密钥与发布
 
 - 两个仓库各保存同值 Repository Actions Secret `LOTTERY_READ_API_KEY`：32–128 位英文字母、数字、`_`、`-`，推荐 64 位随机十六进制，不写进源码/参数/日志。
+- App 构建和服务端统一去除 Secret 首尾空白，兼容复制带换行；内部非法字符仍拒绝，不对外输出密钥。
 - TestFlight 调用中央 `APP_RUNTIME_API_KEY` Secret 输入，仅归档准备步骤获得密钥。`Scripts/write-api-config.py` 在 XcodeGen 前生成 gitignore 的 `GeneratedLotteryReadKey.swift`。
 - 密钥字符串编入安装包，没有额外加密或 Keychain 存储；HTTPS 保护传输。它可被提取，不能证明官方 App 身份。云管理凭据和上游密钥绝不能进入安装包。
 - Build & Test 不获得生产读取密钥，合成密钥验证请求头；归档缺密钥必须阻断。生产密钥不得进入公开模拟器产物或测试截图。
