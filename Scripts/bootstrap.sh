@@ -10,6 +10,7 @@ if ! command -v xcodegen >/dev/null 2>&1; then
   exit 1
 fi
 
+python3 Scripts/write-api-config.py
 xcodegen generate
 echo "已生成 LotteryWallet.xcodeproj"
 

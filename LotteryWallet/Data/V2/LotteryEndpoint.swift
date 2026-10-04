@@ -35,10 +35,8 @@ enum LotteryEndpoint: Hashable, Sendable {
 
     /// GitHub 兜底仓库里的相对路径（不含 `public_data/v2` 前缀）。
     ///
-    /// 就是 CloudBase 路径加个 `.json` —— 这不是巧合，仓库里的静态文件
-    /// 本来就是照着 API 路径生成的。写成派生关系而不是再抄一遍，
-    /// 两边就不可能对不上。
-    var githubPath: String { cloudBasePath + ".json" }
+    /// 基础地址已经包含 `public_data/v2`，这里必须去掉 API 的 `v2/` 前缀。
+    var githubPath: String { String(cloudBasePath.dropFirst(3)) + ".json" }
 
     /// 磁盘缓存键。命名照文档给的约定。
     var cacheKey: String {

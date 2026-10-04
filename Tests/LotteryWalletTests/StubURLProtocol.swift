@@ -15,12 +15,14 @@ final class StubURLProtocol: URLProtocol {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var stubs: [(suffix: String, stub: Stub)] = []
     nonisolated(unsafe) private static var recorded: [String] = []
+    nonisolated(unsafe) private static var requests: [URLRequest] = []
 
     /// 每个用例开头调一次。
     static func reset() {
         lock.lock(); defer { lock.unlock() }
         stubs = []
         recorded = []
+        requests = []
     }
 
     /// 路径以 `suffix` 结尾的请求返回这份数据。**先注册的先匹配。**
@@ -42,6 +44,11 @@ final class StubURLProtocol: URLProtocol {
 
     /// 便捷断言用：发出去的请求总数。
     static var requestCount: Int { requestedPaths.count }
+
+    static var recordedRequests: [URLRequest] {
+        lock.lock(); defer { lock.unlock() }
+        return requests
+    }
 
     /// 这次跑的是不是只碰了 CloudBase（用主机名区分两个在线源）。
     static func hosts() -> [String] {
@@ -71,6 +78,7 @@ final class StubURLProtocol: URLProtocol {
         }
         Self.lock.lock()
         Self.recorded.append(url.absoluteString)
+        Self.requests.append(request)
         let match = Self.stubs.first { url.path.hasSuffix($0.suffix) }?.stub
         Self.lock.unlock()
 
