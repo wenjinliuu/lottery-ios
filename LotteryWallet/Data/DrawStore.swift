@@ -63,7 +63,7 @@ enum LoadState: Equatable, Sendable {
 ///
 /// | 用户动作 | 请求 |
 /// | --- | --- |
-/// | 打开 App | `/v2/bootstrap` |
+/// | 打开 App | `/v2/bootstrap`；首页另按年缓存 `/v2/calendar/{今年}`，判断真实开奖日 |
 /// | 进往期开奖、翻到某个彩种 | `/v2/draws/{type}`（最近 30 期） |
 /// | 点「查看今年全部」 | `/v2/by-year/{type}/{今年}` |
 /// | 点「加载 20XX 年」 | `/v2/by-year/{type}/{那一年}`，一次只一年 |
@@ -105,6 +105,7 @@ final class DrawStore {
     private(set) var statusState: LoadState = .idle
     /// 年度开奖日历，按年存。
     private(set) var yearCalendars: [Int: DrawCalendarYear] = [:]
+    private var calendarRevision = 0
 
     // MARK: - 状态（四组，互不干扰）
 
@@ -318,6 +319,7 @@ final class DrawStore {
                                                    accept: { LotteryV2Mapper.calendarCoversYear($0, year: year) })
             lastSource = loaded.source
             yearCalendars[year] = LotteryV2Mapper.calendarYear(loaded.value, year: year)
+            calendarRevision += 1
             calendarStates[year] = .loaded
         } catch {
             calendarStates[year] = .failed(message(for: error))
@@ -407,7 +409,7 @@ final class DrawStore {
         // 光靠数据指纹这几项就永远停在昨天。按小时分桶，跨过开奖时刻或午夜
         // 都会换一个 token。
         let now = ChinaClock.now()
-        return "\(latestUpdatedAt)|\(schedules.count)|\(draws.count)|\(now.date)|\(now.clock.prefix(2))"
+        return "\(latestUpdatedAt)|\(schedules.count)|\(draws.count)|\(calendarRevision)|\(now.date)|\(now.clock.prefix(2))"
     }
 
     func draws(for game: GameKey) -> [Draw] {
@@ -464,22 +466,14 @@ final class DrawStore {
 
     // MARK: - 今日开奖
 
-    /// 没拿到日程时的兜底周表，0 为周日。
-    private static let fallbackWeekdays: [GameKey: [Int]] = [
-        .ssq: [0, 2, 4], .dlt: [1, 3, 6], .qlc: [1, 3, 5], .qxc: [2, 5, 0],
-        .fc3d: [0, 1, 2, 3, 4, 5, 6], .pl3: [0, 1, 2, 3, 4, 5, 6],
-        .pl5: [0, 1, 2, 3, 4, 5, 6], .k8: [0, 1, 2, 3, 4, 5, 6]
-    ]
+    /// 只认年度日历中的实际开奖日期；休市和调期不能按星期猜。
+    private func todayCalendarIssue(for game: GameKey, now: ChinaClock) -> CalendarIssue? {
+        guard let year = Int(now.date.prefix(4)) else { return nil }
+        return calendarIssues(for: game, year: year).first { $0.drawDate == now.date }
+    }
 
     func todayOpenGames(_ now: ChinaClock = .now()) -> [GameKey] {
-        GameKey.ordered.filter { game in
-            if let schedule = schedules[game], !schedule.weekdays.isEmpty {
-                return schedule.opensToday(now)
-            }
-            // 日程拿到了、但这个彩种没给周表 —— 那就是真没有，不要瞎猜。
-            if !schedules.isEmpty { return false }
-            return Self.fallbackWeekdays[game]?.contains(now.weekday) ?? false
-        }
+        GameKey.ordered.filter { todayCalendarIssue(for: $0, now: now) != nil }
     }
 
     /// 首页轮播顺序：当天开奖的大乐透/双色球排头。
@@ -502,9 +496,10 @@ final class DrawStore {
     /// 今天已过开奖时刻但号码还没更新的彩种。
     func pendingDrawUpdates(_ now: ChinaClock = .now()) -> [GameKey] {
         GameKey.ordered.filter { game in
-            guard let schedule = schedules[game],
-                  schedule.opensToday(now),
-                  schedule.drawTimePassed(now) else { return false }
+            guard let issue = todayCalendarIssue(for: game, now: now),
+                  let drawClock = issue.drawTime.split(separator: " ").last,
+                  drawClock.count >= 5,
+                  now.clock >= String(drawClock.prefix(5)) else { return false }
             return latestDraw(for: game)?.openDate != now.date
         }
     }

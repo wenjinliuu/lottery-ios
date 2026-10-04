@@ -32,13 +32,14 @@ concurrency:
 
 jobs:
   release:
-    uses: wenjinliuu/ios-ci-workflows/.github/workflows/testflight-release.yml@0c7501dd52ac0c252678ce5a4a7ed61fb6633cfb # v1.0.0
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/testflight-release.yml@99db8363c485fc8125075ab3cdde6e3bcd7f6974 # v1.0.0 + optional App read key
     with:
       lookup_only: ${{ inputs.lookup_only || false }}
       dry_run: ${{ inputs.dry_run || false }}
       marketing_version: ${{ inputs.marketing_version || '' }}
       build_number: ${{ inputs.build_number || '' }}
     secrets:
+      APP_RUNTIME_API_KEY: ${{ secrets.LOTTERY_READ_API_KEY }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}

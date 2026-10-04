@@ -9,6 +9,7 @@ xcuserdata/
 
 # XcodeGen 生成物
 LotteryWallet/Resources/Info.plist
+LotteryWallet/Data/V2/GeneratedLotteryReadKey.swift
 
 # 构建产物
 *.ipa

@@ -446,6 +446,8 @@ struct TicketCard: Identifiable, Hashable {
         let dan: Set<Int>
         /// 开出来命中的号。
         let hits: Set<Int>
+        /// 已有完整的逐球核对标记，全部未命中也属于已核对。
+        let hasResult: Bool
         var id: String { key.rawValue }
     }
 
@@ -485,12 +487,14 @@ struct TicketCard: Identifiable, Hashable {
             var union: Set<Int> = []
             var intersection: Set<Int>?
             var hits: Set<Int> = []
+            var hasResult = true
             for record in records {
                 let values = record.ticket[section.key]
-                guard !values.isEmpty else { continue }
+                guard !values.isEmpty else { hasResult = false; continue }
                 union.formUnion(values)
                 intersection = intersection.map { $0.intersection(values) } ?? Set(values)
                 let flags = record.matched[section.key] ?? []
+                if flags.count != values.count { hasResult = false }
                 for (index, value) in values.enumerated() where index < flags.count && flags[index] {
                     hits.insert(value)
                 }
@@ -502,7 +506,8 @@ struct TicketCard: Identifiable, Hashable {
                                    // 整个区都被"交集"覆盖说明这个区是定选的，
                                    // 那不是胆码，是这一区本来就没有可选余地
                                    dan: dan.count == union.count ? [] : dan,
-                                   hits: hits))
+                                   hits: hits,
+                                   hasResult: hasResult))
         }
         // 玩法决定一注选几个号（快乐8 的选五 / 选八），**对账必须按它算**。
         // 用 `section.count`（快乐8 是开奖的 20 个）的话，一张选五复式选了

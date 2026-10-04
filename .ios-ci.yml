@@ -5,7 +5,7 @@ scheme: LotteryWallet
 bundle_id: com.wenjinliu.lotterywallet
 display_name: 对个号
 sync_command: bash Scripts/sync-app-icon.sh
-generate_command: xcodegen generate
+generate_command: python3 -m unittest discover -s Engineering -p test_api_config.py && python3 Scripts/write-api-config.py && xcodegen generate
 icon_path: LotteryWallet/Resources/AppIcon.icon
 
 # 用 6.9 英寸的 Pro Max：UI 测试截出来的图是 1320×2868，正好是 App Store 要求的尺寸。

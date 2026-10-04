@@ -8,11 +8,10 @@ import Foundation
 /// 两边的 JSON **结构完全一样**（仓库里的静态文件就是照着 API 生成的），
 /// 所以这里只在「取字节」这一层分叉，DTO、解码、转换三层一个字都不分。
 ///
-/// ## 不需要、也不允许有任何密钥
+/// ## App 专用读取密钥
 ///
-/// 用到的全是公开 GET 接口。抓取用的 `CLOUDBASE_API_KEY`、`JISU_APPKEY`
-/// 这些只属于服务端和 GitHub Actions，**一个字节都不该进到安装包里**。
-/// 这里没有任何 Authorization 头，也没有任何从配置读密钥的入口。
+/// 仅 CloudBase 请求携带构建时注入的读取密钥，GitHub 请求不携带。
+/// `CLOUDBASE_API_KEY`、`JISU_APPKEY` 是服务端凭据，不能进入安装包。
 actor LotteryAPIClient {
     static let shared = LotteryAPIClient()
 
@@ -22,9 +21,11 @@ actor LotteryAPIClient {
     private let github = URL(string: "https://raw.githubusercontent.com/wenjinliuu/lottery-data-repo/main/public_data/v2")!
 
     private let session: URLSession
+    private let apiKey: String?
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = .shared, apiKey: String? = GeneratedLotteryReadKey.value) {
         self.session = session
+        self.apiKey = apiKey
     }
 
     struct Response: Sendable {
@@ -39,7 +40,7 @@ actor LotteryAPIClient {
     /// 「CloudBase 成功时到底有没有多打一次 GitHub」。
     func fetch(_ endpoint: LotteryEndpoint) async throws -> Response {
         do {
-            let data = try await get(cloudBase.appendingPathComponent(endpoint.cloudBasePath))
+            let data = try await get(cloudBase.appendingPathComponent(endpoint.cloudBasePath), apiKey: apiKey)
             return Response(data: data, source: .cloudBase)
         } catch {
             let data = try await get(github.appendingPathComponent(endpoint.githubPath))
@@ -65,7 +66,7 @@ actor LotteryAPIClient {
     ///
     /// 它同样**不是 `LotteryEndpoint` 的成员** —— 结构上就进不了冷启动。
     func fetchStatus() async throws -> LotteryV2.Status {
-        let data = try await get(cloudBase.appendingPathComponent("v2/status"), timeout: 10)
+        let data = try await get(cloudBase.appendingPathComponent("v2/status"), timeout: 10, apiKey: apiKey)
         do {
             return try JSONDecoder().decode(LotteryV2.Status.self, from: data)
         } catch {
@@ -73,15 +74,18 @@ actor LotteryAPIClient {
         }
     }
 
-    private func get(_ url: URL, timeout: TimeInterval = 15) async throws -> Data {
+    private func get(_ url: URL, timeout: TimeInterval = 15, apiKey: String? = nil) async throws -> Data {
         var request = URLRequest(url: url)
         // 这一层自己管缓存（见 `LotteryCache`），不要让 URLSession 再存一份：
         // 两套缓存各有各的过期判断，出问题时根本说不清界面上那份是谁给的。
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = timeout
         request.httpMethod = "GET"
+        if let apiKey, !apiKey.isEmpty {
+            request.setValue(apiKey, forHTTPHeaderField: "X-Lottery-Api-Key")
+        }
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request, delegate: LotteryReadRedirectGuard())
         guard let http = response as? HTTPURLResponse else {
             throw LotteryDataError.notHTTP
         }
@@ -90,6 +94,23 @@ actor LotteryAPIClient {
         }
         guard !data.isEmpty else { throw LotteryDataError.empty }
         return data
+    }
+}
+
+/// Do not forward the App read key to a redirect's new origin.
+final class LotteryReadRedirectGuard: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        var redirected = request
+        let previous = response.url
+        if previous?.scheme != request.url?.scheme
+            || previous?.host != request.url?.host
+            || previous?.port != request.url?.port {
+            redirected.setValue(nil, forHTTPHeaderField: "X-Lottery-Api-Key")
+        }
+        completionHandler(redirected)
     }
 }
 

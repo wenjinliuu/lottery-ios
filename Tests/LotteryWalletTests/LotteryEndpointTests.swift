@@ -17,12 +17,12 @@ final class LotteryEndpointTests: XCTestCase {
         XCTAssertEqual(LotteryEndpoint.calendar(2026).cloudBasePath, "v2/calendar/2026")
     }
 
-    /// GitHub 兜底的路径是 CloudBase 路径加 `.json`，派生而不是另抄一份。
+    /// 镜像基础地址已有 v2，不能重复拼出 /v2/v2/。
     func testGithubPathsDeriveFromCloudBase() {
-        for endpoint: LotteryEndpoint in [.bootstrap, .recentDraws(.k8),
-                                          .yearDraws(.dlt, 2025), .calendar(2025)] {
-            XCTAssertEqual(endpoint.githubPath, endpoint.cloudBasePath + ".json")
-        }
+        XCTAssertEqual(LotteryEndpoint.bootstrap.githubPath, "bootstrap.json")
+        XCTAssertEqual(LotteryEndpoint.recentDraws(.k8).githubPath, "draws/kl8.json")
+        XCTAssertEqual(LotteryEndpoint.yearDraws(.dlt, 2025).githubPath, "by-year/dlt/2025.json")
+        XCTAssertEqual(LotteryEndpoint.calendar(2025).githubPath, "calendar/2025.json")
     }
 
     // MARK: - k8 ↔ kl8
