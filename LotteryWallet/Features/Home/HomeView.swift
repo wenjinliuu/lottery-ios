@@ -104,6 +104,10 @@ struct HomeView: View {
             .refreshable { await drawStore.refresh() }
             .task(id: RecordsToken(records)) { recompute() }
             .task(id: drawStore.scheduleToken) { refreshSchedule() }
+            .task(id: ChinaClock.year()) {
+                // 最新开奖先显示；日历按年缓存，拿到后再显示准确的今日标记。
+                await drawStore.loadCalendar(year: ChinaClock.year())
+            }
             .onChange(of: range) { _, _ in recomputeSeries() }
             .environment(\.screenWidth, screenWidth)
         }

@@ -1,5 +1,7 @@
 # AI 协作规则
 
+- 业务与发布维护入口：`Engineering/maintenance.md`（实际开奖日历、复式命中渲染、密钥注入与上线顺序）。
+
 - 本项目用 [ios-ci-workflows](https://github.com/wenjinliuu/ios-ci-workflows) 编译和测试；本地不跑 Xcode。改完代码 push，读 Build & Test 的测试报告再修。
 - 新功能必须带测试；删测试、改断言的预期值必须在提交里写明理由。
 - 有意改了界面：手动运行 Build & Test 并勾选 record_snapshots，再跑一次确认变绿，并说明改了哪些页面。

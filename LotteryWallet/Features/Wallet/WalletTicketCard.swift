@@ -253,7 +253,7 @@ struct WalletTicketCard: View {
                 numbers: [zone.key: values],
                 matched: [zone.key: values.map { zone.hits.contains($0) }],
                 size: 27,
-                dimUnmatched: !zone.hits.isEmpty
+                dimUnmatched: zone.hasResult
             )
             Spacer(minLength: 0)
         }
