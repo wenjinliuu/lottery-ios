@@ -7,10 +7,13 @@
 
 每次提交前照文末的对照表复核一遍，避免备注和实现漂移。
 
-**措辞原则（1.2.0 (70) 因 5.2.1 被拒后定下）：** 如实说，但不反复强调。定位是「个人票据
-记账本」；「lottery」只在「与任何彩票机构无关」那一句出现；不引用 5.3 等赌博类条款编号，
-不写玩法的英文名（如 Super Lotto），不主动解释随机填充这类会把注意力引到选号上的功能。
-完全回避也不行 —— 审核员打开 App 就看得到玩法名和票面，刻意隐瞒会落到 2.3.1。
+**措辞原则：直说这是彩票记录 App。**
+- 1.2.0 (70) 因 5.2.1（开发者不是彩票发行方）被拒。
+- 1.2.0 (71) 改成「个人票据记账本」、刻意少提彩票后，又因 2.3.1(a) 被拒：
+  「App 含有商店描述里没写的彩票功能」，即被当成隐藏功能。
+- 所以：商店描述和这份备注都要**开门见山写明「记录和核对用户自己的纸质彩票」**，列出支持的
+  玩法；同时写明不卖票、不碰钱、与任何彩票机构无关。不点名发行机构、不引用赌博类条款编号，
+  这两条仍然保留。商店描述的现行版本在 `AppStore/description.md`。
 
 ---
 
@@ -19,7 +22,7 @@
 DEMO ACCOUNT: Not required. No accounts or login; every feature works on first launch.
 
 WHAT THIS APP IS
-"对个号" is a personal record-keeping notebook. The user copies in, or photographs, the numbers on paper slips they already own; the app compares them with publicly published results and keeps a simple income and expense summary. Think of a receipt tracker: everything stays on the device, there is no account, and the app never connects the user to any seller.
+"对个号" is a record-keeping and result-checking app for paper LOTTERY TICKETS the user has already bought in person at retail outlets. This is stated in the App Store description. The user enters, or photographs, the numbers printed on their own ticket; when results are published, the app checks the ticket, highlights matched numbers and the prize tier, and keeps a summary of the user's own spending and winnings. Supported games: 双色球, 大乐透, 快乐8, 3D, 排列3, 排列5, 七乐彩, 七星彩.
 
 The developer is an independent individual. The app is not affiliated with, endorsed by, or acting for any lottery operator or government entity, and uses no operator's name, logo or materials.
 
@@ -28,12 +31,12 @@ WHAT IT DOES NOT DO
 - No money of any kind: no payments, balances, prize claims or In-App Purchase (no StoreKit code).
 - No predictions, odds, trends or number recommendations.
 - No web view, no third-party SDK. The only outbound links (Settings > About) are the Privacy Policy, Support, and the ICP filing number, which opens beian.miit.gov.cn.
-- Amounts shown are only those printed on the user's own slips, or results already published.
+- Amounts shown are only those printed on the user's own tickets, or results already published.
 
 HOW TO TEST
-A. Scan (sample image attached, marked "审核测试用票", a review sample): save it to Photos. Tap the camera button at the right of the tab bar > "从相册选择" (Choose from Photos) and pick it. On the crop screen tap "重置" (Reset), then "识别这张" (Recognise). The review screen shows issue 26082, 3 lines, x2, total 18 yuan, matching the printed total. Tap "加入票夹" (Add to wallet); the result appears in the Wallet right away.
+A. Scan (sample lottery ticket image attached, marked "审核测试用票", a review sample): save it to Photos. Tap the camera button at the right of the tab bar > "从相册选择" (Choose from Photos) and pick it. On the crop screen tap "重置" (Reset), then "识别这张" (Recognise). The review screen shows issue 26082, 3 lines, x2, total 18 yuan, matching the printed total. Tap "加入票夹" (Add to wallet); the result appears in the Wallet right away.
 B. Manual entry: camera button > "手动录入号码" (Manual entry). Pick a type, tap the numbers, choose an issue marked "已开奖" (published), then "加入票夹".
-The first save shows a "使用提示" (usage notice): the app only records slips the user already owns, does not sell anything or handle money, and asks users to spend responsibly.
+The first save shows a "使用提示" (usage notice): the app only records tickets the user already owns, does not sell anything or handle money, and asks users to spend responsibly.
 
 PERMISSIONS, NETWORK AND PRIVACY
 - Camera and Photos are requested only from the scan button. Recognition runs on-device (Apple Vision); photos are never uploaded or stored.
@@ -41,7 +44,7 @@ PERMISSIONS, NETWORK AND PRIVACY
 - Records stay on the device (SwiftData, CloudKit off). Backups are JSON files in the app sandbox; optionally ("自动备份到 iCloud", off by default) copied to the user's own iCloud Drive (iCloud Documents only, no CloudKit).
 
 DISCLAIMERS
-Short notes on Home, on every record card, on the scan screens and above the save button say recognition can be wrong, the paper slip is authoritative, and results are for personal reference only. Settings > About repeats this and states that the app is an independent personal tool.
+Short notes on Home, on every record card, on the scan screens and above the save button say recognition can be wrong, the paper ticket is authoritative, and results are for personal reference only. Settings > About repeats this and states that the app is an independent personal tool.
 
 Support: https://wenjinliuu.github.io/lottery-ios/support.html
 Privacy Policy: https://wenjinliuu.github.io/lottery-ios/
