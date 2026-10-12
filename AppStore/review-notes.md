@@ -12,7 +12,7 @@
 - (71) 改成「个人票据记账本」、刻意少提彩票后，先因 2.3.1(a)「描述里没写彩票功能」被拒，
   随后被定为 5.6「审核期间故意隐藏功能」。
 - 教训：商店描述和这份备注都要开门见山写明「记录用户自己的纸质彩票」；列出**完整功能清单**；
-  写明没有远程开关、审核模式；本次构建改了什么也要写。不点名发行机构、不引用赌博类条款编号。
+  写明没有远程开关、审核模式；本次构建改了什么也要写。不点名发行机构。5.3.4、5.2.1 只用一小段正面回应（不是「和彩票无关」，而是「只是记录、不提供彩票服务、与机构无关」）。
 - 备注不是更新日志：不写「本次删了什么、改了什么」，只说明 App 现在是什么、怎么审。
 - 审核员手上没有实体票：测试步骤必须写清楚示例图片怎么用、手动录入怎么点，并附录屏。
 - 商店描述的现行版本在 `AppStore/description.md`。
@@ -35,6 +35,10 @@ Complete feature list (the same as the App Description; nothing else exists):
 5. Settings: auto-check, appearance, data status, refresh results, backup and restore (optionally to the user's own iCloud Drive), a scan debug overlay toggle, and the About page.
 
 There is no remote configuration, feature flag, review-only mode or time-based unlock. The server only provides public draw results as read-only data.
+
+REGARDING GUIDELINES 5.3.4 AND 5.2.1
+The app is related to lotteries only as a personal record of tickets the user already owns, in the same way an expense tracker records receipts. It does not offer, sell or facilitate real-money gaming or lotteries (5.3.4): there is no betting, no ticket purchase, no prize claim, and no money of any kind moves through the app.
+It does not represent, imitate or act for any lottery operator or government entity (5.2.1). The developer has no relationship with any lottery operator or seller. The app uses no operator names, logos, emblems, branding or materials; game names appear only as plain text so a record matches what is printed on the user's own ticket. The About page states this independence.
 
 WHAT THE APP DOES NOT DO
 It does not sell tickets, accept bets, process payments, offer number predictions or recommendations, or link to any purchasing channel. There is no In-App Purchase, no web view and no third-party SDK. No account or login is required, and all data stays on the device.
