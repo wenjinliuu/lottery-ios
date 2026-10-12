@@ -13,6 +13,7 @@
   随后被定为 5.6「审核期间故意隐藏功能」。
 - 教训：商店描述和这份备注都要开门见山写明「记录用户自己的纸质彩票」；列出**完整功能清单**；
   写明没有远程开关、审核模式；本次构建改了什么也要写。不点名发行机构、不引用赌博类条款编号。
+- 备注不是更新日志：不写「本次删了什么、改了什么」，只说明 App 现在是什么、怎么审。
 - 审核员手上没有实体票：测试步骤必须写清楚示例图片怎么用、手动录入怎么点，并附录屏。
 - 商店描述的现行版本在 `AppStore/description.md`。
 
@@ -21,9 +22,7 @@
 ## 可直接粘贴的正文
 
 REGARDING THE PREVIOUS GUIDELINE 5.6 DECISION
-We have rewritten the App Description so that it states the app's purpose plainly and lists every feature. Nothing in the app is hidden, enabled remotely, or different during review. Changes in this build:
-- Removed "随机填充" (fill randomly) from manual entry. The app no longer generates numbers; it only records numbers printed on the user's ticket.
-- The sample-data mode used by our automated screenshot tests now exists only in test builds and is not in this release binary.
+We have rewritten the App Description so that it states the app's purpose plainly and lists every feature. Nothing in the app is hidden, enabled remotely, or different during review.
 
 WHAT THE APP IS
 A local record-keeping tool for paper lottery tickets that users have already bought offline. The user photographs a ticket (or types the numbers in by hand); the app recognizes and stores the numbers on the device, checks them against publicly published draw results, and summarizes the user's own spending and winnings. Supported games: 双色球, 大乐透, 快乐8, 3D, 排列3, 排列5, 七乐彩, 七星彩. The developer is an independent individual, not affiliated with any lottery operator.
