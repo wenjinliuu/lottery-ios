@@ -512,8 +512,6 @@ struct EntryFlowView: View {
             }
 
             HStack(spacing: 10) {
-                Button("随机填充", systemImage: "wand.and.stars") { fillRandomSelection() }
-                    .buttonStyle(SecondaryGlassButton(tint: game.tint))
                 if mode == .manual {
                     Button("加入", systemImage: "plus.circle") { addCandidate() }
                         .buttonStyle(SecondaryGlassButton(tint: game.tint))
@@ -749,33 +747,6 @@ struct EntryFlowView: View {
     private func removeCandidate(_ index: Int) {
         guard candidates.indices.contains(index) else { return }
         candidates.remove(at: index)
-    }
-
-    private func fillRandomSelection() {
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
-            var next: [SectionKey: SectionSelection] = [:]
-            for section in game.sections {
-                let need = requiredCount(for: section)
-                if section.isPositional {
-                    next[section.key] = SectionSelection(
-                        selected: TicketBuilder.randomDigits(game: game, count: need,
-                                                             range: section.range, playMode: playMode)
-                    )
-                    continue
-                }
-                // 复式默认多选两个，胆拖默认一胆，给用户一个起点
-                let extra = mode == .system ? 2 : 0
-                let count = min(need + extra, section.range.count)
-                var selection = SectionSelection(selected: TicketBuilder.pickUnique(count: count, from: section.range).sorted())
-                if mode == .dantuo, need > 1 {
-                    selection.selected = TicketBuilder.pickUnique(count: min(need + 2, section.range.count), from: section.range).sorted()
-                    selection.dan = Array(selection.selected.prefix(1))
-                }
-                next[section.key] = selection
-            }
-            selections = next
-            hasPendingEdit = true
-        }
     }
 
     private func save() {

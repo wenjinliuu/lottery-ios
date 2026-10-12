@@ -69,7 +69,7 @@ final class TicketBuilderTests: XCTestCase {
         XCTAssertEqual(tickets?.first?[.nums3], [3, 1, 2])
     }
 
-    /// 「随机」录入模式已经删掉，只保留手选里的随机填充。
+    /// 「随机」录入模式和随机填充都已删掉，只能照着票面录号。
     func testEntryModesDropRandom() {
         XCTAssertEqual(EntryMode.modes(for: .ssq), [.manual, .system, .dantuo])
         XCTAssertEqual(EntryMode.modes(for: .k8), [.manual])
@@ -125,28 +125,6 @@ final class TicketBuilderTests: XCTestCase {
         for kind in [EntryKind.random, .manual, .system, .dantuo, .scan] {
             XCTAssertEqual(TicketShape.from(entryLabel: kind.label), kind.shape)
         }
-    }
-
-    /// 组三必须出两个相同的号，组六必须三个都不同。
-    /// 早期一律 `Int.random` 三次，选着组三却随出 1-5-9。
-    func testRandomDigitsFollowPlayMode() {
-        for _ in 0..<200 {
-            let group3 = TicketBuilder.randomDigits(game: .fc3d, count: 3, range: 0...9, playMode: "group3")
-            XCTAssertEqual(group3.count, 3)
-            XCTAssertEqual(Set(group3).count, 2, "组三应当正好两个号相同：\(group3)")
-
-            let group6 = TicketBuilder.randomDigits(game: .pl3, count: 3, range: 0...9, playMode: "group6")
-            XCTAssertEqual(Set(group6).count, 3, "组六三个号必须互不相同：\(group6)")
-
-            let single = TicketBuilder.randomDigits(game: .fc3d, count: 3, range: 0...9, playMode: "single")
-            XCTAssertEqual(single.count, 3)
-            XCTAssertTrue(single.allSatisfy { (0...9).contains($0) })
-        }
-
-        // 非 3 位的数字区（排列5、七星彩前六位）按位取值，允许重复
-        let pl5 = TicketBuilder.randomDigits(game: .pl5, count: 5, range: 0...9, playMode: "")
-        XCTAssertEqual(pl5.count, 5)
-        XCTAssertTrue(pl5.allSatisfy { (0...9).contains($0) })
     }
 
     /// 快乐8 选几个号由玩法决定，不是开奖的 20 个。

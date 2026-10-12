@@ -12,7 +12,12 @@ enum AppClock {
         return Calendar(identifier: .gregorian).date(from: components)!
     }()
 
+    /// Release 构建里永远是真实时间，见 `DemoData.isEnabled`。
     static var now: Date {
+        #if DEBUG
         ProcessInfo.processInfo.arguments.contains("--demo-data") ? demoToday : Date()
+        #else
+        Date()
+        #endif
     }
 }

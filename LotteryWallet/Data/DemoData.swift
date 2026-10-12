@@ -13,10 +13,15 @@ import CoreImage
 @MainActor
 enum DemoData {
 
-    static let launchArgument = "--demo-data"
-
+    /// **只在 Debug 构建里存在。** 截图和 UI 测试跑的是 Debug；送 TestFlight / App Store 的
+    /// Release 构建里这个开关恒为 false，连启动参数字符串都不编进去 ——
+    /// 正式包里不能有任何看起来像「审核专用模式」的东西（1.2.0 曾因 5.6 被拒）。
     static var isEnabled: Bool {
-        ProcessInfo.processInfo.arguments.contains(launchArgument)
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--demo-data")
+        #else
+        false
+        #endif
     }
 
     /// 最近几张票保持「还没看过结果」，票夹角标和「新结果」分区才有东西可看。
@@ -48,12 +53,14 @@ enum DemoData {
 
     /// UI 测试把一张票据照片的路径放在这个环境变量里，扫描页打开后直接拿它进裁切。
     /// 只在示例模式下生效，正常启动时这条路径不存在。
-    static let scanImageEnvironment = "DEMO_SCAN_IMAGE"
-
     static var scanImage: UIImage? {
+        #if DEBUG
         guard isEnabled,
-              let path = ProcessInfo.processInfo.environment[scanImageEnvironment] else { return nil }
+              let path = ProcessInfo.processInfo.environment["DEMO_SCAN_IMAGE"] else { return nil }
         return UIImage(contentsOfFile: path)
+        #else
+        return nil
+        #endif
     }
 
     /// 截图里要露出票面照片的地方，示例模式下一律整张打马赛克：

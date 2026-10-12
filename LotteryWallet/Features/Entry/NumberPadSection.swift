@@ -204,7 +204,7 @@ struct NumberPadSection: View {
                     ForEach(Array(section.range), id: \.self) { value in
                         // 滚轮停在中间的那个号就是选中的号，但系统的滚轮不会
                         // 把它和上下两个区分开，一眼看过去三个数字长得一样。
-                        // 给中间那个上彩种色 + 加粗，和"随机填充"按钮同一套语言。
+                        // 给中间那个上彩种色 + 加粗。
                         Text(String(value))
                             .font(value == current
                                   ? .title3.weight(.heavy).monospacedDigit()

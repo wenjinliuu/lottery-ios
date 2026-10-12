@@ -7,13 +7,13 @@
 
 每次提交前照文末的对照表复核一遍，避免备注和实现漂移。
 
-**措辞原则：直说这是彩票记录 App。**
+**措辞原则：直说这是彩票记录 App，主动交代全部功能。**
 - 1.2.0 (70) 因 5.2.1（开发者不是彩票发行方）被拒。
-- 1.2.0 (71) 改成「个人票据记账本」、刻意少提彩票后，又因 2.3.1(a) 被拒：
-  「App 含有商店描述里没写的彩票功能」，即被当成隐藏功能。
-- 所以：商店描述和这份备注都要**开门见山写明「记录和核对用户自己的纸质彩票」**，列出支持的
-  玩法；同时写明不卖票、不碰钱、与任何彩票机构无关。不点名发行机构、不引用赌博类条款编号，
-  这两条仍然保留。商店描述的现行版本在 `AppStore/description.md`。
+- (71) 改成「个人票据记账本」、刻意少提彩票后，先因 2.3.1(a)「描述里没写彩票功能」被拒，
+  随后被定为 5.6「审核期间故意隐藏功能」。
+- 教训：商店描述和这份备注都要开门见山写明「记录用户自己的纸质彩票」；列出**完整功能清单**；
+  写明没有远程开关、审核模式；本次构建改了什么也要写。不点名发行机构、不引用赌博类条款编号。
+- 商店描述的现行版本在 `AppStore/description.md`。
 
 ---
 
@@ -22,29 +22,37 @@
 DEMO ACCOUNT: Not required. No accounts or login; every feature works on first launch.
 
 WHAT THIS APP IS
-"对个号" is a record-keeping and result-checking app for paper LOTTERY TICKETS the user has already bought in person at retail outlets. This is stated in the App Store description. The user enters, or photographs, the numbers printed on their own ticket; when results are published, the app checks the ticket, highlights matched numbers and the prize tier, and keeps a summary of the user's own spending and winnings. Supported games: 双色球, 大乐透, 快乐8, 3D, 排列3, 排列5, 七乐彩, 七星彩.
+"对个号" is a record-keeping app for paper LOTTERY TICKETS that the user has already bought in person at retail outlets. The user enters, or photographs, the numbers printed on their own ticket. When results are published, the app checks the ticket, highlights matched numbers and the prize tier, and summarises the user's own spending and winnings. Supported games: 双色球, 大乐透, 快乐8, 3D, 排列3, 排列5, 七乐彩, 七星彩. The App Store description says exactly this.
 
-The developer is an independent individual. The app is not affiliated with, endorsed by, or acting for any lottery operator or government entity, and uses no operator's name, logo or materials.
+The developer is an independent individual, not affiliated with any lottery operator or government entity.
+
+COMPLETE FEATURE LIST (nothing else exists in the app)
+1. Home: the user's income and expense summary, and the latest published results of the eight games ("更多" opens past results).
+2. Wallet: the user's recorded tickets, each showing whether it won; a ticket can be edited or deleted.
+3. Add a ticket: manual entry, or photograph the ticket and recognise its numbers on-device.
+4. Statistics: spending and winnings by month and by game.
+5. Settings: auto-check, appearance, data status, record count, refresh results, backup and restore (optionally to the user's own iCloud Drive), a scan debug overlay toggle (draws recognition guides on the review screen), version, and the about page.
+
+NO HIDDEN OR REMOTE FUNCTIONALITY
+Everything above is visible from the first launch and identical for every user, region and date. There is no remote configuration, feature flag, server-side switch, review-only mode or time-based unlock. The server only serves public results as read-only data and cannot change what the app shows or does.
+
+CHANGES IN THIS BUILD
+- Removed "随机填充" (fill randomly) from manual entry. The app no longer generates any numbers; it only records numbers printed on the user's ticket.
+- The sample-data mode used by our automated screenshot tests is now compiled into test builds only and is absent from this release binary.
 
 WHAT IT DOES NOT DO
-- No selling, ordering or buying on anyone's behalf; no purchase links or entry points.
-- No money of any kind: no payments, balances, prize claims or In-App Purchase (no StoreKit code).
+- No selling, ordering or buying tickets; no purchase links.
+- No money: no payments, balances, prize claims or In-App Purchase.
 - No predictions, odds, trends or number recommendations.
-- No web view, no third-party SDK. The only outbound links (Settings > About) are the Privacy Policy, Support, and the ICP filing number, which opens beian.miit.gov.cn.
-- Amounts shown are only those printed on the user's own tickets, or results already published.
+- No web view and no third-party SDK. Outbound links (Settings > About): Privacy Policy, Support, and the ICP filing number (beian.miit.gov.cn).
 
 HOW TO TEST
-A. Scan (sample lottery ticket image attached, marked "审核测试用票", a review sample): save it to Photos. Tap the camera button at the right of the tab bar > "从相册选择" (Choose from Photos) and pick it. On the crop screen tap "重置" (Reset), then "识别这张" (Recognise). The review screen shows issue 26082, 3 lines, x2, total 18 yuan, matching the printed total. Tap "加入票夹" (Add to wallet); the result appears in the Wallet right away.
-B. Manual entry: camera button > "手动录入号码" (Manual entry). Pick a type, tap the numbers, choose an issue marked "已开奖" (published), then "加入票夹".
-The first save shows a "使用提示" (usage notice): the app only records tickets the user already owns, does not sell anything or handle money, and asks users to spend responsibly.
+A. Scan: save the attached sample ticket image (marked "审核测试用票") to Photos. Tap the camera button at the right of the tab bar > "从相册选择" (Choose from Photos). On the crop screen tap "重置" (Reset), then "识别这张" (Recognise). The review screen shows issue 26082, 3 lines, x2, total 18 yuan. Tap "加入票夹" (Add to wallet); the result appears in the Wallet.
+B. Manual entry: camera button > "手动录入号码" (Manual entry). Pick a game, tap the numbers printed on a ticket, choose an issue marked "已开奖" (published), then "加入票夹".
+The first save shows a "使用提示" (usage notice) that must be acknowledged.
 
-PERMISSIONS, NETWORK AND PRIVACY
-- Camera and Photos are requested only from the scan button. Recognition runs on-device (Apple Vision); photos are never uploaded or stored.
-- Public results and the yearly calendar are downloaded via unauthenticated HTTPS GET from our read-only endpoint on Tencent CloudBase (ap-shanghai.app.tcloudbase.com), with a static mirror on raw.githubusercontent.com as fallback. Requests carry no user data or identifiers. No analytics, ads or accounts, hence "Data Not Collected".
-- Records stay on the device (SwiftData, CloudKit off). Backups are JSON files in the app sandbox; optionally ("自动备份到 iCloud", off by default) copied to the user's own iCloud Drive (iCloud Documents only, no CloudKit).
-
-DISCLAIMERS
-Short notes on Home, on every record card, on the scan screens and above the save button say recognition can be wrong, the paper ticket is authoritative, and results are for personal reference only. Settings > About repeats this and states that the app is an independent personal tool.
+PRIVACY
+Camera and Photos are requested only from the scan button; recognition is on-device and photos are never uploaded or stored. Results are fetched via unauthenticated HTTPS GET from our read-only endpoint on Tencent CloudBase (ap-shanghai.app.tcloudbase.com), with a static mirror on raw.githubusercontent.com as fallback; requests carry no user data. Records stay on the device (CloudKit off). No analytics, ads or accounts.
 
 Support: https://wenjinliuu.github.io/lottery-ios/support.html
 Privacy Policy: https://wenjinliuu.github.io/lottery-ios/
@@ -78,3 +86,5 @@ Thank you for your review.
 | 首次保存弹「使用提示」 | 见上面「首次保存「使用提示」两条保存路径都拦」 |
 | 附件 | 提交时附上 `Tests/LotteryWalletUITests/Fixtures/review-ticket.jpg` |
 | 备案号 | 关于页最底部 `AboutView.icpFiling`（沪ICP备2026015335号-2A），点了打开 beian.miit.gov.cn；所有地区都显示 |
+| 已删除随机填充，App 不生成号码 | `grep -rn 'fillRandom\|randomDigits\|pickUnique' LotteryWallet/` 为空 |
+| 示例模式不进正式包 | `DemoData.isEnabled`、`DemoData.scanImage`、`AppClock.now` 的启动参数分支都在 `#if DEBUG` 里；归档用 Release |
