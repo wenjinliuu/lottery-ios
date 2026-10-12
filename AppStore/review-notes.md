@@ -14,7 +14,7 @@
 - 教训：商店描述和这份备注都要开门见山写明「记录用户自己的纸质彩票」；列出**完整功能清单**；
   写明没有远程开关、审核模式；本次构建改了什么也要写。不点名发行机构。5.3.4、5.2.1 只用一小段正面回应（不是「和彩票无关」，而是「只是记录、不提供彩票服务、与机构无关」）。
 - 备注不是更新日志：不写「本次删了什么、改了什么」，只说明 App 现在是什么、怎么审。
-- 审核员手上没有实体票：测试步骤必须写清楚示例图片怎么用、手动录入怎么点，并附录屏。
+- 审核员手上没有实体票：写明有示例图片和录屏、入口在哪就够了，详细步骤交给录屏，不逐步写、不列玩法。
 - 商店描述的现行版本在 `AppStore/description.md`。
 
 ---
@@ -25,7 +25,7 @@ REGARDING THE PREVIOUS GUIDELINE 5.6 DECISION
 We have rewritten the App Description so that it states the app's purpose plainly and lists every feature. Nothing in the app is hidden, enabled remotely, or different during review.
 
 WHAT THE APP IS
-A local record-keeping tool for paper lottery tickets that users have already bought offline. The user photographs a ticket (or types the numbers in by hand); the app recognizes and stores the numbers on the device, checks them against publicly published draw results, and summarizes the user's own spending and winnings. Supported games: 双色球, 大乐透, 快乐8, 3D, 排列3, 排列5, 七乐彩, 七星彩. The developer is an independent individual, not affiliated with any lottery operator.
+A local record-keeping tool for paper lottery tickets that users have already bought offline. The user photographs a ticket (or types the numbers in by hand); the app recognizes and stores the numbers on the device, checks them against publicly published draw results, and summarizes the user's own spending and winnings. The developer is an independent individual, not affiliated with any lottery operator.
 
 Complete feature list (the same as the App Description; nothing else exists):
 1. Home: the user's income and expense summary, and the latest published results ("更多" shows past results).
@@ -44,10 +44,7 @@ WHAT THE APP DOES NOT DO
 It does not sell tickets, accept bets, process payments, offer number predictions or recommendations, or link to any purchasing channel. There is no In-App Purchase, no web view and no third-party SDK. No account or login is required, and all data stays on the device.
 
 HOW TO REVIEW (no physical ticket needed)
-A screen recording of the complete flow is attached.
-A. Scan the attached sample ticket: save the attached image (a sample marked "审核测试用票") to Photos. In the app, tap the camera button at the right end of the tab bar, then "从相册选择" (Choose from Photos), and pick the image. On the crop screen tap "重置" (Reset), then "识别这张" (Recognize). The review screen shows Super Lotto issue 26082, 3 lines, add-on, x2, total 18 yuan. Tap "加入票夹" (Add to wallet). That draw has already been published, so the Wallet tab shows the result immediately.
-B. Manual entry: camera button > "手动录入号码" (Manual entry). Pick a game, tap the numbers, choose an issue marked "已开奖" (published), then tap "加入票夹".
-The first save shows a "使用提示" (usage notice) that must be acknowledged.
+The attached screen recording shows the complete flow. To try it yourself, save the attached sample ticket image to Photos, tap the camera button at the right end of the tab bar, and choose "从相册选择" (Choose from Photos); or choose "手动录入号码" (Manual entry) to type numbers in.
 
 PRIVACY
 Camera and Photos are used only after the user taps the scan button. Recognition is on-device; photos are never uploaded or stored. Draw results are downloaded via unauthenticated HTTPS GET from our read-only endpoint on Tencent CloudBase (ap-shanghai.app.tcloudbase.com), falling back to a static mirror on raw.githubusercontent.com. Requests contain no user data. No analytics, ads or accounts.
