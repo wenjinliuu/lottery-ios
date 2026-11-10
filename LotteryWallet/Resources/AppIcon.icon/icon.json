@@ -33,18 +33,19 @@
           "glass" : true,
           "hidden" : false,
           "image-name" : "FrontTicket.svg",
-          "name" : "FrontTicket"
+          "name" : "FrontTicket",
+          "opacity" : 0.85
         }
       ],
       "lighting" : "individual",
       "shadow" : {
-        "kind" : "layer-color",
+        "kind" : "neutral",
         "opacity" : 0.18
       },
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.12
+        "value" : 0.4
       }
     },
     {
@@ -68,18 +69,19 @@
           "glass" : true,
           "hidden" : false,
           "image-name" : "MiddleTicket.svg",
-          "name" : "MiddleTicket"
+          "name" : "MiddleTicket",
+          "opacity" : 0.85
         }
       ],
       "lighting" : "individual",
       "shadow" : {
-        "kind" : "layer-color",
+        "kind" : "neutral",
         "opacity" : 0.16
       },
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.1
+        "value" : 0.4
       }
     },
     {
@@ -103,18 +105,19 @@
           "glass" : true,
           "hidden" : false,
           "image-name" : "BackTicket.svg",
-          "name" : "BackTicket"
+          "name" : "BackTicket",
+          "opacity" : 0.85
         }
       ],
       "lighting" : "individual",
       "shadow" : {
-        "kind" : "layer-color",
+        "kind" : "neutral",
         "opacity" : 0.14
       },
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.09
+        "value" : 0.4
       }
     }
   ],
