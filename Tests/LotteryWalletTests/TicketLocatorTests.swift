@@ -186,13 +186,16 @@ final class TicketLocatorTests: XCTestCase {
         XCTAssertTrue(TicketLocator.isSportsSerial("11O31O-333361-I2II60-320322"))
         // 只读出前三组
         XCTAssertTrue(TicketLocator.isSportsSerial("110310-333361-121160"))
-        // 一根横线读丢了、另一根读成了波浪线
-        XCTAssertTrue(TicketLocator.isSportsSerial("110310333361~121160-320322"))
+        // 横线读成了波浪线
+        XCTAssertTrue(TicketLocator.isSportsSerial("110310~333361-121160-320322"))
     }
 
     func testOtherDigitRowsAreNotSerials() {
         XCTAssertFalse(TicketLocator.isSportsSerial("20-020689-101"), "票底的站号行")
         XCTAssertFalse(TicketLocator.isSportsSerial("0005526/10/2611:02:08"))
+        // 站号、流水、时间连成一串：横线可以省的话这里凑得出三组
+        XCTAssertFalse(TicketLocator.isSportsSerial("20-020689-1010005426/10/2611:02:03"))
+        XCTAssertFalse(TicketLocator.isSportsSerial("20-020689-101005481654826/10/2416:50:29"))
         XCTAssertFalse(TicketLocator.isSportsSerial("第26285期2026年10月26日开奖"))
         XCTAssertFalse(TicketLocator.isSportsSerial("①62572"))
     }
