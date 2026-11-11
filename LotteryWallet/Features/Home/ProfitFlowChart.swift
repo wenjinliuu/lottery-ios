@@ -189,6 +189,9 @@ struct ProfitFlowChart: View {
                 AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
             }
         }
+        // 纵轴顶到最高那条线就够了。交给系统自动取整的话会往上凑一个整数，
+        // 图的上面三分之一是空的。
+        .chartYScale(domain: 0...(max(series.costTotal, series.prizeTotal, 1) * 1.04))
         // 系统自带的选中手势：按住再拖，和页面的上下滚动不打架。
         .chartXSelection(value: $selectedDay)
         .accessibilityLabel("累计收支图")
