@@ -28,6 +28,8 @@ struct HomeView: View {
     @State private var flowMode: FlowMode = .cumulative
     @State private var series = ProfitSeries()
     @State private var monthStats = ProfitStats.PeriodStats()
+    /// 下面那张概览卡看本月还是今年。
+    @State private var isYearlyOverview = false
     @State private var carouselIndex = 0
     /// TabView 的真实页码。首尾各多挂一张哨兵页（末卡的副本放在最前、
     /// 首卡的副本放在最后），滑到哨兵页上再无动画地跳回对应的真页，
@@ -112,6 +114,7 @@ struct HomeView: View {
                 await drawStore.loadCalendar(year: ChinaClock.year())
             }
             .onChange(of: range) { _, _ in recomputeSeries() }
+            .onChange(of: isYearlyOverview) { _, _ in recompute() }
             .environment(\.screenWidth, screenWidth)
         }
     }
@@ -126,7 +129,8 @@ struct HomeView: View {
         let now = AppClock.now
         let year = Calendar.chinaCalendar.component(.year, from: now)
         let month = Calendar.chinaCalendar.component(.month, from: now)
-        monthStats = ProfitStats.period(entries: ProfitStats.snapshotAll(records), year: year, month: month)
+        monthStats = ProfitStats.period(entries: ProfitStats.snapshotAll(records), year: year,
+                                        month: isYearlyOverview ? nil : month)
     }
 
     private func recomputeSeries() {
@@ -416,8 +420,17 @@ struct HomeView: View {
 
     private var monthlyCard: some View {
         let month = Calendar.chinaCalendar.component(.month, from: AppClock.now)
+        let year = Calendar.chinaCalendar.component(.year, from: AppClock.now)
         return VStack(alignment: .leading, spacing: 14) {
-            SectionHeader(title: "\(month) 月概览", subtitle: "本机记录 · \(monthStats.ticketCount) 注")
+            SectionHeader(title: isYearlyOverview ? "\(year) 年概览" : "\(month) 月概览",
+                          subtitle: "本机记录 · \(monthStats.ticketCount) 注")
+            // 统计页最常看的两个范围直接放在首页；逐日、逐月的明细还在右上角的统计页里。
+            Picker("概览范围", selection: $isYearlyOverview) {
+                Text("本月").tag(false)
+                Text("今年").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("home.overview.scope")
 
             // 收支是这张卡的主角，单独占一行给足字号；
             // 票面金额和奖金退到下面一行当支撑数据。
@@ -453,7 +466,7 @@ struct HomeView: View {
             }
 
             if monthStats.byGame.isEmpty {
-                Text("这个月还没有记录")
+                Text(isYearlyOverview ? "今年还没有记录" : "这个月还没有记录")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)

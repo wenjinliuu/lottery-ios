@@ -166,11 +166,38 @@ struct ProfitFlowChart: View {
         return series.flow.last { $0.day <= selectedDay } ?? series.flow.first
     }
 
+    /// 图上标出来的中奖点：跳得最高的十二次；其中最高的三次旁边写金额。
+    private var winMarks: [FlowWin] { FlowMarks.largest(FlowMarks.wins(series.flow), limit: 12) }
+    private var winLabels: Set<Date> { Set(FlowMarks.largest(FlowMarks.wins(series.flow), limit: 3).map(\.day)) }
+
     private var cumulativeChart: some View {
         Chart {
             line("投入", Self.spend, fill: 0.26, value: \.cost)
+            // 投入和奖金两条线之间的那一块就是净支出，再淡淡地涂一层
+            ForEach(series.flow) { point in
+                AreaMark(x: .value("日期", point.day),
+                         yStart: .value("奖金", point.prize),
+                         yEnd: .value("投入", point.cost),
+                         series: .value("类别", "净支出"))
+                    .interpolationMethod(.monotone)
+                    .foregroundStyle(Self.spend.opacity(0.10))
+            }
             line("公益金", Palette.warning, fill: 0.34, value: \.welfare)
             line("奖金", Palette.profit, fill: 0.38, value: \.prize)
+            // 奖金线每次往上跳的地方打一个点
+            ForEach(winMarks) { win in
+                PointMark(x: .value("日期", win.day), y: .value("奖金", win.prize))
+                    .symbolSize(winLabels.contains(win.day) ? 46 : 22)
+                    .foregroundStyle(Palette.profit)
+                    .annotation(position: .top, spacing: 2) {
+                        if winLabels.contains(win.day) {
+                            Text("+" + MoneyText.grouped(win.gain))
+                                .font(.caption2.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(Palette.profit)
+                        }
+                    }
+            }
             if let point = selectedPoint {
                 RuleMark(x: .value("日期", point.day))
                     .foregroundStyle(Color.secondary)
@@ -195,10 +222,55 @@ struct ProfitFlowChart: View {
         // 纵轴顶到最高那条线就够了。交给系统自动取整的话会往上凑一个整数，
         // 图的上面三分之一是空的。
         .chartYScale(domain: 0...(max(series.costTotal, series.prizeTotal, 1) * 1.04))
+        // 右边留一条空给数字标签
+        .chartXScale(range: .plotDimension(endPadding: Self.labelWidth + 6))
+        .chartOverlay { proxy in
+            GeometryReader { geometry in
+                if let anchor = proxy.plotFrame, let point = selectedPoint ?? series.flow.last {
+                    endLabels(point, proxy: proxy, frame: geometry[anchor])
+                }
+            }
+            .allowsHitTesting(false)
+        }
         // 系统自带的选中手势：按住再拖，和页面的上下滚动不打架。
         .chartXSelection(value: $selectedDay)
         .accessibilityLabel("累计收支图")
         .accessibilityValue("投入 \(MoneyText.format(series.costTotal))，奖金 \(MoneyText.format(series.prizeTotal))，公益金 \(MoneyText.format(series.welfareTotal))")
+    }
+
+    private static let labelWidth: CGFloat = 56
+
+    /// 三条线右端各标一个数，中间再标净支出。按住拖动时显示的是手指那一天的数。
+    ///
+    /// 标签摆在各自那条线的高度上；挨得太近时上下错开（`FlowMarks.spread`）。
+    private func endLabels(_ point: FlowPoint, proxy: ChartProxy, frame: CGRect) -> some View {
+        let net = point.cost - point.prize
+        let items: [(title: String, value: Double, at: Double, tint: Color)] = [
+            ("投入", point.cost, point.cost, Self.spend),
+            (net < 0 ? "净收入" : "净支出", abs(net), (point.cost + point.prize) / 2, Color.secondary),
+            ("公益金", point.welfare, point.welfare, Palette.warning),
+            ("奖金", point.prize, point.prize, Palette.profit)
+        ]
+        let raw = items.map { proxy.position(forY: $0.at) ?? 0 }
+        let rows = FlowMarks.spread(raw, gap: 25, in: 12...max(frame.height - 12, 13))
+        return ZStack {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(item.title)
+                        .font(.system(size: 9, weight: .medium))
+                    Text(MoneyText.grouped(item.value))
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                }
+                .foregroundStyle(item.tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(width: Self.labelWidth, alignment: .leading)
+                .position(x: frame.maxX - Self.labelWidth / 2, y: frame.minY + rows[index])
+            }
+        }
+        .accessibilityHidden(true)
     }
 
     @ChartContentBuilder

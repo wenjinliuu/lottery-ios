@@ -162,4 +162,35 @@ final class ProfitFlowTests: XCTestCase {
         XCTAssertEqual(DrawCountdown.badge(until: now, now: now), "今日开奖")
         XCTAssertEqual(DrawCountdown.badge(until: now.addingTimeInterval(-600), now: now), "今日开奖")
     }
+
+    // MARK: - 图上的标注
+
+    private func point(_ day: String, cost: Double, prize: Double) -> FlowPoint {
+        FlowPoint(day: DateText.parse(day)!, cost: cost, prize: prize, welfare: cost * 0.36)
+    }
+
+    /// 奖金线每往上跳一次就是一次中奖；没跳的那些天不标。
+    func testWinsAreTheStepsOfThePrizeLine() {
+        let flow = [point("2026-09-01", cost: 10, prize: 0), point("2026-09-03", cost: 20, prize: 5),
+                    point("2026-09-05", cost: 30, prize: 5), point("2026-09-08", cost: 40, prize: 205)]
+        let wins = FlowMarks.wins(flow)
+        XCTAssertEqual(wins.map(\.gain), [5, 200])
+        XCTAssertEqual(wins.map(\.prize), [5, 205])
+        XCTAssertEqual(FlowMarks.largest(wins, limit: 1).map(\.gain), [200])
+        XCTAssertTrue(FlowMarks.wins([point("2026-09-01", cost: 10, prize: 0)]).isEmpty)
+    }
+
+    /// 右端的标签挨得太近时上下错开，顺序不变，也不出图。
+    func testCrowdedLabelsAreSpreadApart() {
+        let spread = FlowMarks.spread([20, 100, 104, 150], gap: 25, in: 12...158)
+        XCTAssertEqual(spread[0], 20)
+        XCTAssertEqual(spread[1], 100)
+        XCTAssertEqual(spread[2], 125, "和上一个隔开 25")
+        XCTAssertEqual(spread[3], 150)
+        // 都挤在底下：整体往上收
+        let bottom = FlowMarks.spread([150, 155, 158], gap: 25, in: 12...158)
+        XCTAssertEqual(bottom, [108, 133, 158])
+        // 输入的顺序不是从上到下也照样对应得上
+        XCTAssertEqual(FlowMarks.spread([104, 100], gap: 25, in: 12...158), [125, 100])
+    }
 }
