@@ -32,7 +32,7 @@ struct BackupService {
     }
 
     /// 转成与 web 版同构的记录字典。
-    private static func dictionary(from record: TicketRecord) -> [String: Any] {
+    static func dictionary(from record: TicketRecord) -> [String: Any] {
         let ticket = record.ticket
         var numbers: [String: Any] = [:]
         for (key, values) in ticket.numbers.values {
