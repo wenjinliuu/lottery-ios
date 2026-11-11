@@ -795,7 +795,8 @@ enum TicketVisionScanner {
     }
 
     static func recognizeFragments(in image: UIImage,
-                                   languages: [String] = ["zh-Hans", "en-US"]) async throws -> [TextFragment] {
+                                   languages: [String] = ["zh-Hans", "en-US"],
+                                   minimumTextHeight: Float = 0.008) async throws -> [TextFragment] {
         guard let cgImage = image.cgImage else { throw ScanError.invalidImage }
         let orientation = cgOrientation(image.imageOrientation)
 
@@ -806,7 +807,7 @@ enum TicketVisionScanner {
             request.recognitionLanguages = languages
             // 彩票号码不是自然语言，语言纠正只会把号码改坏
             request.usesLanguageCorrection = false
-            request.minimumTextHeight = 0.008
+            request.minimumTextHeight = minimumTextHeight
 
             let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation)
             try handler.perform([request])

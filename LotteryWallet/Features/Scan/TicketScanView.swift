@@ -154,8 +154,7 @@ struct TicketScanView: View {
         }
         .fullScreenCover(isPresented: $isCameraPresented) {
             CameraPicker { image in
-                preview = image
-                stage = .crop
+                begin(image)
             }
             .ignoresSafeArea()
         }
@@ -207,8 +206,7 @@ struct TicketScanView: View {
                     errorText = "这张图片读不出来"
                     return
                 }
-                preview = image
-                stage = .crop
+                begin(image)
             }
         }
         .task { await drawStore.loadYearCalendars() }
@@ -238,7 +236,7 @@ struct TicketScanView: View {
             VStack(spacing: 6) {
                 Text("把整张票放进取景框")
                     .font(.headline)
-                Text("识别全部在这台设备上完成，照片不上传也不保存。双色球、大乐透支持单式、复式、胆拖；七乐彩、快乐8、七星彩、排列3、排列5、3D 目前支持单式票。\n拍好之后框一下票面，一次认一张。")
+                Text("识别全部在这台设备上完成，照片不上传也不保存。双色球、大乐透支持单式、复式、胆拖；七乐彩、快乐8、七星彩、排列3、排列5、3D 目前支持单式票。\n一张照片里有几张票都可以，会自动分开；找不到票时再手动框。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -1204,6 +1202,76 @@ struct TicketScanView: View {
 
     // MARK: - 动作
 
+    /// 拿到一张照片：先自动找票，找到几张认几张；一张都找不到再让用户手动框。
+    private func begin(_ image: UIImage) {
+        preview = image
+        croppedPreview = nil
+        Task { await autoScan(image) }
+    }
+
+    /// 自动找票并逐张识别。
+    ///
+    /// 每张票各走一遍和手动框选**完全相同**的识别流程（摆正 → 识别 → 校验），
+    /// 所以识别的准确率和单张时一样；这里只是替用户把「框」这一步做了。
+    private func autoScan(_ image: UIImage) async {
+        stage = .scanning
+        errorText = nil
+        let quads = await TicketLocator.find(in: image)
+        guard !quads.isEmpty else {
+            stage = .crop
+            return
+        }
+        var found: [ScannedTicket] = []
+        var images: [ScannedTicket.ID: UIImage] = [:]
+        var warnings: [String] = []
+        var texts: [String] = []
+        var missed = 0
+        var last: (registration: TicketRegistration.Result, image: UIImage)?
+        for quad in quads {
+            let corrected = await TicketImagePreprocessor.prepare(image, quad: quad)
+            croppedPreview = corrected
+            guard var page = try? await TicketVisionScanner.scan(corrected), !page.result.tickets.isEmpty else {
+                missed += 1
+                continue
+            }
+            polish(&page)
+            found += page.result.tickets
+            images.merge(page.images) { current, _ in current }
+            warnings += page.result.warnings
+            texts.append(page.result.rawText)
+            last = (page.registration, corrected)
+        }
+        guard !found.isEmpty else {
+            // 找到了票的位置却一张都没认出来：交回给用户手动框。
+            croppedPreview = nil
+            stage = .crop
+            return
+        }
+        // 少认了必须说出来 —— 三张票只进来两张，不说的话用户不会发现。
+        if missed > 0 {
+            warnings.insert("照片里找到 \(quads.count) 张票，其中 \(missed) 张没认出来。可以点右上角「重新裁切」单独框那一张。", at: 0)
+        }
+        rawText = texts.joined(separator: "\n\n")
+        tickets = found
+        ticketImages = images
+        globalWarnings = warnings
+        // 多张票时调试图只画最后一张；要看某一张的格子，用「重新裁切」单独认它。
+        if let last { applyDebug(last.registration, on: last.image) }
+        if quads.count > 1 { croppedPreview = nil }
+        stage = .review
+    }
+
+    /// 单价对不上时把追加标志纠正过来，再把提示重算一遍。
+    /// 纠正本身必须说出来 —— 单注价格从 2 元变成 3 元是记账口径的变化，
+    /// 悄悄改掉的话用户看到金额对不上也不知道是哪一步动的。
+    private func polish(_ page: inout TicketVisionScanner.ScannedPage) {
+        for index in page.result.tickets.indices {
+            let note = TicketTextParser.reconcileAddOn(&page.result.tickets[index])
+            page.result.tickets[index].warnings =
+                (note.map { [$0] } ?? []) + TicketTextParser.validate(page.result.tickets[index])
+        }
+    }
+
     private func run(_ image: UIImage, quad: TicketQuad) async {
         stage = .scanning
         errorText = nil
@@ -1215,14 +1283,7 @@ struct TicketScanView: View {
         croppedPreview = corrected
         do {
             var page = try await TicketVisionScanner.scan(corrected)
-            // 单价对不上时把追加标志纠正过来，再把提示重算一遍。
-            // 纠正本身必须说出来 —— 单注价格从 2 元变成 3 元是记账口径的变化，
-            // 悄悄改掉的话用户看到金额对不上也不知道是哪一步动的。
-            for index in page.result.tickets.indices {
-                let note = TicketTextParser.reconcileAddOn(&page.result.tickets[index])
-                page.result.tickets[index].warnings =
-                    (note.map { [$0] } ?? []) + TicketTextParser.validate(page.result.tickets[index])
-            }
+            polish(&page)
             rawText = page.result.rawText
             tickets = page.result.tickets
             ticketImages = page.images
