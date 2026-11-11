@@ -16,6 +16,8 @@ struct TicketLocateView: View {
         var isResolving = false
         /// 用户自己加的框。
         var isManual = false
+        /// 用户自己指定的彩种。票头糊了机器认不出来的时候，人说了算，识别时按它来。
+        var forcedGame: GameKey?
     }
 
     let image: UIImage
@@ -88,6 +90,22 @@ struct TicketLocateView: View {
     private var footer: some View {
         VStack(spacing: 10) {
             if let index = marks.firstIndex(where: { $0.id == selected }) {
+              HStack(spacing: 22) {
+                // 机器没认出彩种、或者认错了：在这里直接指定，识别的时候按指定的来
+                Menu {
+                    ForEach(GameKey.ordered) { game in
+                        Button(game.label) {
+                            marks[index].game = game
+                            marks[index].forcedGame = game
+                            marks[index].isResolving = false
+                        }
+                    }
+                } label: {
+                    Label(marks[index].game == nil ? "指定彩种" : "改彩种", systemImage: "tag")
+                        .font(.footnote.weight(.semibold))
+                }
+                .tint(.white)
+                .accessibilityIdentifier("locate.game")
                 Button(role: .destructive) {
                     withAnimation(.easeOut(duration: 0.15)) {
                         marks.remove(at: index)
@@ -99,6 +117,7 @@ struct TicketLocateView: View {
                 }
                 .tint(.red)
                 .accessibilityIdentifier("locate.remove")
+              }
             } else {
                 Text(Disclaimer.crop)
                     .scaledFont(10)

@@ -189,4 +189,28 @@ final class ProfitStatsTests: XCTestCase {
         XCTAssertEqual(ProfitRange.year.gridSpan, 365)
         XCTAssertEqual(ProfitRange.month.label, "本月")
     }
+
+    /// 首页概览卡的「全部」：不限年份。
+    func testPeriodWithoutAYearCoversEverything() {
+        let entries = [
+            SettledEntry(day: "2025-12-30", game: .ssq, cost: 10, prize: 0, isWon: false),
+            SettledEntry(day: "2026-02-03", game: .dlt, cost: 6, prize: 5, isWon: true)
+        ]
+        let all = ProfitStats.period(entries: entries, year: nil, month: 2)
+        XCTAssertEqual(all.cost, 16)
+        XCTAssertEqual(all.ticketCount, 2)
+        XCTAssertEqual(ProfitStats.period(entries: entries, year: 2026, month: nil).cost, 6)
+    }
+
+    /// 「本年」从今年 1 月 1 日算起，不是往回数 365 天。
+    func testThisYearStartsOnJanuaryFirst() throws {
+        let entries = [
+            SettledEntry(day: "2025-12-30", game: .ssq, cost: 10, prize: 0, isWon: false),
+            SettledEntry(day: "2026-02-03", game: .dlt, cost: 6, prize: 5, isWon: true)
+        ]
+        let now = try XCTUnwrap(DateText.parse("2026-03-01"))
+        let series = ProfitStats.series(entries: entries, range: .year, now: now)
+        XCTAssertEqual(series.costTotal, 6)
+        XCTAssertEqual(ProfitRange.year.label, "本年")
+    }
 }

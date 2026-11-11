@@ -42,12 +42,4 @@ final class KeyFlowTests: XCTestCase {
                                                           "双色球", "大乐透", "七乐彩", "七星彩")).firstMatch
         XCTAssertTrue(ticket.waitForExistence(timeout: 10), "票夹里没有示例票据")
     }
-
-    /// 首页右上角进统计页。
-    func testStatsOpensFromHome() {
-        let stats = app.navigationBars.buttons["统计"]
-        XCTAssertTrue(stats.waitForExistence(timeout: 10), "首页没有统计入口")
-        stats.tap()
-        XCTAssertTrue(app.navigationBars["统计"].waitForExistence(timeout: 10), "统计页没有打开")
-    }
 }

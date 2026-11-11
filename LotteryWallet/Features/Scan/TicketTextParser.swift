@@ -741,8 +741,9 @@ enum TicketTextParser {
     /// 用户手里明明是一张彩票，票夹里冒出两三张卡片，和票面对不上，
     /// 金额也要跟着分摊，反而更难核对。现在玩法落到每一注上（`lineModes`），
     /// 一张票还是一张票。
-    static func parseTickets(_ block: String) -> [ScannedTicket] {
-        guard var ticket = parseTicket(block) else { return [] }
+    /// - Parameter game: 用户在预识别页上自己指定的彩种。给了就不再从票面文字里猜。
+    static func parseTickets(_ block: String, game: GameKey? = nil) -> [ScannedTicket] {
+        guard var ticket = parseTicket(block, game: game) else { return [] }
         guard ticket.game == .fc3d || ticket.game == .pl3, ticket.play == .single else {
             return [ticket]
         }
@@ -790,11 +791,11 @@ enum TicketTextParser {
         Set(digits).count == 3 ? "group6" : "group3"
     }
 
-    static func parseTicket(_ block: String) -> ScannedTicket? {
+    static func parseTicket(_ block: String, game forced: GameKey? = nil) -> ScannedTicket? {
         let lines = normalize(block)
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map { $0.trimmingCharacters(in: .whitespaces) }
-        guard let game = detectGame(block) else { return nil }
+        guard let game = forced ?? detectGame(block) else { return nil }
 
         var ticket = ScannedTicket(game: game)
         ticket.play = detectPlay(block)
@@ -1259,7 +1260,7 @@ enum TicketTextParser {
     // MARK: - 总入口
 
     /// 版面已经切好的多块文本。扫描器用几何方式分出每张票之后走这条路。
-    static func parse(blocks: [String]) -> ScanResult {
+    static func parse(blocks: [String], game: GameKey? = nil) -> ScanResult {
         var result = ScanResult()
         result.rawText = blocks.joined(separator: "\n\n———\n\n")
         for block in blocks {
@@ -1267,7 +1268,7 @@ enum TicketTextParser {
             let pieces = splitBlocks(block)
             let candidates = pieces.count > 1 ? pieces : [block]
             for piece in candidates {
-                for var ticket in parseTickets(piece) {
+                for var ticket in parseTickets(piece, game: game) {
                     ticket.warnings = validate(ticket)
                     result.tickets.append(ticket)
                 }
@@ -1277,8 +1278,8 @@ enum TicketTextParser {
         return result
     }
 
-    static func parse(_ rawText: String) -> ScanResult {
-        parse(blocks: splitBlocks(rawText))
+    static func parse(_ rawText: String, game: GameKey? = nil) -> ScanResult {
+        parse(blocks: splitBlocks(rawText), game: game)
     }
 
     /// 用票面合计金额反查注数。这是最有价值的一道校验 ——

@@ -39,14 +39,17 @@ enum TicketVisionScanner {
     /// 找票、摆正这两步在这之前由 `TicketCropView` + `TicketImagePreprocessor`
     /// 完成，而且最终的框是用户点头的。到这里图已经是正的、放大过的，
     /// OCR 只需要认字。
-    static func scan(_ image: UIImage) async throws -> ScannedPage {
+    ///
+    /// - Parameter game: 用户在预识别页上自己指定的彩种（票头糊了、机器没认出来的时候）。
+    ///   给了就按它来认，不再从票面文字里猜。
+    static func scan(_ image: UIImage, game forced: GameKey? = nil) async throws -> ScannedPage {
         var page = ScannedPage()
         let fragments = try await recognizeFragments(in: image)
         // **配准跑在识别前面。**
         //
         // 阶段 2 起，号码是摆到配准后的格子上去认的，所以基准得先定下来。
         // 阶段 1 时它跑在最后、只画给人看；现在它是号码那条路的入口。
-        let detected = TicketTextParser.detectGame(LayoutSegmenter.lines(fragments))
+        let detected = forced ?? TicketTextParser.detectGame(LayoutSegmenter.lines(fragments))
         var registration = await TicketRegistration.run(image: image,
                                                         fragments: fragments,
                                                         game: detected)
@@ -73,12 +76,12 @@ enum TicketVisionScanner {
         // 「退回老路」和「新路读错」在识别结果上长得一模一样，没有这一句
         // 就只能对着号码猜 —— 上一轮我就猜错了两次。
         if let note = merged.note { registration.debug.notes.append(note) }
-        var result = TicketTextParser.parse(merged.text)
+        var result = TicketTextParser.parse(merged.text, game: forced)
         if result.tickets.isEmpty {
             // 再放大一遍重试。裁切之后还认不出，多半是原图本身就糊。
             if let bigger = upscaled(image, factor: 1.6),
                let retry = try? await recognizeFragments(in: bigger) {
-                let second = TicketTextParser.parse(LayoutSegmenter.lines(retry))
+                let second = TicketTextParser.parse(LayoutSegmenter.lines(retry), game: forced)
                 if !second.tickets.isEmpty { result = second }
             }
         }

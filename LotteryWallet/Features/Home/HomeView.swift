@@ -25,11 +25,14 @@ struct HomeView: View {
     @Query(sort: \TicketRecord.createdAt, order: .reverse) private var records: [TicketRecord]
 
     @State private var range: ProfitRange = .all
-    @State private var flowMode: FlowMode = .cumulative
     @State private var series = ProfitSeries()
     @State private var monthStats = ProfitStats.PeriodStats()
-    /// 下面那张概览卡看本月还是今年。
-    @State private var isYearlyOverview = false
+    /// 下面那张概览卡看哪一段：某年某月、某年全年（月份为 nil）、或者全部。
+    @State private var overviewYear = Calendar.chinaCalendar.component(.year, from: AppClock.now)
+    @State private var overviewMonth: Int? = Calendar.chinaCalendar.component(.month, from: AppClock.now)
+    @State private var isOverviewAll = false
+    @State private var overviewYears: [Int] = []
+    @State private var isOverviewPickerPresented = false
     @State private var carouselIndex = 0
     /// TabView 的真实页码。首尾各多挂一张哨兵页（末卡的副本放在最前、
     /// 首卡的副本放在最后），滑到哨兵页上再无动画地跳回对应的真页，
@@ -96,16 +99,6 @@ struct HomeView: View {
             // 小标题得留着 —— 往下滑的时候顶上要有一条带标题的栏，和设置页一样。
             .navigationTitle("首页")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        StatsView()
-                    } label: {
-                        Image(systemName: "chart.bar.xaxis")
-                    }
-                    .accessibilityLabel("统计")
-                }
-            }
             .refreshable { await drawStore.refresh() }
             .task(id: RecordsToken(records)) { recompute() }
             .task(id: drawStore.scheduleToken) { refreshSchedule() }
@@ -114,7 +107,12 @@ struct HomeView: View {
                 await drawStore.loadCalendar(year: ChinaClock.year())
             }
             .onChange(of: range) { _, _ in recomputeSeries() }
-            .onChange(of: isYearlyOverview) { _, _ in recompute() }
+            .onChange(of: overviewYear) { _, _ in recompute() }
+            .onChange(of: overviewMonth) { _, _ in recompute() }
+            .onChange(of: isOverviewAll) { _, _ in recompute() }
+            .sheet(isPresented: $isOverviewPickerPresented) {
+                PeriodPicker(year: $overviewYear, month: $overviewMonth, isAll: $isOverviewAll, years: overviewYears)
+            }
             .environment(\.screenWidth, screenWidth)
         }
     }
@@ -126,11 +124,9 @@ struct HomeView: View {
     private func recompute() {
         entries = ProfitStats.snapshot(records)
         recomputeSeries()
-        let now = AppClock.now
-        let year = Calendar.chinaCalendar.component(.year, from: now)
-        let month = Calendar.chinaCalendar.component(.month, from: now)
-        monthStats = ProfitStats.period(entries: ProfitStats.snapshotAll(records), year: year,
-                                        month: isYearlyOverview ? nil : month)
+        let all = ProfitStats.snapshotAll(records)
+        overviewYears = ProfitStats.availableYears(entries: all)
+        monthStats = ProfitStats.period(entries: all, year: isOverviewAll ? nil : overviewYear, month: overviewMonth)
     }
 
     private func recomputeSeries() {
@@ -167,14 +163,16 @@ struct HomeView: View {
                     Text("累计收支")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    rangeMenu
                     Spacer(minLength: 0)
-                    // 同一份数据的两种看法：一路累计下来的趋势，或者一个月一根柱子。
-                    Picker("图表", selection: $flowMode) {
-                        ForEach(FlowMode.allCases) { Text($0.label).tag($0) }
+                    // 看哪一段：本月、本年、从头累计。三档就够，原来的下拉菜单和「累计 / 每月」切换都并到这里。
+                    Picker("范围", selection: $range) {
+                        Text("本月").tag(ProfitRange.month)
+                        Text("本年").tag(ProfitRange.year)
+                        Text("累计").tag(ProfitRange.all)
                     }
                     .pickerStyle(.segmented)
                     .fixedSize()
+                    .accessibilityIdentifier("home.range")
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(MoneyText.grouped(series.netTotal))
@@ -206,30 +204,9 @@ struct HomeView: View {
 
             // 原来这里是逐日方格图加四个数字方块。方块里的数现在都在图上面那一行，
             // 而且按住图表拖动时会跟着变成那一天的数。
-            ProfitFlowChart(series: series, mode: flowMode)
+            ProfitFlowChart(series: series, mode: .cumulative)
         }
         .contentCard()
-    }
-
-    /// 范围选择做成一颗小胶囊，贴在「累计收支」后面 —— 它改的就是这个数。
-    private var rangeMenu: some View {
-        Menu {
-            Picker("范围", selection: $range) {
-                ForEach(ProfitRange.allCases) { Text($0.label).tag($0) }
-            }
-        } label: {
-            HStack(spacing: 3) {
-                Text(range.label)
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.semibold))
-            }
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(Color.primary.opacity(0.06), in: Capsule())
-        }
-        .accessibilityLabel("统计范围：\(range.label)")
     }
 
     /// 一分钱都还没结算时，返奖率是 0/0 —— 那不是「返奖率 0%」，
@@ -416,21 +393,38 @@ struct HomeView: View {
             .padding(.horizontal, 4)
     }
 
-    // MARK: - 本月概览
+    // MARK: - 概览
+
+    private var overviewTitle: String {
+        if isOverviewAll { return "全部概览" }
+        if let month = overviewMonth { return "\(overviewYear) 年 \(month) 月概览" }
+        return "\(overviewYear) 年概览"
+    }
 
     private var monthlyCard: some View {
-        let month = Calendar.chinaCalendar.component(.month, from: AppClock.now)
-        let year = Calendar.chinaCalendar.component(.year, from: AppClock.now)
         return VStack(alignment: .leading, spacing: 14) {
-            SectionHeader(title: isYearlyOverview ? "\(year) 年概览" : "\(month) 月概览",
-                          subtitle: "本机记录 · \(monthStats.ticketCount) 注")
-            // 统计页最常看的两个范围直接放在首页；逐日、逐月的明细还在右上角的统计页里。
-            Picker("概览范围", selection: $isYearlyOverview) {
-                Text("本月").tag(false)
-                Text("今年").tag(true)
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(overviewTitle)
+                        .font(.headline)
+                    Text("本机记录 · \(monthStats.ticketCount) 注")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 12)
+                // 选哪个月、哪一年、还是全部
+                Button {
+                    isOverviewPickerPresented = true
+                } label: {
+                    HStack(spacing: 3) {
+                        Text("选择时间")
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .font(.subheadline)
+                }
+                .accessibilityIdentifier("home.overview.period")
             }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("home.overview.scope")
 
             // 收支是这张卡的主角，单独占一行给足字号；
             // 票面金额和奖金退到下面一行当支撑数据。
@@ -466,7 +460,7 @@ struct HomeView: View {
             }
 
             if monthStats.byGame.isEmpty {
-                Text(isYearlyOverview ? "今年还没有记录" : "这个月还没有记录")
+                Text("这一段还没有记录")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -475,7 +469,8 @@ struct HomeView: View {
                 Divider()
                 // 原来是一张横向柱状图，只能看出长短。换成一条占比色带
                 // 加一份明细，金额和比例都直接写出来。
-                SpendBreakdown(items: monthStats.byGame, total: monthStats.cost)
+                // 彩种一共就八个，全部列出来，不并成「其他」
+                SpendBreakdown(items: monthStats.byGame, total: monthStats.cost, limit: monthStats.byGame.count)
             }
         }
         .contentCard()

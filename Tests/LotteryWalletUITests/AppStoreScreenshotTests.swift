@@ -34,14 +34,6 @@ final class AppStoreScreenshotTests: XCTestCase {
         open(tab: "票夹")
         capture("02-wallet")
 
-        open(tab: "首页")
-        let stats = app.navigationBars.buttons["统计"]
-        XCTAssertTrue(stats.waitForExistence(timeout: 10), "首页没有统计入口")
-        stats.tap()
-        XCTAssertTrue(app.navigationBars["统计"].waitForExistence(timeout: 10), "统计页没有打开")
-        settle()
-        capture("03-stats")
-
         open(tab: "设置")
         capture("05-settings")
     }

@@ -53,6 +53,9 @@ struct TicketScanView: View {
     @State private var isResponsibleAlertPresented = false
     @State private var zoneEditorTarget: ZoneEditorTarget?
 
+    /// 支持页上「反馈不支持的票」那一节。
+    static let unsupportedTicketURL = URL(string: "https://wenjinliuu.github.io/lottery-ios/support.html#unsupported")!
+
     enum Stage {
         case intro, locate, crop, scanning, review
     }
@@ -70,6 +73,8 @@ struct TicketScanView: View {
     struct Prescan {
         /// 认的时候框在哪儿。用户拖过角之后就对不上了，要重认。
         var quad: TicketQuad
+        /// 认的时候用户指定的彩种（没指定是 nil）。之后改了彩种也要重认。
+        var forced: GameKey?
         var page: TicketVisionScanner.ScannedPage
         var image: UIImage
     }
@@ -432,6 +437,14 @@ struct TicketScanView: View {
                     }
                     .foregroundStyle(Color.accentColor)
                     .glassPill(interactive: true)
+                    // 这种票 App 还不认识：请用户把票面发过来，我们来适配。说明在支持页上。
+                    Link(destination: Self.unsupportedTicketURL) {
+                        Text("这种票认不出来？把票面发给我们适配")
+                            .font(.footnote)
+                            .underline()
+                    }
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("scan.feedback")
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
@@ -1291,9 +1304,10 @@ struct TicketScanView: View {
                 let corrected = await TicketImagePreprocessor.prepare(image, quad: mark.quad)
                 guard var page = try? await TicketVisionScanner.scan(corrected), !Task.isCancelled else { continue }
                 polish(&page)
-                // 认的这会儿用户可能已经把这个框拖走或者删了
-                guard let index = marks.firstIndex(where: { $0.id == mark.id }), marks[index].quad == mark.quad else { continue }
-                prescans[mark.id] = Prescan(quad: mark.quad, page: page, image: corrected)
+                // 认的这会儿用户可能已经把这个框拖走、删了，或者自己指定了彩种
+                guard let index = marks.firstIndex(where: { $0.id == mark.id }), marks[index].quad == mark.quad,
+                      marks[index].forcedGame == nil else { continue }
+                prescans[mark.id] = Prescan(quad: mark.quad, forced: nil, page: page, image: corrected)
                 if let game = page.result.tickets.first?.game { marks[index].game = game }
             }
         }
@@ -1316,14 +1330,14 @@ struct TicketScanView: View {
         for (index, mark) in marks.enumerated() {
             let page: TicketVisionScanner.ScannedPage
             let corrected: UIImage
-            if let ready = prescans[mark.id], ready.quad == mark.quad {
+            if let ready = prescans[mark.id], ready.quad == mark.quad, ready.forced == mark.forcedGame {
                 // 预识别时已经认过、框也没动：直接用
                 (page, corrected) = (ready.page, ready.image)
                 croppedPreview = corrected
             } else {
                 corrected = await TicketImagePreprocessor.prepare(image, quad: mark.quad)
                 croppedPreview = corrected
-                guard var scanned = try? await TicketVisionScanner.scan(corrected) else {
+                guard var scanned = try? await TicketVisionScanner.scan(corrected, game: mark.forcedGame) else {
                     missed.append(index + 1)
                     continue
                 }

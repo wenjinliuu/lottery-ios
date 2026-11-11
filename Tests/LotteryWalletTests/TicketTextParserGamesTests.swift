@@ -593,4 +593,19 @@ final class WholeTicketDerivationTests: XCTestCase {
         XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["group3"], shape: .system), "组选3复式票")
         XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["group6"], shape: .single), "组选单式票")
     }
+
+    /// 票头糊得认不出彩种：用户在预识别页上自己指定，识别就按指定的来。
+    func testGameChosenByTheUserOverridesWhatTheTextSays() throws {
+        let text = """
+        第26301期 2026年11月11日开奖
+        直选单式票 1倍 合计4元
+        ① 1 4 1 9 6
+        ② 3 7 7 1 6
+        体彩7星彩 为生活添彩!
+        """
+        // 没有票头、广告语里又写着 7 星彩：指定排列5 之后按排列5 读
+        let ticket = try XCTUnwrap(TicketTextParser.parse(text, game: .pl5).tickets.first)
+        XCTAssertEqual(ticket.game, .pl5)
+        XCTAssertEqual(ticket.lines.map { $0[.nums5] }, [[1, 4, 1, 9, 6], [3, 7, 7, 1, 6]])
+    }
 }

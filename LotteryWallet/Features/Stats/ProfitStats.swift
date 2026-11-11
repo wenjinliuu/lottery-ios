@@ -15,7 +15,7 @@ enum ProfitRange: String, CaseIterable, Identifiable {
         switch self {
         case .month: "本月"
         case .half: "近半年"
-        case .year: "近一年"
+        case .year: "本年"
         case .all: "全部"
         }
     }
@@ -271,7 +271,10 @@ enum ProfitStats {
             return firstDay
         case .month:
             return String(DateText.day(now).prefix(7)) + "-01"
-        case .half, .year:
+        case .year:
+            // 本年：从今年 1 月 1 日起（原来是「近一年」的 365 天，首页改成本月 / 本年 / 累计三档之后按自然年算）
+            return String(DateText.day(now).prefix(4)) + "-01-01"
+        case .half:
             let span = Int(range.rawValue) ?? 183
             guard let end = DateText.parse(lastDay),
                   let shifted = Calendar.chinaCalendar.date(byAdding: .day, value: -(max(span, 1) - 1), to: end) else {
@@ -310,17 +313,19 @@ enum ProfitStats {
     }
 
     /// 按年或年月汇总。`month` 为 nil 表示全年。
-    static func period(entries: [SettledEntry], year: Int, month: Int?) -> PeriodStats {
+    /// `year` 为 nil 表示全部年份（这时 `month` 不起作用）。
+    static func period(entries: [SettledEntry], year: Int?, month: Int?) -> PeriodStats {
         var stats = PeriodStats()
         var byGame: [GameKey: GameSpend] = [:]
         var byMonthGame: [Int: [GameKey: GameSpend]] = [:]
         var byDay: [String: ProfitDay] = [:]
-        let yearPrefix = String(format: "%04d-", year)
+        let yearPrefix = year.map { String(format: "%04d-", $0) }
 
         for entry in entries {
-            guard entry.day.hasPrefix(yearPrefix), entry.day.count >= 10 else { continue }
+            guard entry.day.count >= 10 else { continue }
+            if let yearPrefix, !entry.day.hasPrefix(yearPrefix) { continue }
             let monthIndex = Int(entry.day.dropFirst(5).prefix(2)) ?? 0
-            if let month, monthIndex != month { continue }
+            if yearPrefix != nil, let month, monthIndex != month { continue }
 
             stats.cost += entry.cost
             stats.prize += entry.prize
