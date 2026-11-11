@@ -183,7 +183,9 @@ enum TicketTextParser {
             ("[\u{0410}]", "A"), ("[\u{0412}]", "B"), ("[\u{0421}]", "C"),
             ("[\u{0415}]", "E"), ("[\u{041E}\u{043E}]", "O"),
             // 全角字母同理
-            ("[ＡＢＣＤＥ]", "A")
+            ("[ＡＢＣＤＥ]", "A"),
+            // 标签被认成繁体或形近字：真机上「蓝复」读成过「藍复」，整行蓝球就丢了
+            ("[藍籃篮]", "蓝"), ("[紅]", "红")
         ]
         for (pattern, replacement) in replacements {
             text = text.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
@@ -940,7 +942,51 @@ enum TicketTextParser {
 
     // MARK: - 票面信息
 
-    static func detectGame(_ text: String) -> GameKey? {
+    /// 这张票是哪个彩种。
+    ///
+    /// **先看票头，再看全文，最后看版式。** 第一版是整段文字里见到哪个名字算哪个，
+    /// 真机上排列5 的票被认成七星彩 —— 票面下半截印着一句广告「体彩7星彩，为生活添彩！」，
+    /// 而七星彩排在排列5 前面查。认错彩种之后号码按七位去读，整张票就读不出来了。
+    ///
+    /// - Parameter guess: 名字和版式都对不上时，要不要按发行方猜一个（福彩猜双色球、体彩猜大乐透）。
+    ///   预识别页给框上色时不猜，宁可标「没认出彩种」。
+    static func detectGame(_ text: String, guess: Bool = true) -> GameKey? {
+        let lines = text.split(whereSeparator: \.isNewline).map(String.init)
+        // 1. 票头：流水号（体彩）或哈希行（福彩）以上的部分。彩种名只印在这里。
+        if let anchor = lines.firstIndex(where: isSerialLine) {
+            if let game = namedGame(lines[...anchor].joined(separator: "\n")) { return game }
+        }
+        // 2. 全文，去掉广告语和赠票提示。
+        let body = lines.filter { !isSlogan($0) }.joined(separator: "\n")
+        if let game = namedGame(body) { return game }
+
+        // 3. 标签和版式
+        if body.range(of: "前区|后区|套餐|追加", options: .regularExpression) != nil { return .dlt }
+        if body.range(of: "红[单复胆拖]|蓝[单复胆拖]", options: .regularExpression) != nil { return .ssq }
+        if let game = gameByLayout(lines) { return game }
+
+        // 都没认出来才退回发行方 —— 这一步只能区分福彩和体彩，
+        // 而两家各自的主力彩种是双色球和大乐透，作为兜底是合理的猜测。
+        guard guess else { return nil }
+        if text.range(of: "福利彩|WELFARE", options: [.regularExpression, .caseInsensitive]) != nil { return .ssq }
+        if text.range(of: "体育彩票|体彩|LOTTO|SPORT", options: [.regularExpression, .caseInsensitive]) != nil { return .dlt }
+        return nil
+    }
+
+    /// 体彩的流水号行、福彩的哈希行。它上面是票头，下面是号码和票底。
+    static func isSerialLine(_ line: String) -> Bool {
+        let compact = line.replacingOccurrences(of: " ", with: "").uppercased()
+        if compact.range(of: "[0-9]{5,7}-[0-9]{5,7}-[0-9]{5,7}", options: .regularExpression) != nil { return true }
+        return compact.contains("/")
+            && compact.range(of: "[0-9A-Z]{3,5}-[0-9A-Z]{3,5}-[0-9A-Z]{3,5}", options: .regularExpression) != nil
+    }
+
+    /// 票面下半截的广告语、赠票提示：里面会出现**别的彩种**的名字。
+    static func isSlogan(_ line: String) -> Bool {
+        line.range(of: "添彩|诉说|获赠|赠票|好礼|乐趣|公益|感谢", options: .regularExpression) != nil
+    }
+
+    private static func namedGame(_ text: String) -> GameKey? {
         // **具体彩种名必须排在发行方前面。**
         //
         // 七乐彩、快乐8、3D 的票头上印的同样是「中国福利彩票」，
@@ -948,24 +994,34 @@ enum TicketTextParser {
         // 体彩那边同理：排列3/5、七星彩的票头都写着「体彩」。
         if text.range(of: "七乐彩|七乐釆", options: .regularExpression) != nil { return .qlc }
         if text.range(of: "快乐8|快乐八|快乐\\s*8", options: .regularExpression) != nil { return .k8 }
-        if text.range(of: "七星彩|7星彩|Seven\\s*Stars", options: [.regularExpression, .caseInsensitive]) != nil { return .qxc }
         if text.range(of: "排列\\s*5|排列五|排5", options: .regularExpression) != nil { return .pl5 }
         if text.range(of: "排列\\s*3|排列三|排3", options: .regularExpression) != nil { return .pl3 }
+        if text.range(of: "七星彩|7星彩|Seven\\s*Stars", options: [.regularExpression, .caseInsensitive]) != nil { return .qxc }
         if text.contains("双色球") { return .ssq }
-        if text.range(of: "大乐透|超级大乐透", options: .regularExpression) != nil { return .dlt }
+        // 「乐透」两个字常被认坏（真机上读成过「大乐语」），认出一半也算。
+        if text.range(of: "大乐|乐透", options: .regularExpression) != nil { return .dlt }
         // 3D 放在双色球之后：「玩法:3D-单式」这种行里没有别的彩种名，
         // 但 `3D` 两个字符太短，摆在最前面容易被别处的噪声命中。
         if text.range(of: "(^|[^0-9A-Za-z])3\\s*[DdＤ]([^0-9A-Za-z]|$)", options: .regularExpression) != nil { return .fc3d }
-
-        // 标签本身也能定彩种
-        if text.range(of: "前区|后区", options: .regularExpression) != nil { return .dlt }
-        if text.range(of: "红[单复胆拖]|蓝[单复胆拖]", options: .regularExpression) != nil { return .ssq }
-
-        // 都没认出来才退回发行方 —— 这一步只能区分福彩和体彩，
-        // 而两家各自的主力彩种是双色球和大乐透，作为兜底是合理的猜测。
-        if text.range(of: "福利彩|WELFARE", options: [.regularExpression, .caseInsensitive]) != nil { return .ssq }
-        if text.range(of: "体育彩票|体彩|LOTTO|SPORT", options: [.regularExpression, .caseInsensitive]) != nil { return .dlt }
         return nil
+    }
+
+    /// 票头没读出名字时，看号码行长什么样。只管体彩的三种数字型：
+    /// 一行 3 个 / 5 个单个数字是排列3 / 排列5，6 个单个数字后面再跟一个 0–14 是七星彩。
+    private static func gameByLayout(_ lines: [String]) -> GameKey? {
+        var votes: [GameKey: Int] = [:]
+        for line in lines where !isSerialLine(line) {
+            guard let body = betBody(line) else { continue }
+            let tokens = body.split(whereSeparator: \.isWhitespace).map(String.init)
+            guard tokens.allSatisfy({ $0.allSatisfy { $0.isASCII && $0.isNumber } }) else { continue }
+            let singles = tokens.prefix { $0.count == 1 }.count
+            if tokens.count == 7, singles >= 6, let tail = Int(tokens[6]), tail <= 14 { votes[.qxc, default: 0] += 1 }
+            else if tokens.count == 5, singles == 5 { votes[.pl5, default: 0] += 1 }
+            else if tokens.count == 3, singles == 3 { votes[.pl3, default: 0] += 1 }
+        }
+        guard let best = votes.max(by: { $0.value < $1.value }),
+              votes.values.filter({ $0 == best.value }).count == 1 else { return nil }
+        return best.key
     }
 
     /// 票面印的玩法键。

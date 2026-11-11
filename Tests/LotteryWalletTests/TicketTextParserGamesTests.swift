@@ -412,4 +412,82 @@ final class WholeTicketDerivationTests: XCTestCase {
         XCTAssertEqual(ticket.lines.first?[.red], [6, 8, 13, 21, 29, 32])
         XCTAssertEqual(ticket.lines.first?[.blue], [4])
     }
+
+    // MARK: - 彩种认错（2026-11 TestFlight 实测）
+
+    private let pl5WithSlogan = """
+    Wen
+    体彩 排列5
+    第26301期 2026年11月11日开奖
+    110310-337861-121179-488663 226351 i8nxCA
+    直选单式票 1倍 合计4元
+    ① 1 4 1 9 6
+    ② 3 7 7 1 6
+    从3到5到7 让数字诉说你的每一份情感
+    体彩7星彩 为生活添彩!
+    感谢您为公益事业贡献 1.48元
+    20-020689-101 00169 26/11/11 13:57:49
+    """
+
+    /// 排列5 的票面下半截印着一句「体彩7星彩，为生活添彩！」。
+    /// 上一版见到这句就认成七星彩，号码按七位去读，整张票读不出来。
+    func testSloganNamingAnotherGameDoesNotChangeTheGame() throws {
+        XCTAssertEqual(TicketTextParser.detectGame(pl5WithSlogan), .pl5)
+        let ticket = try XCTUnwrap(TicketTextParser.parse(pl5WithSlogan).tickets.first)
+        XCTAssertEqual(ticket.game, .pl5)
+        XCTAssertEqual(ticket.lines.map { $0[.nums5] }, [[1, 4, 1, 9, 6], [3, 7, 7, 1, 6]])
+    }
+
+    /// 票头的彩种名没读出来：看号码行的版式。
+    func testGameFallsBackToTheShapeOfTheNumberRows() {
+        let untitled = pl5WithSlogan.replacingOccurrences(of: "体彩 排列5", with: "体彩")
+        XCTAssertEqual(TicketTextParser.detectGame(untitled), .pl5)
+        let sevenStars = """
+        体彩
+        第26110期 2026年09月22日开奖
+        110310-296561-121124-768065 794382
+        单式票 1倍 合计10元
+        ① 3 3 2 7 6 0 11
+        ② 2 4 7 3 1 1 11
+        """
+        XCTAssertEqual(TicketTextParser.detectGame(sevenStars), .qxc)
+    }
+
+    /// 「大乐透」读成「大乐语」，票底还印着「恭喜您获赠7星彩10元彩票一张」。
+    func testHalfReadTitleAndGiftNoteStillMeansDaLeTou() {
+        let text = """
+        体彩超级大乐语 西餐
+        第26109期 2026年09月23日开奖
+        182312-609220-001294-585768 645238 EUnuLA
+        套餐票 1倍 合计18元
+        ① 02 03 22 32 33 +03 12
+        前区02 10 13 14 29
+        后区 02 07 11
+        恭喜您获赠7星彩10元彩票一张
+        """
+        XCTAssertEqual(TicketTextParser.detectGame(text), .dlt)
+    }
+
+    /// 预识别页给框上色时不猜：只知道是体彩，就标「没认出彩种」。
+    func testGuessingByIssuerIsOptional() {
+        XCTAssertNil(TicketTextParser.detectGame("体彩\n第26110期", guess: false))
+        XCTAssertEqual(TicketTextParser.detectGame("体彩\n第26110期"), .dlt)
+    }
+
+    /// 「蓝复」被认成繁体的「藍复」：上一版这一行整行丢了，14 注的复式票读不出号码。
+    func testTraditionalBlueLabelIsStillTheBlueZone() throws {
+        let text = """
+        Wen 中国福利彩票
+        玩法:双色球-复式 GN WE税号:39136822
+        7692-3402-B25E-4034-AF48/11402378/22513
+        红复:09 21 22 24 26 28 33
+        藍复:02 11
+        倍数:1
+        开奖期:2026129 26-11-10 合计28元
+        """
+        let ticket = try XCTUnwrap(TicketTextParser.parse(text).tickets.first)
+        XCTAssertEqual(ticket.selections[.red]?.selected, [9, 21, 22, 24, 26, 28, 33])
+        XCTAssertEqual(ticket.selections[.blue]?.selected, [2, 11])
+        XCTAssertEqual(ticket.totalCost, 28)
+    }
 }

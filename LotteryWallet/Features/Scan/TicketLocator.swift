@@ -252,14 +252,45 @@ enum TicketLocator {
             return Line(text: fragment.text,
                         corners: [pixel(topLeft), pixel(topRight), pixel(bottomRight), pixel(bottomLeft)])
         }
-        return locate(lines).map { ticket in
+        // 文字定出来的框再贴到票纸的边上（`PaperEdge`）。取不到像素就用文字的框。
+        let raster = paperRaster(image)
+        return locate(lines).map { found in
+            var ticket = found
+            if let raster {
+                let scaleX = Double(raster.width) / Double(size.width), scaleY = Double(raster.height) / Double(size.height)
+                let fitted = PaperEdge.fit(raster.pixels, width: raster.width, height: raster.height,
+                                           corners: ticket.corners.map { .init(x: Double($0.x) * scaleX, y: Double($0.y) * scaleY) })
+                ticket.corners = fitted.map { CGPoint(x: $0.x / scaleX, y: $0.y / scaleY) }
+            }
             func unit(_ point: CGPoint) -> CGPoint {
                 CGPoint(x: min(max(point.x / size.width, 0), 1), y: min(max(point.y / size.height, 0), 1))
             }
             return Located(quad: TicketQuad(topLeft: unit(ticket.corners[0]), topRight: unit(ticket.corners[1]),
                                             bottomRight: unit(ticket.corners[2]), bottomLeft: unit(ticket.corners[3])),
-                           game: TicketTextParser.detectGame(ticket.texts.joined(separator: "\n")))
+                           game: TicketTextParser.detectGame(ticket.texts.joined(separator: "\n"), guess: false))
         }
+    }
+}
+
+extension TicketLocator {
+    /// 整张照片的红色通道，最宽 1200 像素、方向摆正。贴纸边用，不需要更细。
+    ///
+    /// 先画成一张新图再取像素：相机拍的照片像素是横着存的，方向写在属性里，
+    /// 直接拿 `cgImage` 的话像素和识别出来的坐标对不上。
+    static func paperRaster(_ image: UIImage) -> (pixels: [UInt8], width: Int, height: Int)? {
+        guard image.size.width > 0, image.size.height > 0 else { return nil }
+        let width = min(Int(image.size.width.rounded()), 1200)
+        let height = Int((image.size.height * CGFloat(width) / image.size.width).rounded())
+        guard width > 4, height > 4 else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let drawn = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { _ in
+            image.draw(in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        guard let cgImage = drawn.cgImage,
+              let red = ZoneRaster.red(cgImage, width: width, height: height) else { return nil }
+        return (red, width, height)
     }
 }
 
