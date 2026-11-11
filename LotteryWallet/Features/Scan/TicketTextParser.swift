@@ -842,6 +842,15 @@ enum TicketTextParser {
             }
             openLabel = nil
 
+            // 排列3 / 3D 的组选复式：票面只有一行数字（`1 3 5 6 8`），没有标签。
+            if ticket.play == .system, game == .pl3 || game == .fc3d, let section = game.sections.first {
+                let tokens = line.split(whereSeparator: \.isWhitespace)
+                if tokens.count >= 2, tokens.allSatisfy({ $0.count == 1 && $0.first?.isASCII == true && $0.first?.isNumber == true }) {
+                    append(tokens.compactMap { Int($0) }, to: &selections, key: section.key, isDan: false)
+                    continue
+                }
+            }
+
             // 复式、胆拖票上没有标签的纯号码行先攒着（见上面第二个区标签那里）
             if ticket.play != .single, game.sections.count == 2, isNumberOnlyLine(line) {
                 orphans += numbers(in: line, range: game.sections[0].range)
@@ -1073,8 +1082,9 @@ enum TicketTextParser {
             }
             return ""
         case .fc3d, .pl3:
-            if text.contains("组六") || text.contains("组6") { return "group6" }
-            if text.contains("组三") || text.contains("组3") { return "group3" }
+            // 体彩印的是「组选6复式票」「组选3复式票」，福彩印「组六」「组三」
+            if text.range(of: "组六|组6|组选6|组选六", options: .regularExpression) != nil { return "group6" }
+            if text.range(of: "组三|组3|组选3|组选三", options: .regularExpression) != nil { return "group3" }
             // 「组选」要留空：体彩排列3 只印这两个字，具体是组三还是组六
             // 得看号码有没有重复，交给 `perLineModes` 逐注判断。
             // 这一句必须排在「直选」前面 —— 否则「组选单式票」里的"选"字

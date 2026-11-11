@@ -542,4 +542,55 @@ final class WholeTicketDerivationTests: XCTestCase {
         XCTAssertEqual(ticket.selections[.back]?.selected, [1, 4])
         XCTAssertEqual(ticket.totalCost, 112)
     }
+
+    // MARK: - 排列3 / 3D 的组选复式
+
+    /// 排列3「组选6复式票」：一行 5 个数字，C(5,3) = 10 注，20 倍，合计 400 元。
+    /// 按票面存：玩法是组选6、票型是复式，记下这 5 个数字；算钱和兑奖时才展开成 10 注。
+    func testPickThreeGroupSixSystemTicket() throws {
+        let text = """
+        体彩 排列3
+        第26246期 2026年09月13日开奖
+        110440-357676-338715-377668 345741 cwj4e3
+        组选6复式票 20倍 合计400元
+        1 3 5 6 8
+        感谢您为公益事业贡献 136.00
+        公益体彩 乐善人生
+        07-210100-101 000602 26/09/13 12:32:46
+        """
+        let ticket = try XCTUnwrap(TicketTextParser.parse(text).tickets.first)
+        XCTAssertEqual(ticket.game, .pl3)
+        XCTAssertEqual(ticket.play, .system)
+        XCTAssertEqual(ticket.playMode, "group6")
+        XCTAssertEqual(ticket.selections[.nums3]?.selected, [1, 3, 5, 6, 8])
+        XCTAssertEqual(ticket.count, 10)
+        XCTAssertEqual(ticket.multiple, 20)
+        XCTAssertEqual(ticket.totalCost, 400)
+        XCTAssertTrue(ticket.expandedLines.contains(NumberSet([.nums3: [1, 3, 5]])))
+        XCTAssertTrue(ticket.expandedLines.allSatisfy { Set($0[.nums3]).count == 3 }, "组六每一注三个数字都不同")
+    }
+
+    /// 「组选3复式」：n 个数字是 n×(n−1) 注，每一注是一个对子加另一个数字。
+    func testPickThreeGroupThreeSystemExpandsToPairs() throws {
+        let tickets = try XCTUnwrap(TicketBuilder.expand(
+            game: .pl3, selections: [.nums3: SectionSelection(selected: [2, 5, 9])],
+            mode: .system, playMode: "group3", addOn: false))
+        XCTAssertEqual(tickets.count, 6)
+        XCTAssertTrue(tickets.map(\.numbers).contains(NumberSet([.nums3: [2, 2, 5]])))
+        XCTAssertTrue(tickets.map(\.numbers).contains(NumberSet([.nums3: [5, 5, 2]])))
+        XCTAssertTrue(tickets.allSatisfy { Set($0.numbers[.nums3]).count == 2 })
+    }
+
+    /// 组选6复式至少 4 个数字；直选的复式票面是按位排的，还没做，不能当成组选展开。
+    func testPickThreeSystemRejectsWhatItCannotExpand() {
+        let three = [SectionKey.nums3: SectionSelection(selected: [1, 2, 3])]
+        XCTAssertEqual(TicketBuilder.expand(game: .pl3, selections: three, mode: .system, playMode: "group6", addOn: false)?.count, 0)
+        let five = [SectionKey.nums3: SectionSelection(selected: [1, 3, 5, 6, 8])]
+        XCTAssertEqual(TicketBuilder.expand(game: .pl3, selections: five, mode: .system, playMode: "single", addOn: false)?.count, 0)
+        XCTAssertEqual(TicketBuilder.expand(game: .fc3d, selections: five, mode: .system, playMode: "group6", addOn: false)?.count, 10)
+        // 票头按票面写全
+        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["group6"], shape: .system), "组选6复式票")
+        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["group3"], shape: .system), "组选3复式票")
+        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["group6"], shape: .single), "组选单式票")
+    }
 }

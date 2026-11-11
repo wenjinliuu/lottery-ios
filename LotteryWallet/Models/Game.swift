@@ -174,6 +174,13 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     /// `shape` 是票面类型（见 `TicketShape`），两段拼起来才是这张票的全名。
     /// 样票上印的就是「单式票」三个字，所以这里也带「票」字。
     func ticketLabel(modes: Set<String>, shape: TicketShape) -> String {
+        // 排列3 / 3D 的组选复式要写明是哪一种：票面印的就是「组选6复式票」「组选3复式票」，
+        // 两种的注数和奖金都不一样，只写「组选复式票」分不出来。
+        if shape == .system, self == .pl3 || self == .fc3d {
+            let known = modes.filter { !$0.isEmpty }
+            if known == ["group6"] { return "组选6" + shape.label }
+            if known == ["group3"] { return "组选3" + shape.label }
+        }
         let play = headPlayLabel(modes: modes)
         return play.isEmpty ? shape.label : play + shape.label
     }

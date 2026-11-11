@@ -73,7 +73,10 @@ enum ModelFusion {
             slots = ticket.lines.indices.filter { !ticket.lines[$0].isEmpty }.map { .line($0) }
         }
         // 套餐票下面那块、复式票的两个区：一个区一行
-        if ticket.isPackage || ticket.play == .system { slots += ticket.game.sections.map { .zone($0.key) } }
+        // （一位数的区不看：排列3 组选复式那一行数字的版式还没在真票上量过）
+        if ticket.isPackage || ticket.play == .system {
+            slots += ticket.game.sections.filter { digits(per: $0) == 2 }.map { .zone($0.key) }
+        }
         report.expected = slots.count
         guard !slots.isEmpty, !rows.isEmpty else { return report }
 

@@ -106,6 +106,24 @@ enum TicketBuilder {
                 guard selection.selected.count == need else { return [] }
                 groups = [section.isPositional ? selection.selected : selection.selected.sorted()]
             case .system:
+                if game == .pl3 || game == .fc3d {
+                    // 排列3 / 3D 的组选复式（包号）：选一组不重复的数字。
+                    //   组选6复式：任取 3 个不同的数字，C(n,3) 注，n 为 4–10；
+                    //   组选3复式：一个对子加另一个数字，n×(n−1) 注，n 为 2–10。
+                    // 直选的几种复式（定位复式、组合复式）票面是按位排的，还没有真票样张，先不展开。
+                    let digits = Array(Set(selection.selected)).sorted()
+                    switch playMode {
+                    case "group6":
+                        guard digits.count >= 4 else { return [] }
+                        groups = combinations(of: digits, choose: 3)
+                    case "group3":
+                        guard digits.count >= 2 else { return [] }
+                        groups = digits.flatMap { pair in digits.filter { $0 != pair }.map { [pair, pair, $0] } }
+                    default:
+                        return []
+                    }
+                    break
+                }
                 guard selection.selected.count >= need else { return [] }
                 groups = combinations(of: selection.selected.sorted(), choose: need)
             case .dantuo:
