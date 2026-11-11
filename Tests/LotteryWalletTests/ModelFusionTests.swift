@@ -264,4 +264,72 @@ final class ModelFusionTests: XCTestCase {
     func testDescribeShowsWhatTheModelRead() {
         XCTAssertEqual(ModelFusion.describe([row("x 05 l2"), row("xx")]), "x051?2\nxx")
     }
+
+    // MARK: - 折行、胆拖、福彩的行尾倍数
+
+    /// 大乐透复式前区 8 个号：一行印 7 个，第 8 个折到下一行。后区那一行的标签没切成段，
+    /// 看起来也是一行纯数字，但它接上去不是升序，不能并进前区。
+    func testWrappedZoneRowIsJoinedButTheNextZoneIsNot() {
+        let joined = ModelFusion.joinWrapped(["xx 03 08 11 18 19 30 33", "35", "01 04"].map(row))
+        XCTAssertEqual(joined.count, 2)
+        XCTAssertEqual(joined[0].filter { $0.digit != DigitClassifier.reject }.map(\.digit),
+                       [0, 3, 0, 8, 1, 1, 1, 8, 1, 9, 3, 0, 3, 3, 3, 5])
+        XCTAssertEqual(joined[1].map(\.digit), [0, 1, 0, 4])
+    }
+
+    func testSystemTicketWithAWrappedFrontZoneGetsAllEightNumbers() {
+        var ticket = ScannedTicket(game: .dlt)
+        ticket.play = .system
+        ticket.selections[.back] = SectionSelection(selected: [1, 4])
+        ModelFusion.fuse(&ticket, rows: ["lxxxxxx", "xx 03 08 11 18 19 30 33", "35", "01 04"].map(row))
+        XCTAssertEqual(ticket.selections[.front]?.selected, [3, 8, 11, 18, 19, 30, 33, 35])
+        XCTAssertEqual(ticket.totalCost, 112)
+    }
+
+    /// 胆拖票四行都读成、C(6,3) × C(2,1) × 2 = 80 元对得上：以模型为准。
+    func testBankerTicketIsRebuiltWhenTheTotalAgrees() {
+        var ticket = ScannedTicket(game: .dlt)
+        ticket.play = .dantuo
+        ticket.totalAmount = 80
+        // Vision 把前区拖读丢了两个号
+        ticket.selections[.front] = SectionSelection(selected: [2, 7, 10, 11, 12, 27], dan: [2, 27])
+        ticket.selections[.back] = SectionSelection(selected: [3, 4, 12], dan: [3])
+        let model = ["xxx 02 27", "xxx 07 10 11 12 20 21", "xxx 03", "xxx 04 12"].map(row)
+        let report = ModelFusion.fuse(&ticket, rows: model)
+        XCTAssertTrue(report.rebuilt)
+        XCTAssertEqual(ticket.selections[.front]?.dan, [2, 27])
+        XCTAssertEqual(ticket.selections[.front]?.selected, [2, 7, 10, 11, 12, 20, 21, 27])
+        XCTAssertEqual(ticket.selections[.back]?.dan, [3])
+        XCTAssertEqual(ticket.selections[.back]?.selected, [3, 4, 12])
+        XCTAssertEqual(ticket.totalCost, 80)
+    }
+
+    func testBankerTicketIsLeftAloneWhenTheTotalDisagrees() {
+        var ticket = ScannedTicket(game: .dlt)
+        ticket.play = .dantuo
+        ticket.totalAmount = 80
+        ticket.selections[.front] = SectionSelection(selected: [2, 7, 10, 11, 12, 20, 21, 27], dan: [2, 27])
+        ticket.selections[.back] = SectionSelection(selected: [3, 4, 12], dan: [3])
+        let before = ticket
+        // 模型这边少读了一行
+        let report = ModelFusion.fuse(&ticket, rows: ["xxx 02 27", "xxx 07 10 11 12 20 21", "xxx 04 12"].map(row))
+        XCTAssertFalse(report.rebuilt)
+        XCTAssertEqual(ticket, before)
+    }
+
+    /// 双色球单式三注都是 2 倍、合计 12 元。Vision 把行尾的「(2)」读丢了，倍数成了 1。
+    /// 模型每一行行尾都读到 2，3 注 × 2 元 × 2 倍对得上：倍数改成 2。
+    func testWelfareMultipleComesFromTheBracketsWhenVisionLostThem() {
+        var ticket = ScannedTicket(game: .ssq)
+        ticket.lines = [NumberSet([.red: [5, 6, 8, 10, 11, 30], .blue: [1]])]
+        ticket.totalAmount = 12
+        let model = ["x 05 06 08 10 11 30 01     x2x", "x 05 08 12 15 22 31 15     x2x",
+                     "x 08 13 25 28 29 32 16     x2x", "xxx", "xxx"].map(row)
+        let report = ModelFusion.fuse(&ticket, rows: model)
+        XCTAssertTrue(report.rebuilt)
+        XCTAssertEqual(ticket.lines.count, 3)
+        XCTAssertEqual(ticket.multiple, 2)
+        XCTAssertEqual(ticket.totalCost, 12)
+        XCTAssertEqual(ModelFusion.trailingMultiple(row("x 05 06 08 10 11 30 01")), nil)
+    }
 }

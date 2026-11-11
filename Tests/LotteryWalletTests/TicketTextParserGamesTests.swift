@@ -523,4 +523,23 @@ final class WholeTicketDerivationTests: XCTestCase {
         XCTAssertEqual(ticket.lines.map { $0[.nums] }, [[4, 5, 24, 35, 39], [9, 15, 39, 58, 80]])
         XCTAssertEqual(TicketTextParser.dropTrailingMultiple("6 2 5 7 2"), "6 2 5 7 2", "数字型的号码不能动")
     }
+
+    /// 大乐透复式：「前区」两个字没读出来，号码还读重了一个，第 8 个号折在下一行。
+    func testUnlabelledRowsBeforeTheBackLabelAreTheFrontZone() throws {
+        let text = """
+        体彩 超级大乐语
+        第26108期 2026年09月21日开奖
+        110320-296261-117718-131535 048614 Erxx7W
+        复式票 1倍 合计112元
+        03 08 08 11 18 19 30 33
+        35
+        后区01 04
+        看江苏省城市足坪联赛
+        """
+        let ticket = try XCTUnwrap(TicketTextParser.parse(text).tickets.first)
+        XCTAssertEqual(ticket.play, .system)
+        XCTAssertEqual(ticket.selections[.front]?.selected, [3, 8, 11, 18, 19, 30, 33, 35])
+        XCTAssertEqual(ticket.selections[.back]?.selected, [1, 4])
+        XCTAssertEqual(ticket.totalCost, 112)
+    }
 }

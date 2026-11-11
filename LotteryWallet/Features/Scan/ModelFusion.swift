@@ -64,8 +64,9 @@ enum ModelFusion {
     @discardableResult
     static func fuse(_ ticket: inout ScannedTicket, rows: [[GlyphRows.Token]]) -> Report {
         var report = Report()
-        // 胆拖的版式没在真票上量过，不碰
-        guard ticket.play != .dantuo else { return report }
+        // 复式、胆拖一个区的号码多了会折到下一行，先接回去
+        let rows = ticket.play == .single ? rows : joinWrapped(rows)
+        if ticket.play == .dantuo { return rebuildBanker(&ticket, rows: rows) ?? report }
         if let rebuilt = rebuild(&ticket, rows: rows) { return rebuilt }
         var slots: [Slot] = []
         if ticket.play == .single {
@@ -92,6 +93,101 @@ enum ModelFusion {
         return report
     }
 
+    // MARK: - 复式、胆拖
+
+    /// 一个区的号码一行印不下（大乐透一行 7 个），多出来的折到下一行，前面没有标签。
+    ///
+    /// 这一行全是数字、上一行的号码已经印满一行、而且接上去之后还是升序：它是上一行的续行。
+    /// 「还是升序」这一条把「后区」那一行挡在外面 —— 后区的标签没切成段的时候，它看起来也是一行纯数字。
+    static func joinWrapped(_ rows: [[GlyphRows.Token]]) -> [[GlyphRows.Token]] {
+        var out: [[GlyphRows.Token]] = []
+        for tokens in rows {
+            guard let last = out.last, !tokens.isEmpty, tokens.count % 2 == 0,
+                  tokens.allSatisfy({ $0.digit != DigitClassifier.reject }) else {
+                out.append(tokens)
+                continue
+            }
+            let run = Array(last.reversed().prefix { $0.digit != DigitClassifier.reject }.reversed())
+            guard run.count >= 14, run.count % 2 == 0 else {
+                out.append(tokens)
+                continue
+            }
+            let previous = run[run.count - 2].digit * 10 + run[run.count - 1].digit
+            guard tokens[0].digit * 10 + tokens[1].digit > previous else {
+                out.append(tokens)
+                continue
+            }
+            // 接在上一行的右边，隔一个「号码之间」的空隙
+            let between = run[run.count - 2].segment.x0 - run[run.count - 3].segment.x1
+            let shift = run[run.count - 1].segment.x1 + max(between, 1) - tokens[0].segment.x0
+            out[out.count - 1] = last + tokens.map { token in
+                var moved = token
+                moved.segment.x0 += shift
+                moved.segment.x1 += shift
+                return moved
+            }
+        }
+        return out
+    }
+
+    /// 一行「标签 + 一串两位数」：前面至少一段不是数字，后面是这个区里升序的号码。
+    private static func labelled(_ tokens: [GlyphRows.Token], section: GameSection) -> [Value]? {
+        guard let first = tokens.first, first.digit == DigitClassifier.reject else { return nil }
+        var found: [Value]?
+        for count in 1...18 {
+            guard let read = GlyphRows.readLine(tokens, count: count * 2) else { continue }
+            let values = numbers(read, parts: [(section, count)])
+            if ordered(values.map(\.value), section: section),
+               values.allSatisfy({ $0.confidence >= threshold }) { found = values }
+        }
+        return found
+    }
+
+    /// 胆拖票：模型把「胆 / 拖」几行都读成了、注数和票面合计对得上，就以模型为准。
+    ///
+    /// 大乐透印四行（前区胆、前区拖、后区胆、后区拖），后区没有胆时是三行；双色球印三行（红胆、红拖、蓝）。
+    /// 对不上就返回 nil，票保持 Vision 读到的样子。
+    static func rebuildBanker(_ ticket: inout ScannedTicket, rows: [[GlyphRows.Token]]) -> Report? {
+        let sections = ticket.game.sections
+        guard ticket.game == .dlt || ticket.game == .ssq, sections.count == 2,
+              let total = ticket.totalAmount, total > 0 else { return nil }
+        let (front, back) = (sections[0], sections[1])
+        // 号码区里按顺序读得成的标签行。前两行按第一个区读，后面的按第二个区读。
+        var firstRows: [[Int]] = [], secondRows: [[Int]] = []
+        for tokens in rows {
+            if firstRows.count < 2, let values = labelled(tokens, section: front) {
+                firstRows.append(values.map(\.value))
+            } else if firstRows.count == 2, secondRows.count < 2, let values = labelled(tokens, section: back) {
+                secondRows.append(values.map(\.value))
+            }
+        }
+        guard firstRows.count == 2, (1...2).contains(secondRows.count) else { return nil }
+        let frontDan = firstRows[0], frontTuo = firstRows[1]
+        let backDan = secondRows.count == 2 ? secondRows[0] : []
+        let backTuo = secondRows.count == 2 ? secondRows[1] : secondRows[0]
+        guard frontDan.count < front.count, backDan.count < back.count,
+              Set(frontDan).isDisjoint(with: frontTuo), Set(backDan).isDisjoint(with: backTuo) else { return nil }
+        let units = combinations(frontTuo.count, front.count - frontDan.count)
+            * combinations(backTuo.count, back.count - backDan.count)
+        let scale = Double(units * max(ticket.multiple, 1) * max(ticket.periods, 1))
+        let prices: [Double] = ticket.game == .dlt ? [2, 3] : [2]
+        guard units > 0, prices.contains(where: { abs(scale * $0 - total) < 0.01 }) else { return nil }
+
+        var report = Report(expected: 2 + secondRows.count, read: 2 + secondRows.count, rebuilt: true)
+        for (section, dan, tuo) in [(front, frontDan, frontTuo), (back, backDan, backTuo)] {
+            let model = SectionSelection(selected: (dan + tuo).sorted(), dan: dan)
+            let known = ticket.selections[section.key]
+            if known?.selected.sorted() == model.selected, known?.dan.sorted() == model.dan.sorted() {
+                report.confirmed += model.selected.count
+            } else {
+                report.filled += model.selected.count
+            }
+            ticket.selections[section.key] = model
+        }
+        refreshWarnings(&ticket)
+        return report
+    }
+
     // MARK: - 以模型读到的行为准
 
     /// 模型自己读出来的整张票：每一注在号码区的第几行、读到了什么；套餐票下面那块的两个区。
@@ -100,6 +196,8 @@ enum ModelFusion {
         var parts: [(section: GameSection, count: Int)] = []
         var rows: [Int] = []
         var lines: [[Value]] = []
+        /// 福彩每一注行尾括号里的倍数，读不出来是 nil。
+        var multiples: [Int?] = []
         var zones: [SectionKey: [Value]] = [:]
     }
 
@@ -135,6 +233,7 @@ enum ModelFusion {
             if let line, sound(line, parts: parts) {
                 out.rows.append(index)
                 out.lines.append(line)
+                out.multiples.append(trailingMultiple(tokens))
                 continue
             }
             // 大乐透套餐票下面那块：先前区、后后区
@@ -152,6 +251,16 @@ enum ModelFusion {
             }
         }
         return out.lines.isEmpty ? nil : out
+    }
+
+    /// 福彩一注的最后印着「(2)」：括号多半切不成数字，中间那个倍数切得成。
+    /// 一行最右边那一段是「不是数字」、它左边紧挨着一个有把握的数字，那个数字就是倍数。
+    static func trailingMultiple(_ tokens: [GlyphRows.Token]) -> Int? {
+        guard tokens.count >= 3, let last = tokens.last, last.digit == DigitClassifier.reject else { return nil }
+        let digit = tokens[tokens.count - 2]
+        guard digit.digit != DigitClassifier.reject, digit.digit >= 1, digit.confidence >= threshold,
+              tokens[tokens.count - 3].digit == DigitClassifier.reject else { return nil }
+        return digit.digit
     }
 
     /// 一注的每个区都在值域里、两位数的区升序不重复。
@@ -190,9 +299,18 @@ enum ModelFusion {
             guard let front = skeleton.zones[sections[0].key], let back = skeleton.zones[sections[1].key] else { return nil }
             blockUnits = combinations(front.count, sections[0].count) * combinations(back.count, sections[1].count)
         }
-        let units = Double((skeleton.lines.count + blockUnits) * max(ticket.multiple, 1) * max(ticket.periods, 1))
+        // 倍数：Vision 读到的那个；福彩每一注行尾括号里的倍数模型都读到了、而且都一样，也算一个候选。
+        // Vision 把括号读丢的时候（真机上三张双色球都是 2 倍，读成了 1 倍）靠它把金额对上。
+        var multiples = [max(ticket.multiple, 1)]
+        let printed = skeleton.multiples.compactMap { $0 }
+        if printed.count == skeleton.lines.count, let first = printed.first, printed.allSatisfy({ $0 == first }),
+           !multiples.contains(first) { multiples.append(first) }
         let prices: [Double] = game == .dlt ? [2, 3] : [2]
-        guard prices.contains(where: { abs(units * $0 - total) < 0.01 }) else { return nil }
+        let base = Double((skeleton.lines.count + blockUnits) * max(ticket.periods, 1))
+        guard let multiple = multiples.first(where: { times in
+            prices.contains { abs(base * Double(times) * $0 - total) < 0.01 }
+        }) else { return nil }
+        ticket.multiple = multiple
 
         // Vision 读到的每一注去找模型的同一行
         let slots: [Slot] = ticket.lines.indices.filter { !ticket.lines[$0].isEmpty }.map { .line($0) }

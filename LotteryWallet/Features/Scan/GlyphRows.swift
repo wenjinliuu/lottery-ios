@@ -155,8 +155,9 @@ enum GlyphRows {
     /// 比一般的行高出将近一半的行，多半是两行粘在了一起（表头的下半截贴着第一注 ——
     /// 真机上一张套餐票就这样少了第一注）。
     ///
-    /// 在它中间那一半里找墨最少的一条线，那条线上的墨不到这一行最浓处的 35% 就从那儿切开。
-    /// 每一行最多切一刀。
+    /// 在它正中间那一小段（38%–62%）里找墨最少的一条线，那条线上的墨不到这一行最浓处的 35% 就从那儿切开。
+    /// 只看正中间：两行差不多高，分界就在中间；放宽了会切到数字的腰上（数字中间的墨本来就少），
+    /// 真机上第一注就这样被拦腰切成了两截。每一行最多切一刀。
     static func splitTall(_ rows: [(Int, Int)], profile: [Int], tall: Int) -> [(Int, Int)] {
         var out: [(Int, Int)] = []
         for (top, bottom) in rows {
@@ -165,7 +166,7 @@ enum GlyphRows {
                 out.append((top, bottom))
                 continue
             }
-            let low = top + height / 4, high = bottom - height / 4
+            let low = top + height * 38 / 100, high = bottom - height * 38 / 100
             var cut = low
             for y in low..<high where profile[y] < profile[cut] { cut = y }
             let peak = profile[top..<bottom].max() ?? 0

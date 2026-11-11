@@ -802,6 +802,8 @@ enum TicketTextParser {
         var selections: [SectionKey: SectionSelection] = [:]
         var singleLines: [NumberSet] = []
         var lineMultiples: [Int] = []
+        /// 复式、胆拖票上还没有归属的无标签号码。
+        var orphans: [Int] = []
         /// 看着像一注、但号码个数多到救不回来的行数。
         var overfull = 0
         /// 上一行的标签，用来接住没有标签的续行。
@@ -815,6 +817,13 @@ enum TicketTextParser {
                 ? ((selections[game.sections[0].key]?.selected.isEmpty ?? true) ? game.sections[0].key : game.sections[1].key)
                 : nil
             if let (label, rest) = zoneLabel(line, game: game, unlabelled: vacant) {
+                // 第二个区的标签到了，第一个区还空着，前面又攒着几行没标签的号码：那几行就是第一个区。
+                // 真机上一张大乐透复式票「前区」两个字没读出来，8 个前区号全丢了。
+                if game.sections.count == 2, label.key == game.sections[1].key, !orphans.isEmpty,
+                   selections[game.sections[0].key]?.selected.isEmpty ?? true {
+                    append(Array(Set(orphans)).sorted(), to: &selections, key: game.sections[0].key, isDan: false)
+                }
+                orphans = []
                 let section = game.sections.first { $0.key == label.key }
                 let range = section?.range ?? 1...99
                 let values = numbers(in: rest, range: range)
@@ -832,6 +841,12 @@ enum TicketTextParser {
                 continue
             }
             openLabel = nil
+
+            // 复式、胆拖票上没有标签的纯号码行先攒着（见上面第二个区标签那里）
+            if ticket.play != .single, game.sections.count == 2, isNumberOnlyLine(line) {
+                orphans += numbers(in: line, range: game.sections[0].range)
+                continue
+            }
 
             // 没有标签的票是单式票，按一行一注读
             if ticket.play == .single {
