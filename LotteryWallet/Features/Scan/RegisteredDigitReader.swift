@@ -133,6 +133,30 @@ enum RegisteredDigitReader {
             }
         }
 
+        // 第二个读数：自己训练的数字模型把每一格再读一遍，和 Vision 对。
+        //
+        // 只对一位数的格子做（0–9）；两位数的格子模型一次只认一个字，不在这里管。
+        // 对不上的格子标问号 —— 见 `DigitCrossCheck.resolve`。模型或号码区的像素
+        // 拿不到时整段跳过，结果和没有这道校验时一样。
+        var checked = 0
+        var overruled = 0
+        if let classifier = DigitClassifier.shared,
+           let red = ZoneRaster.red(zoneImage, width: mask.width, height: mask.height) {
+            for row in values.indices {
+                for column in values[row].indices {
+                    guard maximums.indices.contains(column), maximums[column] <= 9,
+                          let vision = values[row][column],
+                          let rect = grid.cell(row: row, column: column),
+                          let glyph = ZoneRaster.glyph(in: rect, mask: mask, red: red) else { continue }
+                    let verdict = classifier.classify(pixels: glyph.pixels, width: glyph.width, height: glyph.height)
+                    let outcome = DigitCrossCheck.resolve(vision: vision, model: verdict)
+                    checked += 1
+                    if outcome.disagreed { overruled += 1 }
+                    values[row][column] = outcome.value
+                }
+            }
+        }
+
         // 一多半都是问号就别拿出来了，那多半根本没划对地方
         let known = values.reduce(0) { $0 + $1.compactMap { $0 }.count }
         let total = values.count * layout.columns
@@ -189,6 +213,12 @@ enum RegisteredDigitReader {
         // 两遍识别在同一位置给出不同答案的次数。**这一版只数不改** ——
         // 先看真机上到底多久打一次架，再决定要不要把打架的格子标成问号。
         if conflicts > 0 { note += "；两遍识别有 \(conflicts) 处不一致（这一版只统计，不改结果）" }
+        if checked > 0 {
+            note += "；数字模型复核了 \(checked) 格"
+            note += overruled > 0 ? "，\(overruled) 格和 Vision 读的不一样，已标成问号" : "，都和 Vision 一致"
+        } else if DigitClassifier.shared == nil {
+            note += "；数字模型没有加载，这次没有复核"
+        }
         return Outcome(
             reading: Reading(matrix: .init(rows: rows, span: low...high),
                              grid: grid, trailing: tailColumns),
