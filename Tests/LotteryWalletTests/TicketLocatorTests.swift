@@ -177,4 +177,28 @@ final class TicketLocatorTests: XCTestCase {
         XCTAssertTrue(TicketLocator.locate([line("祝您中奖", 479, 43, 334), line("2026-11-08 12:06:09", 300, 400, 200),
                                             line("合计28元", 573, 403, 77)]).isEmpty)
     }
+
+    // MARK: - 流水号读不干净的时候（真机上两张票丢过一张）
+
+    func testSportsSerialToleratesMisreads() {
+        XCTAssertTrue(TicketLocator.isSportsSerial("110310-333361-121160-320322"))
+        // 0 读成 O、1 读成 I
+        XCTAssertTrue(TicketLocator.isSportsSerial("11O31O-333361-I2II60-320322"))
+        // 只读出前三组
+        XCTAssertTrue(TicketLocator.isSportsSerial("110310-333361-121160"))
+        // 一根横线读丢了、另一根读成了波浪线
+        XCTAssertTrue(TicketLocator.isSportsSerial("110310333361~121160-320322"))
+    }
+
+    func testOtherDigitRowsAreNotSerials() {
+        XCTAssertFalse(TicketLocator.isSportsSerial("20-020689-101"), "票底的站号行")
+        XCTAssertFalse(TicketLocator.isSportsSerial("0005526/10/2611:02:08"))
+        XCTAssertFalse(TicketLocator.isSportsSerial("第26285期2026年10月26日开奖"))
+        XCTAssertFalse(TicketLocator.isSportsSerial("①62572"))
+    }
+
+    func testLocateMarkTitles() {
+        XCTAssertEqual(TicketLocateView.title(number: 2, game: .pl5), "2 排列5")
+        XCTAssertEqual(TicketLocateView.title(number: 1, game: nil), "1 没认出彩种")
+    }
 }

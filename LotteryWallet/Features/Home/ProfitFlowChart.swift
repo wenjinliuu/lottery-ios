@@ -30,7 +30,7 @@ struct FlowReading: Equatable {
 
     /// - Parameters:
     ///   - day: 累计模式下手指所在的日期。取**不晚于它的最后一个点** ——
-    ///     线是阶梯状的，两次购买之间的任何一天，数都等于前一次购买之后的累计。
+    ///     两次购买之间的任何一天，数都等于前一次购买之后的累计（圆点也落在那个点上）。
     ///   - month: 每月模式下选中的那个月（yyyy-MM）。
     static func make(series: ProfitSeries, mode: FlowMode, day: Date?, month: String?) -> FlowReading {
         switch mode {
@@ -76,10 +76,13 @@ struct FlowReading: Equatable {
 
 /// 首页的收支图。
 ///
-/// **累计**：三条从零画起的阶梯线 —— 投入（主题蓝）、公益金（橙）、奖金（红），
+/// **累计**：三条从零画起的平滑线 —— 投入（主题蓝）、公益金（橙）、奖金（红），
 /// 线下面是由深到透明的渐变。每条线的高度就是它自己的数；蓝线和红线之间的距离
-/// 就是净支出。用阶梯而不是平滑曲线：钱是一笔一笔花的、奖是一下子中的，
-/// 平滑会画出不存在的中间值。
+/// 就是净支出。
+///
+/// 第一版画的是阶梯线（钱是一笔一笔花的），真机上一看全是锯齿，改成平滑的。
+/// 用的是**保单调**的插值：线一定经过每一个数据点，两点之间只升不降、不会鼓出去 ——
+/// 累计值不会凭空多出一截，也不会掉下去再回来。读数和圆点仍然落在真实的数据点上。
 ///
 /// **每月**：一个月一根柱子，自下而上是奖金、公益金、其余，总高等于当月投入。
 ///
@@ -207,13 +210,13 @@ struct ProfitFlowChart: View {
                      y: .value(name, point[keyPath: value]),
                      series: .value("类别", name),
                      stacking: .unstacked)
-                .interpolationMethod(.stepEnd)
+                .interpolationMethod(.monotone)
                 .foregroundStyle(LinearGradient(colors: [color.opacity(fill), color.opacity(0)],
                                                 startPoint: .top, endPoint: .bottom))
             LineMark(x: .value("日期", point.day),
                      y: .value(name, point[keyPath: value]),
                      series: .value("类别", name))
-                .interpolationMethod(.stepEnd)
+                .interpolationMethod(.monotone)
                 .foregroundStyle(color)
                 .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
         }

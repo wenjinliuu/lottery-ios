@@ -117,7 +117,7 @@ final class ProfitFlowTests: XCTestCase {
         XCTAssertTrue(reading.lastIsGain)
     }
 
-    /// 线是阶梯状的：两次购买之间的任何一天，读数都是前一次购买之后的累计。
+    /// 两次购买之间的任何一天，读数都是前一次购买之后的累计（线是平滑的，读数不插值）。
     func testReadingSnapsToTheLastPointOnOrBeforeTheFinger() throws {
         let series = ProfitStats.series(entries: entries, range: .all)
         let between = try XCTUnwrap(DateText.parse("2026-09-06"))

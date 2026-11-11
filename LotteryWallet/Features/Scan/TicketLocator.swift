@@ -34,6 +34,8 @@ enum TicketLocator {
         /// 找到了票底（福彩的「…发行中心承销」、体彩的站号行）。
         /// 没找到多半是下半截被压住或裁掉了 —— 票还是会交出去，但只到看得见的地方为止。
         var complete: Bool
+        /// 归到这张票名下的每一行文字。预识别页拿它猜彩种，好给框上色。
+        var texts: [String] = []
     }
 
     // 版式常数，单位都是「锚行的字距」或「锚行的行高」，和拍摄距离无关。
@@ -75,6 +77,24 @@ enum TicketLocator {
         text.range(of: pattern, options: .regularExpression) != nil
     }
 
+    /// 体彩的流水号行：`110310-333361-121160-320322`，四组六位数字。
+    ///
+    /// 照片里票小的时候这一行读不干净 —— 真机上两张票丢过一张，就是这一行没对上。
+    /// 所以放宽三处：`O`/`I`/`L` 当成 0/1；横线读成别的短线或者读丢了都认；
+    /// 只读出三组也认。票底的站号行（`20-020689-101`）和时间不会被误认：它们凑不出三组五位以上的数字。
+    static func isSportsSerial(_ compact: String) -> Bool {
+        var text = ""
+        for character in compact {
+            switch character {
+            case "O": text.append("0")
+            case "I", "L": text.append("1")
+            default: text.append(character)
+            }
+        }
+        return matches(text, "[0-9]{5,7}[-—–−~_.·]?[0-9]{5,7}[-—–−~_.·][0-9]{5,7}")
+            || matches(text, "[0-9]{5,7}[-—–−~_.·][0-9]{5,7}[-—–−~_.·]?[0-9]{5,7}")
+    }
+
     private static func anchor(for line: Line) -> Anchor? {
         guard line.corners.count == 4 else { return nil }
         let compact = line.text.replacingOccurrences(of: " ", with: "").uppercased()
@@ -83,7 +103,7 @@ enum TicketLocator {
         if matches(compact, "[0-9A-Z]{3,5}-[0-9A-Z]{3,5}-[0-9A-Z]{3,5}-[0-9A-Z]{3,5}-[0-9A-Z]{3,5}"), compact.contains("/") {
             kind = .welfare
             chars = welfareChars
-        } else if matches(compact, "[0-9]{5,7}-[0-9]{5,7}-[0-9]{5,7}-[0-9]{5,7}") {
+        } else if isSportsSerial(compact) {
             kind = .sports
             chars = sportsChars
         } else {
@@ -97,7 +117,9 @@ enum TicketLocator {
         // 识别有时把锚后面的校验码并进同一行，所以按这一行实际有多少个字来算字距。
         let count = Double(line.text.trimmingCharacters(in: .whitespaces).count)
         return Anchor(kind: kind, origin: line.corners[0], u: u, v: CGPoint(x: -u.y, y: u.x),
-                      pitch: length / max(count, chars), height: max(height, 1))
+                      // 只读出一截的时候（字数比该有的少两成以上）按实际读到的字数算，否则字距会偏大。
+                      pitch: length / (count >= chars * 0.8 ? max(count, chars) : max(count, 1)),
+                      height: max(height, 1))
     }
 
     /// 找票。返回的顺序是从上到下、从左到右。
@@ -169,7 +191,8 @@ enum TicketLocator {
             found.append(Found(kind: anchor.kind,
                                corners: [anchor.point(u: u0, v: v0), anchor.point(u: u1, v: v0),
                                          anchor.point(u: u1, v: v1), anchor.point(u: u0, v: v1)],
-                               complete: complete))
+                               complete: complete,
+                               texts: rows.sorted { $0.v0 < $1.v0 }.map(\.text)))
         }
 
         // 同一排的票（上沿相差不到几行高）按从左到右，排与排之间从上到下。
@@ -191,6 +214,17 @@ enum TicketLocator {
     /// 上窄 12% 的透视都不影响定位；歪到 35° 掉一半，横过来一张都找不到 ——
     /// 所以大角度靠这里转正，小角度靠锚行自己的走向。
     static func find(in image: UIImage) async -> (image: UIImage, quads: [TicketQuad]) {
+        let found = await findTickets(in: image)
+        return (found.image, found.tickets.map(\.quad))
+    }
+
+    /// 一张找到的票：四个角 + 猜出来的彩种（猜不出是 nil）。
+    struct Located {
+        var quad: TicketQuad
+        var game: GameKey?
+    }
+
+    static func findTickets(in image: UIImage) async -> (image: UIImage, tickets: [Located]) {
         let upright = await quads(in: image)
         if !upright.isEmpty { return (image, upright) }
         for turns in [1, 3, 2] {
@@ -201,7 +235,7 @@ enum TicketLocator {
         return (image, [])
     }
 
-    private static func quads(in image: UIImage) async -> [TicketQuad] {
+    private static func quads(in image: UIImage) async -> [Located] {
         // 整张照片里票可能很小，字高门槛要比认单张票时低。
         guard let fragments = try? await TicketVisionScanner.recognizeFragments(in: image, minimumTextHeight: 0.004) else {
             return []
@@ -222,8 +256,9 @@ enum TicketLocator {
             func unit(_ point: CGPoint) -> CGPoint {
                 CGPoint(x: min(max(point.x / size.width, 0), 1), y: min(max(point.y / size.height, 0), 1))
             }
-            return TicketQuad(topLeft: unit(ticket.corners[0]), topRight: unit(ticket.corners[1]),
-                              bottomRight: unit(ticket.corners[2]), bottomLeft: unit(ticket.corners[3]))
+            return Located(quad: TicketQuad(topLeft: unit(ticket.corners[0]), topRight: unit(ticket.corners[1]),
+                                            bottomRight: unit(ticket.corners[2]), bottomLeft: unit(ticket.corners[3])),
+                           game: TicketTextParser.detectGame(ticket.texts.joined(separator: "\n")))
         }
     }
 }

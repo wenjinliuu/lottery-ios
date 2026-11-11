@@ -54,8 +54,13 @@ struct TicketScanView: View {
     @State private var zoneEditorTarget: ZoneEditorTarget?
 
     enum Stage {
-        case intro, crop, scanning, review
+        case intro, locate, crop, scanning, review
     }
+
+    /// 预识别页上的框：自动找到的票，加上用户自己加的、改的。
+    @State private var marks: [TicketLocateView.Mark] = []
+    /// 预识别页上要说的话（上一次这些框里一张都没认出来）。
+    @State private var locateNotice: String?
 
     /// 一个 ForEach 里挂很多个 `.sheet` 是 SwiftUI 的经典坑（只有最后一个生效），
     /// 所以期号选择器和号码编辑器都提到根视图上，用 item 驱动。
@@ -96,6 +101,7 @@ struct TicketScanView: View {
             Group {
                 switch stage {
                 case .intro: intro
+                case .locate: locateStep
                 case .crop: cropStep
                 case .scanning: scanning
                 case .review: review
@@ -112,7 +118,7 @@ struct TicketScanView: View {
             .toolbarBackgroundVisibility(.visible, for: .navigationBar)
             .navigationTitle(stage == .review ? "核对识别结果" : "扫描票据")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarVisibility(stage == .crop ? .hidden : .automatic, for: .navigationBar)
+            .toolbarVisibility(stage == .crop || stage == .locate ? .hidden : .automatic, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
@@ -120,7 +126,7 @@ struct TicketScanView: View {
                 if stage == .review {
                     ToolbarItem(placement: .primaryAction) {
                         // 重新裁一次比重拍一张常见得多 —— 号码没认全往往是框歪了
-                        Button("重新裁切") { stage = .crop }
+                        Button("重新裁切") { recrop() }
                     }
                 }
             }
@@ -305,6 +311,25 @@ struct TicketScanView: View {
         }
     }
 
+    /// 预识别：找到的票框出来给人看，可以改、可以加、可以删，点头了才去认号码。
+    @ViewBuilder
+    private var locateStep: some View {
+        if let preview {
+            TicketLocateView(image: preview, marks: $marks, notice: locateNotice) {
+                reset()
+            } onConfirm: {
+                Task { await scanMarks(preview) }
+            }
+            .ignoresSafeArea(edges: .bottom)
+        }
+    }
+
+    /// 「重新裁切」：有预识别的框就回预识别页（框还在，改哪个都行），没有就回单框裁切。
+    private func recrop() {
+        locateNotice = nil
+        stage = marks.isEmpty ? .crop : .locate
+    }
+
     /// 识别中。
     ///
     /// 摆的是**裁切矫正之后**的那张图，铺满整块区域 —— 一来等待时有东西看，
@@ -373,7 +398,7 @@ struct TicketScanView: View {
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 10) {
                     HStack(spacing: 12) {
-                        Button("重新裁切") { stage = .crop }
+                        Button("重新裁切") { recrop() }
                             .buttonStyle(SecondaryGlassButton(tint: .accentColor))
                             .fixedSize()
                         Button("重新拍摄") { reset() }
@@ -1220,40 +1245,42 @@ struct TicketScanView: View {
 
     // MARK: - 动作
 
-    /// 拿到一张照片：先自动找票，找到几张认几张；一张都找不到再让用户手动框。
+    /// 拿到一张照片：先找票，把找到的框摆出来给用户看（`locateStep`），点头了再认。
     private func begin(_ image: UIImage) {
         preview = image
         croppedPreview = nil
-        Task { await autoScan(image) }
+        Task { await locateTickets(image) }
     }
 
-    /// 自动找票并逐张识别。
-    ///
-    /// 每张票各走一遍和手动框选**完全相同**的识别流程（摆正 → 识别 → 校验），
-    /// 所以识别的准确率和单张时一样；这里只是替用户把「框」这一步做了。
-    private func autoScan(_ image: UIImage) async {
+    private func locateTickets(_ image: UIImage) async {
         stage = .scanning
         errorText = nil
-        let located = await TicketLocator.find(in: image)
-        let quads = located.quads
-        guard !quads.isEmpty else {
-            stage = .crop
-            return
-        }
+        locateNotice = nil
+        let located = await TicketLocator.findTickets(in: image)
         // 横着或倒着拍的照片，找票时已经转正了；之后都用转正的那张。
-        let image = located.image
-        preview = image
+        preview = located.image
+        marks = located.tickets.map { TicketLocateView.Mark(quad: $0.quad, game: $0.game) }
+        stage = .locate
+    }
+
+    /// 按预识别页上的框逐张识别。
+    ///
+    /// 每张票各走一遍和单张**完全相同**的识别流程（摆正 → 识别 → 校验）。
+    private func scanMarks(_ image: UIImage) async {
+        stage = .scanning
+        errorText = nil
         var found: [ScannedTicket] = []
         var images: [ScannedTicket.ID: UIImage] = [:]
         var warnings: [String] = []
         var texts: [String] = []
-        var missed = 0
+        var missed: [Int] = []
         var last: (registration: TicketRegistration.Result, image: UIImage)?
-        for quad in quads {
-            let corrected = await TicketImagePreprocessor.prepare(image, quad: quad)
+        var notes: [String] = []
+        for (index, mark) in marks.enumerated() {
+            let corrected = await TicketImagePreprocessor.prepare(image, quad: mark.quad)
             croppedPreview = corrected
             guard var page = try? await TicketVisionScanner.scan(corrected), !page.result.tickets.isEmpty else {
-                missed += 1
+                missed.append(index + 1)
                 continue
             }
             polish(&page)
@@ -1262,24 +1289,29 @@ struct TicketScanView: View {
             warnings += page.result.warnings
             texts.append(page.result.rawText)
             last = (page.registration, corrected)
+            notes += page.registration.debug.notes.map { marks.count > 1 ? "第 \(index + 1) 张：\($0)" : $0 }
         }
         guard !found.isEmpty else {
-            // 找到了票的位置却一张都没认出来：交回给用户手动框。
+            // 框都在，却一张都没认出来：回到预识别页让用户调框。
             croppedPreview = nil
-            stage = .crop
+            locateNotice = "这\(marks.count > 1 ? "几个" : "个")框里没认出票。把框拖到票面四个角上，再试一次"
+            stage = .locate
             return
         }
         // 少认了必须说出来 —— 三张票只进来两张，不说的话用户不会发现。
-        if missed > 0 {
-            warnings.insert("照片里找到 \(quads.count) 张票，其中 \(missed) 张没认出来。可以点右上角「重新裁切」单独框那一张。", at: 0)
+        if !missed.isEmpty {
+            let which = missed.map { "第 \($0) 张" }.joined(separator: "、")
+            warnings.insert("框出了 \(marks.count) 张票，\(which)没认出来。点右上角「重新裁切」调一下那一张的框。", at: 0)
         }
         rawText = texts.joined(separator: "\n\n")
         tickets = found
         ticketImages = images
         globalWarnings = warnings
-        // 多张票时调试图只画最后一张；要看某一张的格子，用「重新裁切」单独认它。
+        // 多张票时调试图只画最后一张；要看某一张的格子，回预识别页只留那一个框再认。
         if let last { applyDebug(last.registration, on: last.image) }
-        if quads.count > 1 { croppedPreview = nil }
+        // 说明文字每张票的都留着：哪一张的模型读行没到位，要看得出来。
+        if settings.debugVision { debugNotes = notes }
+        if marks.count > 1 { croppedPreview = nil }
         stage = .review
     }
 
@@ -1334,6 +1366,8 @@ struct TicketScanView: View {
 
     private func reset() {
         stage = .intro
+        marks = []
+        locateNotice = nil
         preview = nil
         croppedPreview = nil
         photoItem = nil
