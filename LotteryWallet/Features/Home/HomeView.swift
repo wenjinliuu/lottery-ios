@@ -205,8 +205,34 @@ struct HomeView: View {
             // 原来这里是逐日方格图加四个数字方块。方块里的数现在都在图上面那一行，
             // 而且按住图表拖动时会跟着变成那一天的数。
             ProfitFlowChart(series: series, mode: .cumulative)
+
+            // 曲线看总数，方格看每一天：哪天买了、哪天中了。两张图用同一个范围。
+            if !series.days.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    ProfitHeatmap(days: series.days, range: range, width: screenWidth - 64)
+                    HStack(spacing: 12) {
+                        heatLegend(Palette.profit, "当天有中奖")
+                        heatLegend(Palette.loss, "当天没中")
+                        Text("颜色越深金额越大")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
         .contentCard()
+    }
+
+    private func heatLegend(_ tint: Color, _ title: String) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                .fill(tint)
+                .frame(width: 9, height: 9)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
     }
 
     /// 一分钱都还没结算时，返奖率是 0/0 —— 那不是「返奖率 0%」，
@@ -814,11 +840,11 @@ struct ProfitHeatmap: View {
         }
     }
 
-    /// 赚的日子偏红、亏的日子偏绿，浓度按 `intensity` 算。
-    /// 最低透明度留 0.30，否则小额那天几乎和空格子分不出来。
+    /// 当天有一注中奖就是红的，都没中就是绿的；深浅分三档，见 `HeatTone`。
     private func color(for day: ProfitDay) -> Color {
-        let level = 0.30 + 0.70 * intensity(for: day)
-        return (day.net >= 0 ? Palette.profit : Palette.loss).opacity(level)
+        let scales = HeatTone.scales(days)
+        let level = HeatTone.level(of: day, wins: scales.wins, losses: scales.losses)
+        return (HeatTone.isWin(day) ? Palette.profit : Palette.loss).opacity([0.4, 0.7, 1.0][level])
     }
 }
 

@@ -213,4 +213,28 @@ final class ProfitStatsTests: XCTestCase {
         XCTAssertEqual(series.costTotal, 6)
         XCTAssertEqual(ProfitRange.year.label, "本年")
     }
+
+    // MARK: - 方格图的颜色
+
+    private func heatDay(_ date: String, cost: Double, prize: Double, won: Int) -> ProfitDay {
+        ProfitDay(date: date, day: DateText.parse(date)!, close: 0, cost: cost, prize: prize, count: 3, wonCount: won, games: [])
+    }
+
+    /// 颜色只看有没有中：花 20 中 5，净值是负的，那天也算「中了」。
+    func testHeatColourFollowsWhetherAnyBetWon() {
+        XCTAssertTrue(HeatTone.isWin(heatDay("2026-09-01", cost: 20, prize: 5, won: 1)))
+        XCTAssertFalse(HeatTone.isWin(heatDay("2026-09-02", cost: 20, prize: 0, won: 0)))
+    }
+
+    /// 深浅按这段时间里的排位分三档，不设固定的金额线。
+    func testHeatDepthIsRankedWithinTheRange() {
+        let days = [heatDay("2026-09-01", cost: 4, prize: 0, won: 0), heatDay("2026-09-02", cost: 10, prize: 0, won: 0),
+                    heatDay("2026-09-03", cost: 30, prize: 0, won: 0), heatDay("2026-09-04", cost: 6, prize: 5, won: 1)]
+        let scales = HeatTone.scales(days)
+        XCTAssertEqual(scales.losses, [4, 10, 30])
+        XCTAssertEqual(scales.wins, [5])
+        XCTAssertEqual(days.map { HeatTone.level(of: $0, wins: scales.wins, losses: scales.losses) }, [0, 1, 2, 2])
+        // 样本不到三天时不分档，都按最深的画
+        XCTAssertEqual(HeatTone.level(5, among: [5]), 2)
+    }
 }

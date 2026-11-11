@@ -377,3 +377,30 @@ extension Calendar {
         return calendar
     }()
 }
+
+/// 方格图上一天涂什么颜色、涂多深。
+///
+/// 规则（2026-11 和用户敲定）：
+/// - **颜色只看有没有中**：当天只要有一注中奖就是红的，一注都没中就是绿的。
+///   不看当天净值 —— 花 20 元中 5 元，那天也是「中了」。
+/// - **深浅不设固定的金额线**：把这段时间里的日子排个队，分成三档。
+///   红的按当天奖金排，绿的按当天投入排。这样买得多的人和买得少的人，图上都有深有浅。
+enum HeatTone {
+    /// 三档：0 最浅，2 最深。
+    static func level(_ value: Double, among sorted: [Double]) -> Int {
+        guard sorted.count >= 3 else { return 2 }
+        let below = sorted.filter { $0 < value }.count
+        return min(below * 3 / sorted.count, 2)
+    }
+
+    static func isWin(_ day: ProfitDay) -> Bool { day.wonCount > 0 }
+
+    /// 这段时间里中奖那些天的奖金、没中那些天的投入，各自从小到大排好。
+    static func scales(_ days: [ProfitDay]) -> (wins: [Double], losses: [Double]) {
+        (days.filter(isWin).map(\.prize).sorted(), days.filter { !isWin($0) }.map(\.cost).sorted())
+    }
+
+    static func level(of day: ProfitDay, wins: [Double], losses: [Double]) -> Int {
+        isWin(day) ? level(day.prize, among: wins) : level(day.cost, among: losses)
+    }
+}
