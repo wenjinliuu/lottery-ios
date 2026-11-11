@@ -33,10 +33,13 @@ enum ModelFusion {
         var filled = 0
         /// 两边不一致、标成问号的号码个数。
         var disputed = 0
+        /// 这张票的号码是不是**按模型读到的行重建**的（见 `rebuild`）。
+        var rebuilt = false
 
         var note: String {
             guard expected > 0 else { return "模型读行：这种票面不复核" }
-            var text = "模型读行：\(expected) 行号码读成 \(read) 行"
+            var text = rebuilt ? "模型读行：\(read) 行号码全部读成、注数和票面合计对得上，按模型读到的行重建"
+                               : "模型读行：\(expected) 行号码读成 \(read) 行"
             if read > 0 { text += "，\(confirmed) 个号码和 Vision 一致" }
             if filled > 0 { text += "，补上 \(filled) 个问号" }
             if disputed > 0 { text += "，\(disputed) 个对不上、已标成问号" }
@@ -62,6 +65,7 @@ enum ModelFusion {
     static func fuse(_ ticket: inout ScannedTicket, rows: [[GlyphRows.Token]]) -> Report {
         var report = Report()
         guard ticket.play == .single else { return report }
+        if let rebuilt = rebuild(&ticket, rows: rows) { return rebuilt }
         var slots: [Slot] = ticket.lines.indices.filter { !ticket.lines[$0].isEmpty }.map { .line($0) }
         if ticket.isPackage { slots += ticket.game.sections.map { .zone($0.key) } }
         report.expected = slots.count
@@ -81,6 +85,183 @@ enum ModelFusion {
         }
         if report.filled > 0 || report.disputed > 0 { refreshWarnings(&ticket) }
         return report
+    }
+
+    // MARK: - 以模型读到的行为准
+
+    /// 模型自己读出来的整张票：每一注在号码区的第几行、读到了什么；套餐票下面那块的两个区。
+    struct Skeleton {
+        var rows: [Int] = []
+        var lines: [[Value]] = []
+        var zones: [SectionKey: [Value]] = [:]
+    }
+
+    /// 只凭模型读到的行，按这个彩种一行号码该有的样子，把整张票搭出来。只管体彩的四种。
+    ///
+    /// 一行号码「该有的样子」很死：大乐透 14 位、排列5 五位、排列3 三位、七星彩 7 或 8 位；
+    /// 套餐票下面是「前区」「后区」各一行偶数位。`GlyphRows.readLine` 要求个数正好，
+    /// 多一位少一位都不算，所以这里搭出来的每一行都是完整的一行。
+    static func skeleton(game: GameKey, rows: [[GlyphRows.Token]]) -> Skeleton? {
+        let sections = game.sections
+        var out = Skeleton()
+        for (index, tokens) in rows.enumerated() {
+            var line: [Value]?
+            switch game {
+            case .dlt:
+                if let found = GlyphRows.readLine(tokens, count: 14) {
+                    line = numbers(found, parts: [(sections[0], 5), (sections[1], 2)])
+                }
+            case .pl3, .pl5:
+                if let found = GlyphRows.readLine(tokens, count: sections[0].count) { line = found.map(single) }
+            case .qxc:
+                if let seven = GlyphRows.readLine(tokens, count: 7) {
+                    line = seven.map(single)
+                } else if let eight = GlyphRows.readLine(tokens, count: 8), eight[6].digit == 1 {
+                    line = eight.prefix(6).map(single)
+                        + [Value(value: 10 + eight[7].digit, confidence: min(eight[6].confidence, eight[7].confidence))]
+                }
+            default:
+                return nil
+            }
+            if let line, sound(line, sections: sections) {
+                out.rows.append(index)
+                out.lines.append(line)
+                continue
+            }
+            // 大乐透套餐票下面那块：先前区、后后区
+            guard game == .dlt, !out.lines.isEmpty else { continue }
+            for section in sections where out.zones[section.key] == nil {
+                var found: [Value]?
+                for count in section.count...(section.count + 8) {
+                    guard let read = GlyphRows.readLine(tokens, count: count * 2) else { continue }
+                    let values = numbers(read, parts: [(section, count)])
+                    if ordered(values.map(\.value), section: section) { found = values }
+                }
+                if let found { out.zones[section.key] = found }
+                // 一行只能是一个区；前区没读成就不往后区上凑
+                break
+            }
+        }
+        return out.lines.isEmpty ? nil : out
+    }
+
+    /// 一注的每个区都在值域里、两位数的区升序不重复。
+    private static func sound(_ line: [Value], sections: [GameSection]) -> Bool {
+        var cursor = 0
+        for section in sections {
+            guard cursor + section.count <= line.count else { return false }
+            guard ordered(line[cursor..<cursor + section.count].map(\.value), section: section) else { return false }
+            cursor += section.count
+        }
+        return cursor == line.count
+    }
+
+    /// **模型读到的行当骨架，Vision 的读数拿来对。**
+    ///
+    /// 上一版反过来：Vision 认出几注就是几注，模型只能在这几注里补问号。真机上 Vision 把
+    /// `⑤ 07 12 18 19 27` 读成 `07 12 118 19 27`，整注被丢；把 `② 09` 读成 `Q09`，后面全错开 ——
+    /// 这两注模型其实都读对了，但没有地方可放。
+    ///
+    /// 只有模型这边**自己站得住**才换骨架：
+    /// 1. 每一行都按这个彩种该有的位数读成了（`skeleton`）；
+    /// 2. 注数乘单价正好等于票面印的合计 —— 这是和号码无关的第三个读数。
+    ///
+    /// 换了骨架之后 Vision 仍然有用：它读出来的每一注去找模型的同一行，
+    /// 同一个号码两边不一样就标问号；模型没把握的那一位用 Vision 的。
+    /// 条件不满足就返回 nil，走原来「Vision 为骨架、模型补问号」的路。
+    static func rebuild(_ ticket: inout ScannedTicket, rows: [[GlyphRows.Token]]) -> Report? {
+        let game = ticket.game
+        guard ticket.play == .single, let total = ticket.totalAmount, total > 0,
+              let skeleton = skeleton(game: game, rows: rows) else { return nil }
+        // 排列3 每一注还带着自己的玩法（组三 / 组六），注数变了就对不上了
+        if !ticket.lineModes.isEmpty, ticket.lineModes.count != skeleton.lines.count { return nil }
+        let sections = game.sections
+        var blockUnits = 0
+        if !skeleton.zones.isEmpty {
+            guard let front = skeleton.zones[sections[0].key], let back = skeleton.zones[sections[1].key] else { return nil }
+            blockUnits = combinations(front.count, sections[0].count) * combinations(back.count, sections[1].count)
+        }
+        let units = Double((skeleton.lines.count + blockUnits) * max(ticket.multiple, 1) * max(ticket.periods, 1))
+        let prices: [Double] = game == .dlt ? [2, 3] : [2]
+        guard prices.contains(where: { abs(units * $0 - total) < 0.01 }) else { return nil }
+
+        // Vision 读到的每一注去找模型的同一行
+        let slots: [Slot] = ticket.lines.indices.filter { !ticket.lines[$0].isEmpty }.map { .line($0) }
+        var options = [[Option?]](repeating: [Option?](repeating: nil, count: rows.count), count: slots.count)
+        for (slotIndex, slot) in slots.enumerated() {
+            for rowIndex in skeleton.rows {
+                options[slotIndex][rowIndex] = option(for: slot, in: ticket, tokens: rows[rowIndex])
+            }
+        }
+        var visionAt: [Int: [Int]] = [:]
+        for pair in settle(match(options), options: options) {
+            visionAt[pair.row] = current(of: slots[pair.slot], in: ticket)
+        }
+
+        var report = Report(expected: skeleton.lines.count, read: skeleton.lines.count, rebuilt: true)
+        var lines: [NumberSet] = []
+        for (line, row) in zip(skeleton.lines, skeleton.rows) {
+            let vision = visionAt[row]
+            var numbers = NumberSet()
+            var cursor = 0
+            for section in sections {
+                var values: [Int] = []
+                for _ in 0..<section.count {
+                    let model = line[cursor]
+                    let seen = vision.flatMap { cursor < $0.count ? $0[cursor] : nil } ?? NumberSet.unknown
+                    cursor += 1
+                    let sure = model.confidence >= threshold
+                    if seen < 0 {
+                        values.append(sure ? model.value : NumberSet.unknown)
+                        if sure { report.filled += 1 }
+                    } else if !sure {
+                        values.append(seen)
+                    } else if seen == model.value {
+                        values.append(seen)
+                        report.confirmed += 1
+                    } else {
+                        values.append(NumberSet.unknown)
+                        report.disputed += 1
+                    }
+                }
+                // 拿 Vision 的值顶上之后不合规了：这一区里 Vision 顶上的那几位退回问号
+                if !ordered(values, section: section) {
+                    for position in values.indices where line[cursor - section.count + position].confidence < threshold {
+                        values[position] = NumberSet.unknown
+                    }
+                }
+                numbers[section.key] = values
+            }
+            lines.append(numbers)
+        }
+        ticket.lines = lines
+        if !skeleton.zones.isEmpty {
+            ticket.isPackage = true
+            for section in sections {
+                guard let values = skeleton.zones[section.key] else { continue }
+                apply(values, to: .zone(section.key), ticket: &ticket, report: &report)
+            }
+        }
+        refreshWarnings(&ticket)
+        return report
+    }
+
+    static func combinations(_ total: Int, _ pick: Int) -> Int {
+        guard pick >= 0, total >= pick else { return 0 }
+        var result = 1
+        for index in 0..<pick { result = result * (total - index) / (index + 1) }
+        return result
+    }
+
+    /// 模型读到的每一行，写成一行字。放在「识别原文」后面，出了问题一眼看得出模型读到了什么：
+    /// 数字照写，「不是数字」写 `x`，没把握的数字后面跟一个 `?`。
+    static func describe(_ rows: [[GlyphRows.Token]]) -> String {
+        rows.map { tokens in
+            tokens.map { token -> String in
+                guard token.digit != DigitClassifier.reject else { return "x" }
+                return token.confidence >= threshold ? String(token.digit) : "\(token.digit)?"
+            }.joined()
+        }.filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
     // MARK: - 一行读成号码

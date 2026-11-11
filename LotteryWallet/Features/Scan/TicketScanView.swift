@@ -61,6 +61,18 @@ struct TicketScanView: View {
     @State private var marks: [TicketLocateView.Mark] = []
     /// 预识别页上要说的话（上一次这些框里一张都没认出来）。
     @State private var locateNotice: String?
+    /// 预识别页摆出来的同时，后台已经在逐张认了。认完的存在这里：
+    /// 一来框上的彩种用**真正识别出来的**（整张照片上的小字常常读不出票头）；
+    /// 二来用户没动过的框，点「识别」时不用再认一遍。
+    @State private var prescans: [TicketLocateView.Mark.ID: Prescan] = [:]
+    @State private var prescanTask: Task<Void, Never>?
+
+    struct Prescan {
+        /// 认的时候框在哪儿。用户拖过角之后就对不上了，要重认。
+        var quad: TicketQuad
+        var page: TicketVisionScanner.ScannedPage
+        var image: UIImage
+    }
 
     /// 一个 ForEach 里挂很多个 `.sheet` 是 SwiftUI 的经典坑（只有最后一个生效），
     /// 所以期号选择器和号码编辑器都提到根视图上，用 item 驱动。
@@ -1260,13 +1272,34 @@ struct TicketScanView: View {
         // 横着或倒着拍的照片，找票时已经转正了；之后都用转正的那张。
         preview = located.image
         marks = located.tickets.map { TicketLocateView.Mark(quad: $0.quad, game: $0.game) }
+        prescans = [:]
         stage = .locate
+        prescan(located.image)
+    }
+
+    /// 后台把预识别页上的每个框先认一遍，认出来的彩种写回框上。
+    private func prescan(_ image: UIImage) {
+        prescanTask?.cancel()
+        let pending = marks
+        prescanTask = Task {
+            for mark in pending {
+                guard !Task.isCancelled else { return }
+                let corrected = await TicketImagePreprocessor.prepare(image, quad: mark.quad)
+                guard var page = try? await TicketVisionScanner.scan(corrected), !Task.isCancelled else { continue }
+                polish(&page)
+                // 认的这会儿用户可能已经把这个框拖走或者删了
+                guard let index = marks.firstIndex(where: { $0.id == mark.id }), marks[index].quad == mark.quad else { continue }
+                prescans[mark.id] = Prescan(quad: mark.quad, page: page, image: corrected)
+                if let game = page.result.tickets.first?.game { marks[index].game = game }
+            }
+        }
     }
 
     /// 按预识别页上的框逐张识别。
     ///
     /// 每张票各走一遍和单张**完全相同**的识别流程（摆正 → 识别 → 校验）。
     private func scanMarks(_ image: UIImage) async {
+        prescanTask?.cancel()
         stage = .scanning
         errorText = nil
         var found: [ScannedTicket] = []
@@ -1277,13 +1310,26 @@ struct TicketScanView: View {
         var last: (registration: TicketRegistration.Result, image: UIImage)?
         var notes: [String] = []
         for (index, mark) in marks.enumerated() {
-            let corrected = await TicketImagePreprocessor.prepare(image, quad: mark.quad)
-            croppedPreview = corrected
-            guard var page = try? await TicketVisionScanner.scan(corrected), !page.result.tickets.isEmpty else {
+            let page: TicketVisionScanner.ScannedPage
+            let corrected: UIImage
+            if let ready = prescans[mark.id], ready.quad == mark.quad {
+                // 预识别时已经认过、框也没动：直接用
+                (page, corrected) = (ready.page, ready.image)
+                croppedPreview = corrected
+            } else {
+                corrected = await TicketImagePreprocessor.prepare(image, quad: mark.quad)
+                croppedPreview = corrected
+                guard var scanned = try? await TicketVisionScanner.scan(corrected) else {
+                    missed.append(index + 1)
+                    continue
+                }
+                polish(&scanned)
+                page = scanned
+            }
+            guard !page.result.tickets.isEmpty else {
                 missed.append(index + 1)
                 continue
             }
-            polish(&page)
             found += page.result.tickets
             images.merge(page.images) { current, _ in current }
             warnings += page.result.warnings
@@ -1368,6 +1414,8 @@ struct TicketScanView: View {
         stage = .intro
         marks = []
         locateNotice = nil
+        prescanTask?.cancel()
+        prescans = [:]
         preview = nil
         croppedPreview = nil
         photoItem = nil

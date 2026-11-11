@@ -90,8 +90,14 @@ enum TicketVisionScanner {
                                                  game: result.tickets[0].game, classifier: classifier) {
                 let report = ModelFusion.fuse(&result.tickets[0], rows: reading.rows)
                 registration.debug.notes.append(report.note)
+                // 模型读到的每一行附在识别原文后面。两个读数都摆出来，哪一步出的岔子才看得出来。
+                if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
+                result.rawText += "\n\n［模型读行］\(report.note.replacingOccurrences(of: "模型读行：", with: ""))\n"
+                    + ModelFusion.describe(reading.rows)
             } else {
                 registration.debug.notes.append("模型读行：号码区没夹出来，这次没有复核")
+                if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
+                result.rawText += "\n\n［模型读行］号码区没夹出来，这次没有复核"
             }
         }
         // 一个字都没认出来和「认出字但拼不成票」是两回事，

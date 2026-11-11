@@ -154,4 +154,86 @@ final class ModelFusionTests: XCTestCase {
         XCTAssertEqual(ticket, before)
         XCTAssertEqual(report.expected, 0)
     }
+
+    // MARK: - 模型读到的行当骨架
+
+    private let packageRows = ["x 11 16 21 32 35 11 12", "x 09 12 13 23 28 03 11", "x 02 18 21 26 28 05 10",
+                               "x 03 07 11 26 33 07 08", "x 07 12 18 19 27 02 12", "x 09 14 18 22 28 08 10",
+                               "xx 02 15 30 31 33", "xx 02 05 11", "xxx"]
+
+    /// 真机上那张套餐票：Vision 把第二注读成 `Q09 1213 23 28`（错开一位）、把第五注读成
+    /// `07 12 118 19 27`（整注被丢）。模型六行都读对了，注数和合计 18 元也对得上 —— 以模型为准。
+    func testTicketIsRebuiltFromTheModelWhenTheTotalAgrees() {
+        var ticket = dlt([([11, 16, 21, 32, 35], [11, 12]), ([12, 13, 23, 28, -1], [3, 11]),
+                          ([2, 18, 21, 26, 28], [5, 10]), ([3, 7, 11, 26, 33], [7, 8]),
+                          ([9, 14, 18, 22, 28], [8, 10])])
+        ticket.isPackage = true
+        ticket.selections[.front] = SectionSelection(selected: [2, 15, 30, 31, 33])
+        ticket.selections[.back] = SectionSelection(selected: [2, 5, 11])
+        ticket.totalAmount = 18
+        let report = ModelFusion.fuse(&ticket, rows: packageRows.map(row))
+        XCTAssertTrue(report.rebuilt)
+        XCTAssertEqual(ticket.lines.count, 6)
+        XCTAssertEqual(ticket.lines[1][.front], [9, 12, 13, 23, 28])
+        XCTAssertEqual(ticket.lines[4][.front], [7, 12, 18, 19, 27])
+        XCTAssertEqual(ticket.lines[4][.back], [2, 12])
+        XCTAssertFalse(ticket.hasUnknown)
+        XCTAssertEqual(ticket.totalCost, 18)
+    }
+
+    /// 重建之后 Vision 的读数仍然算数：同一注里两边不一样的那个号码标问号。
+    func testRebuiltTicketStillMarksDisagreements() {
+        var ticket = dlt([([11, 16, 21, 32, 35], [11, 12]), ([9, 12, 13, 23, 28], [3, 11]),
+                          ([2, 18, 21, 26, 29], [5, 10]), ([3, 7, 11, 26, 33], [7, 8]),
+                          ([7, 12, 18, 19, 27], [2, 12]), ([9, 14, 18, 22, 28], [8, 10])])
+        ticket.totalAmount = 12
+        let report = ModelFusion.fuse(&ticket, rows: Array(packageRows.prefix(6)).map(row))
+        XCTAssertTrue(report.rebuilt)
+        XCTAssertEqual(ticket.lines[2][.front], [2, 18, 21, 26, -1], "Vision 读 29、模型读 28：标问号")
+        XCTAssertEqual(report.disputed, 1)
+    }
+
+    /// 注数和票面合计对不上：模型这边站不住，不换骨架，照旧只补问号。
+    func testNoRebuildWhenTheTotalDisagrees() {
+        var ticket = dlt([([11, 16, 21, 32, 35], [11, 12]), ([9, 12, 13, 23, 28], [3, 11])])
+        ticket.totalAmount = 4
+        let report = ModelFusion.fuse(&ticket, rows: Array(packageRows.prefix(6)).map(row))
+        XCTAssertFalse(report.rebuilt)
+        XCTAssertEqual(ticket.lines.count, 2)
+    }
+
+    /// 没读到票面合计：没有第三个读数可对，不换骨架。
+    func testNoRebuildWithoutAPrintedTotal() {
+        var ticket = dlt([([11, 16, 21, 32, 35], [11, 12])])
+        let report = ModelFusion.fuse(&ticket, rows: Array(packageRows.prefix(6)).map(row))
+        XCTAssertFalse(report.rebuilt)
+        XCTAssertEqual(ticket.lines.count, 1)
+    }
+
+    /// 追加票 3 元一注：三注 9 元也对得上。
+    func testAddOnPriceAlsoCounts() {
+        var ticket = dlt([([5, 12, 23, 30, 35], [2, 11])])
+        ticket.totalAmount = 9
+        let report = ModelFusion.fuse(&ticket, rows: rows.map(row))
+        XCTAssertTrue(report.rebuilt)
+        XCTAssertEqual(ticket.lines.count, 3)
+    }
+
+    /// 七星彩：Vision 丢了两注的特别号，另有一注整行没读出来。
+    func testSevenStarsIsRebuiltWithItsTails() {
+        var ticket = qxc([[3, 3, 2, 7, 6, 0, 11], [2, 4, 7, 3, 1, 1, -1], [7, 9, 7, 4, 2, 0, 14], [2, 9, 7, 4, 6, 2, -1]])
+        ticket.totalAmount = 10
+        let model = ["x 3 3 2 7 6 0   11", "x 2 4 7 3 1 1   11", "x 7 9 7 4 2 0   14",
+                     "x 0 1 3 3 4 9   8", "x 2 9 7 4 6 2   13"].map(row)
+        let report = ModelFusion.fuse(&ticket, rows: model)
+        XCTAssertTrue(report.rebuilt)
+        XCTAssertEqual(ticket.lines.count, 5)
+        XCTAssertEqual(ticket.lines[1][.tail], [11])
+        XCTAssertEqual(ticket.lines[3][.nums6], [0, 1, 3, 3, 4, 9])
+        XCTAssertEqual(ticket.lines[4][.tail], [13])
+    }
+
+    func testDescribeShowsWhatTheModelRead() {
+        XCTAssertEqual(ModelFusion.describe([row("x 05 l2"), row("xx")]), "x051?2\nxx")
+    }
 }
