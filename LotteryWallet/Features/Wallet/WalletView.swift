@@ -361,7 +361,8 @@ struct WalletView: View {
         if item == .pending {
             return isOn ? AnyShapeStyle(Palette.warning) : AnyShapeStyle(Palette.warning.opacity(0.15))
         }
-        return isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Palette.card)
+        // 没选中的用和首页分段控件一样的浅灰底，不再是一块块白卡片
+        return isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary.opacity(0.06))
     }
 
     /// 空状态要分清是「一张票都没有」还是「筛选之后没有」。

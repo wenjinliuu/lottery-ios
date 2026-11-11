@@ -22,12 +22,15 @@ struct BallView: View {
         return padded && value < 10 ? String(format: "%02d", value) : String(value)
     }
 
-    /// 未命中的球换成实心中性灰，而不是把彩色球调透明。
-    /// 半透明的做法会连白字一起变淡，整张票看起来像褪了色；
-    /// 灰球是「设计成这样」，透明球是「没加载完」。
+    /// 未命中的球：很淡的彩种色底，数字用彩种的深色。
+    ///
+    /// 第一版是实心中性灰 —— 一排灰球里只有命中的有颜色，整张票显得没精神。
+    /// 也不是把彩色球整体调透明：那样白字跟着变淡，像没加载完。
+    /// 现在底是淡的、字是实的，一眼看得出是哪个彩种的球，命中的实心球照样跳得出来。
     private var fill: LinearGradient {
         isDimmed
-            ? LinearGradient(colors: [Palette.missLight, Palette.missDeep], startPoint: .top, endPoint: .bottom)
+            ? LinearGradient(colors: [color.accentColor.opacity(0.13), color.accentColor.opacity(0.19)],
+                             startPoint: .top, endPoint: .bottom)
             : color.gradient
     }
 
@@ -74,7 +77,7 @@ struct BallView: View {
     private var unknownOrRegularInk: Color {
         if isUnknown { return Palette.warning }
         if isHollow { return color.accentColor }
-        return isDimmed ? Palette.missInk : Color.white
+        return isDimmed ? color.accentColor : Color.white
     }
 
     private var accessibilityText: String {

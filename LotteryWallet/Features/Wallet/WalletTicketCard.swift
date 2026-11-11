@@ -373,6 +373,7 @@ struct WalletTicketCard: View {
     /// 时候，这句话都得跟着那张票 —— 兑奖依据是他手里那张纸，不是这里的记录。
     private var disclaimer: some View {
         DisclaimerNote(text: Disclaimer.card)
-            .padding(.top, 8)
+            .opacity(0.75)
+            .padding(.top, 6)
     }
 }

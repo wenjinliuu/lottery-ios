@@ -22,9 +22,12 @@ struct TicketPaper<Content: View>: View {
             // 实际效果是每张卡片都糊着一块颜色，一列卡片刷下来很脏；
             // 而且彩种已经有描边和标题两处在说了，第三处纯属重复。
             .background(Palette.card, in: shape)
+            // 原来每张票一圈彩种色的描边：几张叠在一起红紫蓝各一圈，显得花。
+            // 现在只留一道极淡的发丝线，靠一层很浅的阴影把卡片托起来；认彩种靠左上角的彩种名。
             .overlay {
-                shape.stroke(game.tint.opacity(0.30), lineWidth: 1)
+                shape.strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
             }
+            .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 3)
             .overlay(alignment: .topLeading) { notches }
     }
 

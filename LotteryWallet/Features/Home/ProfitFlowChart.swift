@@ -134,9 +134,13 @@ struct ProfitFlowChart: View {
             HStack(alignment: .top, spacing: 8) {
                 cell("投入", reading.cost, mode == .cumulative ? Self.spend : Color.primary)
                 cell("奖金", reading.prize, Palette.profit)
-                cell("公益金", reading.welfare, Palette.warning)
-                cell(reading.lastTitle, reading.lastValue,
-                     mode == .monthly ? Palette.missInk : (reading.lastIsGain ? Palette.profit : Palette.loss))
+                // 没按住的时候，公益金和净值就是上面大数字那两行，不再重复一遍；
+                // 按住拖动时四个数都给，那是「那一天」的数，上面没有。
+                if selectedDay != nil || selectedMonth != nil || mode == .monthly {
+                    cell("公益金", reading.welfare, Palette.warning)
+                    cell(reading.lastTitle, reading.lastValue,
+                         mode == .monthly ? Palette.missInk : (reading.lastIsGain ? Palette.profit : Palette.loss))
+                }
             }
         }
     }
