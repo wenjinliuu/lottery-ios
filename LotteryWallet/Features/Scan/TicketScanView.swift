@@ -124,6 +124,12 @@ struct TicketScanView: View {
                 case .review: review
                 }
             }
+            // 找票、预识别、识别、结果，几步之间淡入淡出，不是硬切
+            .transition(.opacity)
+            .animation(.smooth(duration: 0.28), value: stage)
+            // 结果出来时震一下；预识别页加框、删框时轻点一下
+            .sensoryFeedback(trigger: stage) { _, new in new == .review ? .success : nil }
+            .sensoryFeedback(.impact(weight: .light), trigger: marks.count)
             // **必须和抽屉面板同一个底色。**
             //
             // 这里原来是 `.clear`（当年抽屉是半透明玻璃时的写法）。改成自绘

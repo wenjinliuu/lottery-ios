@@ -47,7 +47,12 @@ struct TicketLocateView: View {
 
                     ForEach(Array(marks.enumerated()), id: \.element.id) { index, mark in
                         outline(mark, number: index + 1, in: frame)
+                            // 框一个个浮出来；认出彩种时颜色和牌子平滑换过去
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                            .animation(.smooth(duration: 0.3), value: mark.game)
+                            .animation(.smooth(duration: 0.3), value: mark.isResolving)
                     }
+                    .animation(.spring(response: 0.38, dampingFraction: 0.82), value: marks.map(\.id))
                     if let index = marks.firstIndex(where: { $0.id == selected }) {
                         ForEach(0..<4, id: \.self) { corner in
                             handle(mark: index, corner: corner, in: frame)

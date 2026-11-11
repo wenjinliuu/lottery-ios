@@ -25,6 +25,8 @@ struct HomeView: View {
     @Query(sort: \TicketRecord.createdAt, order: .reverse) private var records: [TicketRecord]
 
     @State private var range: ProfitRange = .all
+    /// 卡片里画曲线还是方格。两种二选一，记住上次选的。
+    @AppStorage("home.chartStyle") private var chartStyle = HomeChartStyle.line.rawValue
     @State private var series = ProfitSeries()
     @State private var monthStats = ProfitStats.PeriodStats()
     /// 下面那张概览卡看哪一段：某年某月、某年全年（月份为 nil）、或者全部。
@@ -106,7 +108,8 @@ struct HomeView: View {
                 // 最新开奖先显示；日历按年缓存，拿到后再显示准确的今日标记。
                 await drawStore.loadCalendar(year: ChinaClock.year())
             }
-            .onChange(of: range) { _, _ in recomputeSeries() }
+            // 换范围时曲线和数字一起过渡，不是啪地一下换掉
+            .onChange(of: range) { _, _ in withAnimation(.snappy(duration: 0.35)) { recomputeSeries() } }
             .onChange(of: overviewYear) { _, _ in recompute() }
             .onChange(of: overviewMonth) { _, _ in recompute() }
             .onChange(of: isOverviewAll) { _, _ in recompute() }
@@ -199,28 +202,47 @@ struct HomeView: View {
                     // 公益金逐条按彩种计提，比例见 `GameKey.welfareRate` ——
                     // 八个彩种不是同一个比例，不能拿总额乘一个数。
                     inlineStat("公益金", "\(MoneyText.grouped(series.welfareTotal)) 元", tint: Palette.warning)
+                    Spacer(minLength: 0)
+                    // 曲线看总数怎么涨，方格看每一天。二选一。
+                    Picker("图表样式", selection: $chartStyle) {
+                        Image(systemName: "chart.xyaxis.line")
+                            .accessibilityLabel("曲线")
+                            .tag(HomeChartStyle.line.rawValue)
+                        Image(systemName: "square.grid.3x3.fill")
+                            .accessibilityLabel("方格")
+                            .tag(HomeChartStyle.grid.rawValue)
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    .accessibilityIdentifier("home.chart.style")
                 }
             }
 
             // 原来这里是逐日方格图加四个数字方块。方块里的数现在都在图上面那一行，
             // 而且按住图表拖动时会跟着变成那一天的数。
-            ProfitFlowChart(series: series, mode: .cumulative)
-
-            // 曲线看总数，方格看每一天：哪天买了、哪天中了。两张图用同一个范围。
-            if !series.days.isEmpty {
-                Divider()
-                VStack(alignment: .leading, spacing: 8) {
-                    ProfitHeatmap(days: series.days, range: range, width: screenWidth - 64)
-                    HStack(spacing: 12) {
-                        heatLegend(Palette.profit, "当天有中奖")
-                        heatLegend(Palette.loss, "当天没中")
-                        Text("颜色越深金额越大")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+            Group {
+                if chartStyle == HomeChartStyle.grid.rawValue, !series.days.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ProfitHeatmap(days: series.days, range: range, width: screenWidth - 64)
+                        HStack(spacing: 12) {
+                            heatLegend(Palette.profit, "当天有中奖")
+                            heatLegend(Palette.loss, "当天没中")
+                            Text("颜色越深金额越大")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                } else {
+                    ProfitFlowChart(series: series, mode: .cumulative)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
             }
+            .animation(.smooth(duration: 0.3), value: chartStyle)
         }
+        // 换范围、换图表样式时各给一下轻的触感
+        .sensoryFeedback(.selection, trigger: range)
+        .sensoryFeedback(.selection, trigger: chartStyle)
         .contentCard()
     }
 
@@ -564,6 +586,11 @@ extension EnvironmentValues {
         get { self[ScreenWidthKey.self] }
         set { self[ScreenWidthKey.self] = newValue }
     }
+}
+
+/// 首页那张卡片里画哪一种图。
+enum HomeChartStyle: String {
+    case line, grid
 }
 
 // MARK: - 收支热力图
