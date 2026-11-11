@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="对个号 的隐私政策。本应用不收集任何个人信息，所有数据仅保存在设备本地。">
+<meta name="description" content="对个号 的隐私政策。票据数据仅保存在设备本地；只有开启开奖通知时才登记推送令牌和订阅的彩种。">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#101014" media="(prefers-color-scheme: dark)">
@@ -276,14 +276,14 @@
     </div>
   </header>
 
-  <p class="effective">生效日期：2026 年 9 月 28 日</p>
+  <p class="effective">生效日期：2026 年 11 月 12 日</p>
 
   <div class="summary">
     <h2>要点速览</h2>
     <ul>
       <li>
         <span class="tick" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.3 4.6 9 10 3"/></svg></span>
-        <span><b>不收集任何个人信息。</b><small>我们没有接收或保存用户数据的后端，唯一的服务端只提供公开的开奖数据。无需注册登录，不获取设备标识、位置或通讯录。</small></span>
+        <span><b>票据不离开你的手机。</b><small>无需注册登录，不获取位置或通讯录。唯一会发给服务端的，是你主动开启「开奖通知」后的推送令牌和订阅的彩种，用来把开奖通知发给这台设备。</small></span>
       </li>
       <li>
         <span class="tick" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.3 4.6 9 10 3"/></svg></span>
@@ -297,12 +297,12 @@
   </div>
 
   <section>
-    <h2><span class="num">01</span>我们不收集任何个人信息</h2>
-    <p>「对个号」（以下简称「本应用」）是一款帮助用户记录自己手里已有的实体票号码、并在开奖后进行核对的个人工具，由个人独立开发，与任何彩票发行或销售机构均无关联。本应用没有任何形式的用户信息收集行为，具体而言：</p>
+    <h2><span class="num">01</span>我们收集什么、不收集什么</h2>
+    <p>「对个号」（以下简称「本应用」）是一款帮助用户记录自己手里已有的实体票号码、并在开奖后进行核对的个人工具，由个人独立开发，与任何彩票发行或销售机构均无关联。具体而言：</p>
     <ul class="body">
-      <li>不存在<strong>接收或保存用户数据的后端系统</strong>：我们唯一的服务端只对外提供公开的开奖数据，只读，不接收任何用户数据（见第 04 节）；</li>
+      <li><strong>票据、号码、金额和照片不会上传</strong>：服务端对外提供公开的开奖数据，唯一接收的用户侧信息是「开奖通知」的推送令牌和订阅的彩种（见第 04 节），而且只在您主动开启该功能后；</li>
       <li>无需注册、无需登录，不要求您提供姓名、手机号、邮箱或任何其他身份信息；</li>
-      <li>不获取设备标识符（如 IDFA、IDFV）、广告标识、地理位置、通讯录、日历或麦克风；</li>
+      <li>不获取广告标识（IDFA）、IDFV、地理位置、通讯录、日历或麦克风；</li>
       <li>不对您的使用行为进行任何形式的跟踪、画像或统计。</li>
     </ul>
   </section>
@@ -333,19 +333,21 @@
     <ul class="body">
       <li><strong>相机权限</strong>：仅在您主动点击拍照按钮时调用，用于拍摄纸质票据。应用不会在后台或未经您操作的情况下启用相机。</li>
       <li><strong>照片权限</strong>：仅用于读取您本人主动选择的那一张图片，本应用不会浏览、扫描或读取您相册中的其他内容。</li>
+      <li><strong>通知权限</strong>：仅在您于「设置」中打开「开奖通知」时申请，用于在开奖后提醒您。该开关默认关闭，可随时关闭。</li>
     </ul>
     <p>票面号码的<strong>文字识别全部在您的设备本地完成</strong>，使用的是 Apple 系统内置的图像识别能力。照片及其识别结果<strong>不会上传到任何服务器</strong>，识别完成后照片即被释放，本应用不会留存原始照片。</p>
   </section>
 
   <section>
     <h2><span class="num">04</span>第三方服务</h2>
-    <p>本应用<strong>未集成任何第三方广告、统计或数据分析 SDK</strong>，不存在任何形式的数据外传或数据共享，也不会将您的信息出售、出租或披露给任何第三方。</p>
+    <p>本应用<strong>未集成任何第三方广告、统计或数据分析 SDK</strong>，也不会将您的信息出售、出租或披露给任何第三方。</p>
     <p>为了显示开奖号码和开奖日历，本应用会读取<strong>公开的、只读的</strong>开奖数据：</p>
     <ul class="body">
       <li>首选开发者部署在<strong>腾讯云 CloudBase</strong>（上海地域）上的开奖数据接口；</li>
       <li>该接口不可用时，改为读取 GitHub 上公开仓库里的同一份静态数据（raw.githubusercontent.com）。</li>
     </ul>
     <p>这两处都只提供公开的开奖信息。请求是不带身份信息的普通 HTTPS 读取，<strong>不包含您的任何票据、个人信息或使用数据</strong>，也不携带设备标识或账号。与所有联网请求一样，云服务商会在访问日志里记录请求的 IP 地址和时间，用于保障服务的安全和稳定运行；我们不会用这些日志识别您的身份，也不会把它们和任何其他信息关联。</p>
+    <p><strong>关于「开奖通知」：</strong>该功能<strong>默认关闭</strong>。开启后，应用会向上述腾讯云接口登记两样东西：Apple 分配给这台设备的<strong>推送令牌</strong>，以及您<strong>订阅的彩种</strong>（即最近买过或手里有待开奖票据的彩种，例如「双色球、大乐透」）。它们只用于在对应彩种开奖后，经 Apple 的推送服务（APNs）把开奖号码发给这台设备。通知里的「中没中」是应用收到开奖号码后<strong>在您的设备本机</strong>用本机票据核对出来的，票据本身不会上传。推送令牌不关联账号或身份；关闭开关后订阅即被清空，令牌失效后会被停用。</p>
   </section>
 
   <section>

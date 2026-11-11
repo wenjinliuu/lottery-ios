@@ -7,6 +7,10 @@
 
 每次提交前照文末的对照表复核一遍，避免备注和实现漂移。
 
+**下次提交前必须重写（2026-11-12）：** 中国区已被苹果按第 5 条下架（账号主体不是彩票机构），备案号已从 App 里拿掉。
+新加的「开奖通知」会向云端登记推送令牌和订阅的彩种，下面正文里 "Requests carry no user data or identifiers"、
+"Data Not Collected"、"unauthenticated HTTPS GET" 三处都不再成立，App Store Connect 的隐私标签也要改成收集了设备标识（用于 App 功能）。
+
 **措辞原则（1.2.0 (70) 因 5.2.1 被拒后定下）：** 如实说，但不反复强调。定位是「个人票据
 记账本」；「lottery」只在「与任何彩票机构无关」那一句出现；不引用 5.3 等赌博类条款编号，
 不写玩法的英文名（如 Super Lotto），不主动解释随机填充这类会把注意力引到选号上的功能。
@@ -27,7 +31,7 @@ WHAT IT DOES NOT DO
 - No selling, ordering or buying on anyone's behalf; no purchase links or entry points.
 - No money of any kind: no payments, balances, prize claims or In-App Purchase (no StoreKit code).
 - No predictions, odds, trends or number recommendations.
-- No web view, no third-party SDK. The only outbound links (Settings > About) are the Privacy Policy, Support, and the ICP filing number, which opens beian.miit.gov.cn.
+- No web view, no third-party SDK. The only outbound links (Settings > About) are the Privacy Policy and Support.
 - Amounts shown are only those printed on the user's own slips, or results already published.
 
 HOW TO TEST
@@ -56,7 +60,7 @@ Thank you for your review.
 | --- | --- |
 | 无第三方 SDK | `project.yml` 无 `packages:` 段 |
 | 无内购 / 无内嵌网页 | `grep -rn 'StoreKit\|WKWebView\|SFSafariViewController' LotteryWallet/` 为空 |
-| 仅有的外链是隐私政策、技术支持和备案查询 | `grep -rn 'Link(destination\|openURL' LotteryWallet/` 只应命中 `SettingsView.swift` 的三条（`privacyURL`、`supportURL`、`icpLookupURL`） |
+| 仅有的外链是隐私政策和技术支持 | `grep -rn 'Link(destination\|openURL' LotteryWallet/` 只应命中 `SettingsView.swift` 的两条（`privacyURL`、`supportURL`） |
 | 网络端点只有两个，都是公开只读 GET | `LotteryWallet/Data/V2/LotteryAPIClient.swift`：`cloudBase`（腾讯云 CloudBase，上海）为主、`github`（raw.githubusercontent.com）兜底；无 Authorization 头、无任何参数带用户数据。隐私政策第 04 节写的是同一件事 |
 | 权限用途 | `project.yml` 的 NSCameraUsageDescription / NSPhotoLibraryUsageDescription |
 | 各处免责声明 | `grep -rn 'Disclaimer\.' LotteryWallet/`，文案集中在 `Design/Disclaimer.swift` |
@@ -74,4 +78,3 @@ Thank you for your review.
 | 扫描步骤里的「重置」 | 这张图自动框选会框到打码的二维码（`TicketImagePreprocessor.suggestedQuad` 取面积最大的矩形），点「重置」用整张内缩 8% 的默认框。自动框选修好后删掉这一句 |
 | 首次保存弹「使用提示」 | 见上面「首次保存「使用提示」两条保存路径都拦」 |
 | 附件 | 提交时附上 `Tests/LotteryWalletUITests/Fixtures/review-ticket.jpg` |
-| 备案号 | 关于页最底部 `AboutView.icpFiling`（沪ICP备2026015335号-2A），点了打开 beian.miit.gov.cn；所有地区都显示 |

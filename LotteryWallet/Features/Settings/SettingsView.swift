@@ -7,6 +7,13 @@ struct SettingsView: View {
     @Query private var records: [TicketRecord]
 
     @State private var isRefreshing = false
+    private var push: DrawPushCenter { DrawPushCenter.shared }
+
+    /// 开关的状态以 `DrawPushCenter` 为准：系统授权被拒时它自己会弹回关。
+    private var pushBinding: Binding<Bool> {
+        Binding(get: { push.isEnabled },
+                set: { isOn in Task { if isOn { await push.enable() } else { await push.disable() } } })
+    }
 
 
     var body: some View {
@@ -21,6 +28,24 @@ struct SettingsView: View {
                         }
                     } footer: {
                         Text("每次打开应用并拿到新开奖数据时，自动核对待开奖的票据。")
+                    }
+
+                    Section {
+                        Toggle(isOn: pushBinding) {
+                            LabeledContent {
+                                // 开着且一切正常时不用再说一遍「已开启」。
+                                if push.status != .on && push.status != .off {
+                                    Text(push.status.label)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .multilineTextAlignment(.trailing)
+                                }
+                            } label: {
+                                row("bell.badge.fill", .red, "开奖通知")
+                            }
+                        }
+                    } footer: {
+                        Text("手里有票的彩种开奖后推送一条通知，并在本机核对好中没中。票据不会上传，云端只知道这台设备订了哪几个彩种。")
                     }
 
                     Section {
@@ -181,11 +206,6 @@ struct SettingsView: View {
 struct AboutView: View {
     static let privacyURL = URL(string: "https://wenjinliuu.github.io/lottery-ios/")!
     static let supportURL = URL(string: "https://wenjinliuu.github.io/lottery-ios/support.html")!
-    /// App 备案号。工信部要求在 App 显著位置标明；所有地区都显示，
-    /// 海外用户看到一行小字没有任何影响，按地区藏起来反而要引入 StoreKit 读商店地区。
-    static let icpFiling = "沪ICP备2026015335号-2A"
-    /// 工信部备案查询。点备案号跳这里，和网站底部备案号的通行做法一致。
-    static let icpLookupURL = URL(string: "https://beian.miit.gov.cn/")!
 
     private func linkRow(_ title: String, systemImage: String) -> some View {
         HStack(spacing: 10) {
@@ -230,17 +250,6 @@ struct AboutView: View {
                 Text("以上两个链接会在浏览器中打开，页面为纯静态内容，不会收集任何信息。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                // 备案号：页面最底下一行小字，点了去工信部备案查询。
-                Link(destination: AboutView.icpLookupURL) {
-                    Text(AboutView.icpFiling)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .underline()
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 12)
-                .accessibilityHint("在浏览器中打开工信部备案查询")
             }
             .font(.subheadline)
             .padding(20)

@@ -4,6 +4,7 @@ import Observation
 
 @main
 struct LotteryWalletApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var drawStore = DrawStore()
     @State private var settings: AppSettings
     /// 数据库的健康状态。建库和它一起产生，见 `ModelStore`。
@@ -28,6 +29,9 @@ struct LotteryWalletApp: App {
         } else {
             container = ModelStore.makeContainer(health: health)
         }
+        // 开奖通知在后台把 App 叫起来时没有任何视图，数据库只能从这里拿。
+        // 示例模式的内存库不交出去：那里面是假票据。
+        if !DemoData.isEnabled { DrawPushCenter.shared.container = container }
         _storeHealth = State(initialValue: health)
         _settings = State(initialValue: AppSettings())
     }

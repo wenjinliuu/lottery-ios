@@ -140,6 +140,8 @@ struct RootView: View {
             // 自动备份常开（一天一次、留两份，见 `BackupPolicy`），开关只决定存本机还是 iCloud。
             guard phase == .background, !DemoData.isEnabled else { return }
             autoBackup()
+            // 这一轮可能新录了别的彩种的票：把订阅的彩种跟上。没变就不发请求。
+            Task { await DrawPushCenter.shared.syncSubscription() }
         }
         .sheet(item: $activeSheet, onDismiss: {
             guard let next = queuedSheet else {
@@ -218,6 +220,7 @@ struct RootView: View {
             TintDimming.disable()
             await drawStore.bootstrap()
             await runStartupChecks()
+            await DrawPushCenter.shared.refreshOnLaunch()
         }
     }
 

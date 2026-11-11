@@ -55,6 +55,9 @@ targets:
         NSCameraUsageDescription: 用于拍摄纸质票据并在本机识别号码，照片不会离开设备。
         NSPhotoLibraryUsageDescription: 用于从相册选择票据照片并在本机识别号码，照片不会离开设备。
         ITSAppUsesNonExemptEncryption: false
+        # 开奖通知到了之后在后台把 App 叫起来，用本机的票核对。
+        UIBackgroundModes:
+          - remote-notification
         # 让本机备份在「文件」App 里看得见、拷得走。
         #
         # 暴露的只有 App 沙盒的 Documents（里面就是 Backups 那个文件夹），
