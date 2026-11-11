@@ -472,6 +472,11 @@ final class DrawStore {
         return calendarIssues(for: game, year: year).first { $0.drawDate == now.date }
     }
 
+    /// 今天这一期的开奖时刻。今天不开、或者日历还没到，返回 nil。
+    func todayDrawTime(for game: GameKey, now: ChinaClock = .now()) -> Date? {
+        todayCalendarIssue(for: game, now: now)?.drawsAt
+    }
+
     func todayOpenGames(_ now: ChinaClock = .now()) -> [GameKey] {
         GameKey.ordered.filter { todayCalendarIssue(for: $0, now: now) != nil }
     }

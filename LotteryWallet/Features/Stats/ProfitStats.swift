@@ -72,9 +72,44 @@ struct GameSpend: Identifiable, Hashable {
     var net: Double { prize - cost }
 }
 
+/// 首页那张图上的一个点：**到这一天为止**一共投入了多少、回来多少、捐出去多少。
+///
+/// 三个数都是累计值，而且是在抽稀**之前**加好的 —— 抽稀只是少画几个点，
+/// 剩下每个点上的数仍然是对的。
+struct FlowPoint: Identifiable, Hashable {
+    var day: Date
+    var cost: Double
+    var prize: Double
+    var welfare: Double
+
+    var id: Date { day }
+}
+
+/// 一个月的投入去了哪。
+struct FlowMonth: Identifiable, Hashable {
+    /// yyyy-MM
+    var month: String
+    var cost: Double
+    var prize: Double
+    var welfare: Double
+
+    var id: String { month }
+
+    /// 柱子上公益金那一段。中了大奖的月份奖金可能超过投入，
+    /// 这时公益金和「其余」都让位，柱子总高仍然等于投入，不会画出负的一段。
+    var welfareShown: Double { min(welfare, max(cost - prize, 0)) }
+    var prizeShown: Double { min(prize, cost) }
+    /// 别人的奖金和发行费。
+    var rest: Double { max(cost - prize - welfare, 0) }
+}
+
 /// 折线图的完整数据。
 struct ProfitSeries {
     var days: [ProfitDay] = []
+    /// 累计投入 / 奖金 / 公益金，首页的渐变线画的是它。
+    var flow: [FlowPoint] = []
+    /// 按月汇总，最多最近十二个月。
+    var months: [FlowMonth] = []
     var costTotal: Double = 0
     var prizeTotal: Double = 0
     /// 公益金合计。**必须逐条按彩种算**，不能拿 `costTotal` 乘一个固定比例 ——
@@ -153,6 +188,14 @@ enum ProfitStats {
 
         var points: [ProfitDay] = []
         points.reserveCapacity(visible.count + 1)
+        var flow: [FlowPoint] = []
+        flow.reserveCapacity(visible.count + 1)
+        var months: [FlowMonth] = []
+        // 三条线都从零起步：区间第一天的前一天补一个零点，任何范围都补。
+        if let first = DateText.parse(visible[0]),
+           let origin = Calendar.chinaCalendar.date(byAdding: .day, value: -1, to: first) {
+            flow.append(FlowPoint(day: origin, cost: 0, prize: 0, welfare: 0))
+        }
 
         // "全部"范围在最前面补一个 0 基线点，曲线从零起步更直观
         if range == .all, let first = DateText.parse(visible[0]),
@@ -172,10 +215,11 @@ enum ProfitStats {
             var prize = 0.0
             var won = 0
             var byGame: [GameKey: GameSpend] = [:]
+            var welfare = 0.0
             for item in items {
                 cost += item.cost
                 prize += item.prize
-                welfareTotal += item.cost * item.game.welfareRate
+                welfare += item.cost * item.game.welfareRate
                 if item.isWon { won += 1 }
                 var spend = byGame[item.game] ?? GameSpend(game: item.game, cost: 0, prize: 0, count: 0)
                 spend.cost += item.cost
@@ -186,6 +230,17 @@ enum ProfitStats {
             balance += prize - cost
             costTotal += cost
             prizeTotal += prize
+            welfareTotal += welfare
+            let parsed = DateText.parse(day) ?? Date()
+            flow.append(FlowPoint(day: parsed, cost: costTotal, prize: prizeTotal, welfare: welfareTotal))
+            let month = String(day.prefix(7))
+            if months.last?.month == month {
+                months[months.count - 1].cost += cost
+                months[months.count - 1].prize += prize
+                months[months.count - 1].welfare += welfare
+            } else {
+                months.append(FlowMonth(month: month, cost: cost, prize: prize, welfare: welfare))
+            }
             settledCount += items.count
             wonTotal += won
             points.append(ProfitDay(date: day,
@@ -199,6 +254,8 @@ enum ProfitStats {
         }
 
         return ProfitSeries(days: downsample(points),
+                            flow: downsample(flow),
+                            months: Array(months.suffix(12)),
                             costTotal: costTotal,
                             prizeTotal: prizeTotal,
                             welfareTotal: welfareTotal,
@@ -225,10 +282,10 @@ enum ProfitStats {
     }
 
     /// 点数超上限时等距抽稀，保留首尾，累计值本身仍然正确。
-    private static func downsample(_ points: [ProfitDay]) -> [ProfitDay] {
+    private static func downsample<Point>(_ points: [Point]) -> [Point] {
         guard points.count > maxChartPoints else { return points }
         let stride = Double(points.count - 1) / Double(maxChartPoints - 1)
-        var result: [ProfitDay] = []
+        var result: [Point] = []
         result.reserveCapacity(maxChartPoints)
         for step in 0..<maxChartPoints {
             let index = Int((Double(step) * stride).rounded())

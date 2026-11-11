@@ -25,6 +25,7 @@ struct HomeView: View {
     @Query(sort: \TicketRecord.createdAt, order: .reverse) private var records: [TicketRecord]
 
     @State private var range: ProfitRange = .all
+    @State private var flowMode: FlowMode = .cumulative
     @State private var series = ProfitSeries()
     @State private var monthStats = ProfitStats.PeriodStats()
     @State private var carouselIndex = 0
@@ -42,6 +43,8 @@ struct HomeView: View {
     /// `carouselOrder` 每次都要取一遍东八区时间、过一遍八个彩种，
     /// 而 body 在滚动时一秒会跑很多次。统一在数据变化时算好存下来。
     @State private var todayGames: Set<GameKey> = []
+    /// 今天开奖的彩种各自几点开，卡片上的倒计时用。
+    @State private var todayDrawTimes: [GameKey: Date] = [:]
     @State private var pendingGames: [GameKey] = []
     @State private var carouselGames: [GameKey] = GameKey.ordered
     /// 量出来的可用宽度。量到之前用起手值，见 `HomeLayout.fallbackScreenWidth`。
@@ -132,6 +135,9 @@ struct HomeView: View {
 
     private func refreshSchedule() {
         todayGames = Set(drawStore.todayOpenGames())
+        var times: [GameKey: Date] = [:]
+        for game in todayGames { times[game] = drawStore.todayDrawTime(for: game) }
+        todayDrawTimes = times
         pendingGames = drawStore.pendingDrawUpdates()
         let order = drawStore.carouselOrder()
         carouselGames = order
@@ -145,12 +151,11 @@ struct HomeView: View {
 
     // MARK: - 累计收支
 
-    /// 从上到下一条线：标签和范围 → 大数字 → 两个小指标 → 方格图 → 四格明细。
+    /// 从上到下一条线：标签、范围和图表模式 → 大数字 → 两个小指标 → 一行读数 → 图。
     ///
-    /// 中奖率和「最好的一天」紧跟在大数字下面：它们是对这个数字的**解读**
-    /// （这笔钱是怎么来的、哪天最好），放在明细里跟流水数字挤在一起就看不出主次。
-    /// 票面金额、奖金、公益金、已结算这四个流水数排成两行两列，每格有底色，
-    /// 比原来一行五个挤在一起好读得多。
+    /// 返奖率和公益金紧跟在大数字下面：它们是对这个数字的**解读**
+    /// （花出去的钱回来多少、捐出去多少）。投入、奖金这些流水数不再单独占方块，
+    /// 并进图上面那一行读数里，见 `ProfitFlowChart`。
     private var profitCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
@@ -160,6 +165,12 @@ struct HomeView: View {
                         .foregroundStyle(.secondary)
                     rangeMenu
                     Spacer(minLength: 0)
+                    // 同一份数据的两种看法：一路累计下来的趋势，或者一个月一根柱子。
+                    Picker("图表", selection: $flowMode) {
+                        ForEach(FlowMode.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(MoneyText.grouped(series.netTotal))
@@ -177,28 +188,21 @@ struct HomeView: View {
                 .accessibilityElement(children: .combine)
 
                 HStack(spacing: 8) {
-                    inlineStat("中奖率", winRateText, tint: series.settledCount > 0 ? Palette.profit : .secondary)
-                    if let best = bestDayNet {
-                        Rectangle()
-                            .fill(Palette.separator)
-                            .frame(width: 1, height: 11)
-                        inlineStat("最好的一天", "+\(MoneyText.grouped(best)) 元", tint: Palette.profit)
-                    }
+                    // 返奖率：花出去的钱回来了多少。比「中奖率」诚实 —— 中 5 元也算中奖，
+                    // 中奖率很好看的时候钱照样是净出去的。
+                    inlineStat("返奖率", returnRateText, tint: series.prizeTotal > 0 ? Palette.profit : .secondary)
+                    Rectangle()
+                        .fill(Palette.separator)
+                        .frame(width: 1, height: 11)
+                    // 公益金逐条按彩种计提，比例见 `GameKey.welfareRate` ——
+                    // 八个彩种不是同一个比例，不能拿总额乘一个数。
+                    inlineStat("公益金", "\(MoneyText.grouped(series.welfareTotal)) 元", tint: Palette.warning)
                 }
             }
 
-            ProfitHeatmap(days: series.days, range: range,
-                          width: screenWidth - HomeLayout.pagePadding * 2 - 32)
-
-            // 公益金逐条按彩种计提，比例见 `GameKey.welfareRate` ——
-            // 原来固定乘 0.36，八个彩种里五个是错的。
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
-                      spacing: 10) {
-                statTile("票面金额", MoneyText.grouped(series.costTotal), unit: "元")
-                statTile("奖金", MoneyText.grouped(series.prizeTotal), unit: "元", tint: Palette.profit)
-                statTile("公益金", MoneyText.grouped(series.welfareTotal), unit: "元")
-                statTile("已结算", "\(series.settledCount)", unit: "注")
-            }
+            // 原来这里是逐日方格图加四个数字方块。方块里的数现在都在图上面那一行，
+            // 而且按住图表拖动时会跟着变成那一天的数。
+            ProfitFlowChart(series: series, mode: flowMode)
         }
         .contentCard()
     }
@@ -224,17 +228,10 @@ struct HomeView: View {
         .accessibilityLabel("统计范围：\(range.label)")
     }
 
-    /// 这个范围里收益最高的那一天；一天都没赚过就不显示。
-    private var bestDayNet: Double? {
-        guard let best = series.days.filter({ $0.count > 0 }).max(by: { $0.net < $1.net }),
-              best.net > 0 else { return nil }
-        return best.net
-    }
-
-    /// 一注都还没结算时，中奖率是 0/0 —— 那不是「中奖率 0%」，
+    /// 一分钱都还没结算时，返奖率是 0/0 —— 那不是「返奖率 0%」，
     /// 是「还没有能算的东西」。写成 0% 会让人以为买了都没中。
-    private var winRateText: String {
-        series.settledCount > 0 ? String(format: "%.0f%%", series.winRate) : "—"
+    private var returnRateText: String {
+        series.costTotal > 0 ? String(format: "%.0f%%", series.prizeTotal / series.costTotal * 100) : "—"
     }
 
     private func inlineStat(_ title: String, _ value: String, tint: Color) -> some View {
@@ -247,29 +244,6 @@ struct HomeView: View {
         }
         .font(.footnote)
         .lineLimit(1)
-    }
-
-    private func statTile(_ title: String, _ value: String, unit: String, tint: Color = .primary) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value)
-                    .font(.system(.title3, design: .rounded, weight: .semibold))
-                    .monospacedDigit()
-                Text(unit)
-                    .font(.footnote)
-            }
-            .foregroundStyle(tint)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityElement(children: .combine)
     }
 
     // MARK: - 最新开奖
@@ -296,7 +270,8 @@ struct HomeView: View {
                     let game = carouselGames[realIndex(page)]
                     DrawCard(game: game,
                              draw: drawStore.latestDraw(for: game),
-                             opensToday: todayGames.contains(game))
+                             opensToday: todayGames.contains(game),
+                             drawsAt: todayDrawTimes[game])
                         // 分页是整屏宽翻的，卡片自己不留边就会和下一张严丝合缝地
                         // 贴在一起，滑动时看起来像一整条在动，分不出是两张卡。
                         .padding(.horizontal, HomeLayout.carouselPagePadding)
@@ -1033,6 +1008,8 @@ struct DrawCard: View {
     /// 这个彩种今天开奖。原来「今日开奖」是页面顶部单独一行标签，
     /// 和它描述的卡片隔得很远；写进卡片里既更省地方也更好懂。
     var opensToday: Bool = false
+    /// 今天这一期的开奖时刻。有它，「今日开奖」那枚标签里就多一段倒计时。
+    var drawsAt: Date? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: DrawCardMetrics.blockSpacing) {
@@ -1084,12 +1061,19 @@ struct DrawCard: View {
                 .foregroundStyle(game.accent.accentColor)
 
             if opensToday {
-                Text("今日开奖")
-                    .scaledFont(10, weight: .bold)
-                    .foregroundStyle(Palette.live)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Palette.live.opacity(0.14), in: Capsule())
+                // 倒计时写在原来那枚标签**里面**，不另起一行：卡片高度是八张卡共用的
+                // 定值，多一行会把号码和奖项挤出去。
+                //
+                // 每秒一跳只重画这枚标签（`TimelineView` 的作用域），不会把整张卡、
+                // 更不会把首页拖进每秒一次的重算。示例模式不走表：截图里出现
+                // 一个每秒都在变的数，参考图就永远对不上。
+                if let drawsAt, !DemoData.isEnabled {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        todayBadge(DrawCountdown.badge(until: drawsAt, now: context.date))
+                    }
+                } else {
+                    todayBadge("今日开奖")
+                }
             }
 
             Spacer(minLength: 6)
@@ -1104,6 +1088,34 @@ struct DrawCard: View {
         }
     }
 
+}
+
+extension DrawCard {
+    fileprivate func todayBadge(_ text: String) -> some View {
+        Text(text)
+            .scaledFont(10, weight: .bold)
+            .monospacedDigit()
+            .foregroundStyle(Palette.live)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Palette.live.opacity(0.14), in: Capsule())
+            .lineLimit(1)
+            .fixedSize()
+    }
+}
+
+/// 「今日开奖」标签上的倒计时文字。
+enum DrawCountdown {
+    /// 还没到点：`今日开奖 2:14:37`（不足一小时是 `14:37`）；到点之后只剩「今日开奖」。
+    static func badge(until drawsAt: Date, now: Date) -> String {
+        let left = Int(drawsAt.timeIntervalSince(now).rounded(.up))
+        guard left > 0 else { return "今日开奖" }
+        let hours = left / 3600, minutes = left / 60 % 60, seconds = left % 60
+        let clock = hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
+            : String(format: "%d:%02d", minutes, seconds)
+        return "今日开奖 \(clock)"
+    }
 }
 
 /// 卡片上那两行奖级挑谁。
