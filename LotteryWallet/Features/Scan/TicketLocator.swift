@@ -180,9 +180,28 @@ enum TicketLocator {
         }
     }
 
-    /// 在照片里找票，返回每张票的归一化四角（可以直接交给 `TicketImagePreprocessor.prepare`）。
-    /// 一张都没找到返回空数组 —— 调用方退回手动框选。
-    static func find(in image: UIImage) async -> [TicketQuad] {
+    /// 在照片里找票。
+    ///
+    /// 返回的 `image` 是**实际找到票的那张图**：照片是横着或倒着拍的时候，
+    /// 正着找不到，会依次转 90°、270°、180° 再找，找到了就把转正的那张交回去，
+    /// 后面的摆正和识别都在它上面做。四角是归一化坐标，可以直接交给
+    /// `TicketImagePreprocessor.prepare`。一张都没找到时 `quads` 为空，调用方退回手动框选。
+    ///
+    /// 实测（`lottery-ocr/tools/stress_locate.py`，28 张真票）：歪 20° 以内、
+    /// 上窄 12% 的透视都不影响定位；歪到 35° 掉一半，横过来一张都找不到 ——
+    /// 所以大角度靠这里转正，小角度靠锚行自己的走向。
+    static func find(in image: UIImage) async -> (image: UIImage, quads: [TicketQuad]) {
+        let upright = await quads(in: image)
+        if !upright.isEmpty { return (image, upright) }
+        for turns in [1, 3, 2] {
+            guard let turned = image.turned(quarterTurns: turns) else { continue }
+            let found = await quads(in: turned)
+            if !found.isEmpty { return (turned, found) }
+        }
+        return (image, [])
+    }
+
+    private static func quads(in image: UIImage) async -> [TicketQuad] {
         // 整张照片里票可能很小，字高门槛要比认单张票时低。
         guard let fragments = try? await TicketVisionScanner.recognizeFragments(in: image, minimumTextHeight: 0.004) else {
             return []
@@ -205,6 +224,23 @@ enum TicketLocator {
             }
             return TicketQuad(topLeft: unit(ticket.corners[0]), topRight: unit(ticket.corners[1]),
                               bottomRight: unit(ticket.corners[2]), bottomLeft: unit(ticket.corners[3]))
+        }
+    }
+}
+
+extension UIImage {
+    /// 顺时针转若干个 90°，得到一张方向为 `.up` 的新图。
+    func turned(quarterTurns: Int) -> UIImage? {
+        let turns = ((quarterTurns % 4) + 4) % 4
+        guard turns != 0 else { return self }
+        let target = turns % 2 == 0 ? size : CGSize(width: size.height, height: size.width)
+        guard target.width > 0, target.height > 0 else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        return UIGraphicsImageRenderer(size: target, format: format).image { context in
+            context.cgContext.translateBy(x: target.width / 2, y: target.height / 2)
+            context.cgContext.rotate(by: .pi / 2 * CGFloat(turns))
+            draw(in: CGRect(x: -size.width / 2, y: -size.height / 2, width: size.width, height: size.height))
         }
     }
 }

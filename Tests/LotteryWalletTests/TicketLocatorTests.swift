@@ -158,6 +158,19 @@ final class TicketLocatorTests: XCTestCase {
         }
     }
 
+    /// 横着拍的照片要先转正。转四次回到原样，转一次宽高互换。
+    func testQuarterTurns() throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 20)).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 40, height: 20))
+        }
+        XCTAssertEqual(try XCTUnwrap(image.turned(quarterTurns: 1)).size, CGSize(width: 20, height: 40))
+        XCTAssertEqual(try XCTUnwrap(image.turned(quarterTurns: 2)).size, CGSize(width: 40, height: 20))
+        XCTAssertEqual(try XCTUnwrap(image.turned(quarterTurns: 3)).size, CGSize(width: 20, height: 40))
+        XCTAssertTrue(image.turned(quarterTurns: 4) === image)
+        XCTAssertEqual(try XCTUnwrap(image.turned(quarterTurns: -1)).size, CGSize(width: 20, height: 40))
+    }
+
     /// 没有锚行就是没有票：不能把一段普通文字框成一张票。
     func testNothingWithoutAnAnchor() {
         XCTAssertTrue(TicketLocator.locate([]).isEmpty)

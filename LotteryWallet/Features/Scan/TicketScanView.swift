@@ -1216,11 +1216,15 @@ struct TicketScanView: View {
     private func autoScan(_ image: UIImage) async {
         stage = .scanning
         errorText = nil
-        let quads = await TicketLocator.find(in: image)
+        let located = await TicketLocator.find(in: image)
+        let quads = located.quads
         guard !quads.isEmpty else {
             stage = .crop
             return
         }
+        // 横着或倒着拍的照片，找票时已经转正了；之后都用转正的那张。
+        let image = located.image
+        preview = image
         var found: [ScannedTicket] = []
         var images: [ScannedTicket.ID: UIImage] = [:]
         var warnings: [String] = []
