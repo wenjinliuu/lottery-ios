@@ -82,6 +82,18 @@ enum TicketVisionScanner {
                 if !second.tickets.isEmpty { result = second }
             }
         }
+        // **第二个读数**：自己训练的模型把号码区一行一行读一遍，和上面的结果逐个号码对。
+        // 一致的留下、不一致的标问号、Vision 没认出来而模型有把握的补上 —— 见 `ModelFusion`。
+        // 号码区夹不出来、模型没加载、照片里不止一张票时整段跳过，结果和没有这一步时一样。
+        if result.tickets.count == 1, let classifier = DigitClassifier.shared {
+            if let reading = ModelRowReader.read(image: image, fragments: fragments,
+                                                 game: result.tickets[0].game, classifier: classifier) {
+                let report = ModelFusion.fuse(&result.tickets[0], rows: reading.rows)
+                registration.debug.notes.append(report.note)
+            } else {
+                registration.debug.notes.append("模型读行：号码区没夹出来，这次没有复核")
+            }
+        }
         // 一个字都没认出来和「认出字但拼不成票」是两回事，
         // 复核页要能把原文摆出来，否则用户只能干瞪眼。
         if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }

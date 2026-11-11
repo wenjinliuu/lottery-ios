@@ -146,4 +146,63 @@ final class PackageTicketTests: XCTestCase {
         // 套餐票单式那几注在票型上仍然按单式看
         XCTAssertEqual(TicketShape.from(entryLabel: "套餐票"), .single)
     }
+
+    // MARK: - 真机上读坏的三种情况（2026-11 TestFlight 实测）
+
+    /// 「前区」被认成「豚区」：那一行还是前区。上一版把它丢了，6 注 18 元又被反推成追加票。
+    func testGarbledFrontLabelStillReadsAsTheFrontZone() throws {
+        let text = """
+        体彩 超级大乐透 需義
+        第26122期 2026年10月26日开奖
+        182312-610260-001364-284765 029261 QRX1Kg
+        套餐票 1倍 合计18元
+        ①11 1621 3235 +11 12
+        Q 09 12 13 23 28 + 0311
+        ③02 18 21 26 28+05 10
+        ④03 0711 26 33+07 08
+        ⑤07 12 1819 27+02 12
+        ⑥ 09 14 18 22 28 +08 10
+        豚区02 15 30 31 33
+        后区 02 05 11
+        感谢您为公益事业贡献 6 48元
+        20-020689-101 00054 26/10/26 11:02:03
+        """
+        var ticket = try XCTUnwrap(TicketTextParser.parse(text).tickets.first)
+        XCTAssertTrue(ticket.isPackage)
+        XCTAssertEqual(ticket.selections[.front]?.selected, [2, 15, 30, 31, 33])
+        XCTAssertEqual(ticket.selections[.back]?.selected, [2, 5, 11])
+        XCTAssertEqual(ticket.totalCost, 18)
+        XCTAssertNil(TicketTextParser.reconcileAddOn(&ticket))
+        XCTAssertFalse(ticket.addOn)
+    }
+
+    /// 复式那一块少了半边：还是套餐票，不能导入，也不能被反推成追加票。
+    func testPackageWithHalfTheBlockMissingBlocksImportAndIsNotAddOn() throws {
+        let text = """
+        体彩 超级大乐透
+        第26122期 2026年10月26日开奖
+        套餐票 1倍 合计18元
+        ①11 16 21 32 35 + 11 12
+        ②09 12 13 23 28 + 03 11
+        ③02 18 21 26 28 + 05 10
+        ④03 07 11 26 33 + 07 08
+        ⑤07 12 18 19 27 + 02 12
+        ⑥09 14 18 22 28 + 08 10
+        后区 02 05 11
+        """
+        var ticket = try XCTUnwrap(TicketTextParser.parse(text).tickets.first)
+        XCTAssertTrue(ticket.isPackage)
+        XCTAssertTrue(ticket.packageBlockMissing)
+        XCTAssertTrue(ticket.hasUnknown, "补齐之前不让导入")
+        XCTAssertNil(TicketTextParser.reconcileAddOn(&ticket))
+        XCTAssertFalse(ticket.addOn)
+    }
+
+    /// 圈码 ⑤ 被认成 5、还和第一个号码粘在一起：`501 0218 …` 是 `⑤ 01 02 18 …`。
+    func testCircledIndexReadAsADigitAndGluedToTheFirstNumber() throws {
+        let line = try XCTUnwrap(TicketTextParser.singleLineForTesting("501 0218 20 26+03 07", game: .dlt))
+        XCTAssertEqual(line[.front], [1, 2, 18, 20, 26])
+        XCTAssertEqual(line[.back], [3, 7])
+        XCTAssertEqual(TicketTextParser.dropStrayIndex("0612 18 20 26"), "0612 18 20 26", "位数是双数的不动")
+    }
 }

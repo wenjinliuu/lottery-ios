@@ -135,7 +135,15 @@ struct ScannedTicket: Identifiable, Hashable {
         }
     }
 
-    var hasUnknown: Bool { unknownCount > 0 }
+    var hasUnknown: Bool { unknownCount > 0 || packageBlockMissing }
+
+    /// 套餐票下面那块复式没读全（少了前区或后区，或者个数不够成一注）。
+    var packageBlockMissing: Bool {
+        guard isPackage else { return false }
+        return game.sections.contains { section in
+            (selections[section.key]?.selected.count ?? 0) < section.count
+        }
+    }
 
     /// 单期金额。票面合计是 `periods` 期的总和。
     var costPerPeriod: Double { Double(count) * unitPrice * Double(multiple) }
@@ -356,7 +364,11 @@ enum TicketTextParser {
     }
 
     /// `红单 / 红复 / 红胆 / 红拖 / 蓝单 / 蓝复 / 前区 / 前区胆 / 前区拖 / 后区 / 后区胆 / 后区拖`
-    private static func zoneLabel(_ line: String, game: GameKey) -> (label: ZoneLabel, rest: String)? {
+    ///
+    /// `unlabelled`：大乐透的「前区 / 后区」第一个字被认错时（真机上「前区」读成过「豚区」），
+    /// 这一行算哪个区 —— 调用方按「前区还空着就是前区，否则后区」给。
+    private static func zoneLabel(_ line: String, game: GameKey,
+                                  unlabelled: SectionKey? = nil) -> (label: ZoneLabel, rest: String)? {
         let patterns: [(String, SectionKey)] = game == .ssq
             ? [("^\\s*红\\s*([单复胆拖])?\\s*[:：]?", .red), ("^\\s*蓝\\s*([单复胆拖])?\\s*[:：]?", .blue)]
             : [("^\\s*前\\s*区\\s*([胆拖])?\\s*[:：]?", .front), ("^\\s*后\\s*区\\s*([胆拖])?\\s*[:：]?", .back)]
@@ -365,6 +377,14 @@ enum TicketTextParser {
             let mark = match.groups.first ?? ""
             let rest = String((line as NSString).substring(from: match.range.location + match.range.length))
             return (ZoneLabel(key: key, isDan: mark == "胆", isMultipleMark: mark == "复"), rest)
+        }
+        // 「X区」+ 号码：X 不是数字也不是「前 / 后」。只有大乐透这么印。
+        if game == .dlt, let unlabelled,
+           let match = firstMatch(in: line, pattern: "^\\s*[^\\d\\s前后]\\s*区\\s*([胆拖])?\\s*[:：]?(?=\\s*\\d)"),
+           match.length > 0 {
+            let mark = match.groups.first ?? ""
+            let rest = String((line as NSString).substring(from: match.range.location + match.range.length))
+            return (ZoneLabel(key: unlabelled, isDan: mark == "胆", isMultipleMark: false), rest)
         }
         return nil
     }
@@ -434,6 +454,23 @@ enum TicketTextParser {
             return singleZoneLine(body, game: game, section: sections[0], multiple: multiple)
         }
         guard sections.count == 2 else { return nil }
+        if sections[0].range.lowerBound > 0 { return twoZoneLine(dropStrayIndex(body), game: game, multiple: multiple) }
+        return twoZoneLine(body, game: game, multiple: multiple)
+    }
+
+    /// 圈码被认成普通数字、还和第一个号码粘在一起：`501 0218 20 26+03 07`（票面是 `⑤ 01 02 18 20 26 + 03 07`）。
+    ///
+    /// 号码全是两位数，所以开头那一串数字的位数是**单数**（至少三位）时，多出来的只能是最前面那一位。
+    static func dropStrayIndex(_ body: String) -> String {
+        let trimmed = body.drop { $0 == " " }
+        let run = trimmed.prefix { $0.isASCII && $0.isNumber }
+        guard run.count >= 3, run.count % 2 == 1 else { return body }
+        return String(trimmed.dropFirst())
+    }
+
+    private static func twoZoneLine(_ body: String, game: GameKey,
+                                    multiple: Int?) -> (numbers: NumberSet, multiple: Int?)? {
+        let sections = game.sections
         let (firstSection, secondSection) = (sections[0], sections[1])
 
         // 数字型的两区票（七星彩：前六位 0-9 + 特别号 0-14）不能按
@@ -753,7 +790,8 @@ enum TicketTextParser {
         for line in lines {
             guard !line.isEmpty else { openLabel = nil; continue }
 
-            if let (label, rest) = zoneLabel(line, game: game) {
+            let vacant: SectionKey = (selections[.front]?.selected.isEmpty ?? true) ? .front : .back
+            if let (label, rest) = zoneLabel(line, game: game, unlabelled: vacant) {
                 let section = game.sections.first { $0.key == label.key }
                 let range = section?.range ?? 1...99
                 let values = numbers(in: rest, range: range)
@@ -790,8 +828,12 @@ enum TicketTextParser {
 
         // 套餐票：票头印着「套餐票」，上面几注单式、下面一块「前区 / 后区」的复式。
         // 两样都读到了才算；它是一张票，不拆成两张，也不把单式那几注丢掉。
-        if block.contains("套餐"), !singleLines.isEmpty, !selections.isEmpty,
-           inferPlay(game: game, playMode: ticket.effectivePlayMode(), selections: selections) == .system {
+        //
+        // 复式那一块缺了半边（真机上「前区」那一行没读出来过）也还是套餐票：
+        // 缺的那半边在复核页上是「没认出来，点这里补上」，补齐之前不让导入
+        // （见 `packageBlockMissing`）。当成普通单式票的话合计对不上，
+        // 上一版还因此把它错判成了追加票。
+        if block.contains("套餐"), !singleLines.isEmpty, game == .dlt {
             ticket.isPackage = true
             ticket.play = .single
         } else
@@ -835,8 +877,11 @@ enum TicketTextParser {
         }
         ticket.addOn = detectAddOn(block)
         ticket.periods = extractPeriods(block)
-        if ticket.hasUnknown {
+        if ticket.unknownCount > 0 {
             ticket.warnings.append("有 \(ticket.unknownCount) 位号码没认出来，点那颗问号球补一下")
+        }
+        if ticket.packageBlockMissing {
+            ticket.warnings.append("套餐票下面「前区 / 后区」那一块没读全，补上之后才能导入")
         }
         if overfull > 0 {
             ticket.warnings.append("有 \(overfull) 行号码读出来的个数比一注还多，"
@@ -1166,6 +1211,8 @@ enum TicketTextParser {
     @discardableResult
     static func reconcileAddOn(_ ticket: inout ScannedTicket) -> String? {
         guard ticket.game == .dlt, let total = ticket.totalAmount, ticket.count > 0 else { return nil }
+        // 套餐票没读全的时候注数是少的，拿合计去除只会除出一个假的「3 元一注」。
+        guard !ticket.packageBlockMissing else { return nil }
         let units = Double(ticket.count * ticket.multiple * ticket.periods)
         guard units > 0 else { return nil }
         let unit = total / units

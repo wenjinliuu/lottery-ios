@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(UIKit)
 import UIKit
+#endif
 
 /// 自己训练的数字模型：给一小块票面，说它是 0–9 里的哪一个，或者「不是数字」。
 ///
@@ -25,13 +27,6 @@ struct DigitClassifier {
     private let conv2Weight: [Float], conv2Bias: [Float]
     private let fc1Weight: [Float], fc1Bias: [Float]
     private let fc2Weight: [Float], fc2Bias: [Float]
-
-    /// 安装包里的那一份。读不出来就是 nil —— 交叉校验整个跳过，识别照旧。
-    static let shared: DigitClassifier? = {
-        guard let url = Bundle(for: AppDelegate.self).url(forResource: "DigitNet", withExtension: "bin"),
-              let data = try? Data(contentsOf: url) else { return nil }
-        return DigitClassifier(data: data)
-    }()
 
     init?(data: Data) {
         let total = Self.shapes.reduce(0, +)
@@ -200,6 +195,16 @@ enum DigitCrossCheck {
     }
 }
 
+#if canImport(UIKit)
+extension DigitClassifier {
+    /// 安装包里的那一份。读不出来就是 nil —— 交叉校验整个跳过，识别照旧。
+    static let shared: DigitClassifier? = {
+        guard let url = Bundle(for: AppDelegate.self).url(forResource: "DigitNet", withExtension: "bin"),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return DigitClassifier(data: data)
+    }()
+}
+
 /// 把配准后的号码区画成和墨迹图一样大的一张图，取红色通道。
 ///
 /// 用红色通道是因为福彩票的底纹是粉红色的：在红色通道里它几乎是白的，
@@ -252,3 +257,4 @@ enum ZoneRaster {
         return (pixels, width, height)
     }
 }
+#endif

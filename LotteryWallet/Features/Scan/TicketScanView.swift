@@ -1199,6 +1199,7 @@ struct TicketScanView: View {
         if tickets.isEmpty { return "还没有可导入的票" }
         if tickets.contains(where: { $0.count == 0 }) { return "有票没读出号码，点进去补一下" }
         if let ticket = tickets.first(where: \.hasUnknown) {
+            if ticket.unknownCount == 0 { return "套餐票下面「前区 / 后区」那一块没读全，补上再导入" }
             return "有 \(ticket.unknownCount) 位号码没认出来，点那颗问号球补上再导入"
         }
         if tickets.contains(where: { $0.issue.isEmpty }) { return "有票还没选期号" }
