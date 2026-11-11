@@ -116,7 +116,13 @@ enum TicketLocator {
                 let span = anchor.kind == .welfare ? welfareSpan : sportsSpan
                 guard position.u >= -leftSlack * anchor.pitch, position.u <= span * anchor.pitch else { continue }
                 guard position.v >= -(headLines[anchor.kind] ?? 7) * anchor.height else { continue }
-                if position.v < 0, !(headWords[anchor.kind] ?? []).contains(where: { upper.contains($0) }) { continue }
+                if position.v < 0 {
+                    // 票底那行「××市福利彩票发行中心承销」也带着「福利」「彩票」两个词。
+                    // 上下挨着放的时候，上面那张的票底正好落在下面那张的票头范围里 ——
+                    // 不排除它，上面那张就丢了票底，下面那张的框还会被撑宽。
+                    let isFooter = upper.contains("承销") || upper.contains("发行中心")
+                    if isFooter || !(headWords[anchor.kind] ?? []).contains(where: { upper.contains($0) }) { continue }
+                }
                 // 落在某个锚的票头范围里（锚的上方）而且长得像票头，优先归它；
                 // 否则归正上方最近的那个锚。
                 let rank = position.v < 0 ? (0, -position.v) : (1, position.v)
