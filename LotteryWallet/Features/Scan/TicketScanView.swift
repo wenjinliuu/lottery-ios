@@ -566,7 +566,11 @@ struct TicketScanView: View {
     /// 现在两边都走 `Game.ticketLabel`，玩法是从**每一注**的集合里取的：
     /// 排列3 的组选票一眼能看出是组选还是直选，快乐8 看得出是选几。
     private func headLabel(_ ticket: ScannedTicket) -> String {
-        ticket.game.ticketLabel(modes: playModes(ticket), shape: ticket.play.shape)
+        let label = ticket.game.ticketLabel(modes: playModes(ticket), shape: ticket.play.shape)
+        // 套餐票在内部按单式存那几注，票头照票面写「套餐票」。
+        return ticket.isPackage
+            ? label.replacingOccurrences(of: TicketShape.single.label, with: TicketShape.packageLabel)
+            : label
     }
 
     /// 这张票上出现过的玩法。
@@ -770,6 +774,38 @@ struct TicketScanView: View {
                     }
                 }
             case .system, .dantuo:
+                zoneBlock(ticket)
+            }
+            // 套餐票：单式那几注下面还有一块复式选号，照票面的样子接在后面。
+            if ticket.isPackage {
+                Divider()
+                zoneBlock(ticket)
+            }
+            HStack(spacing: 10) {
+                Text(ticket.play == .single ? "点一注可以改这一注的号码" : "点号码球可以改这一区")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
+                // 少认出一注是很常见的（折痕、反光压住一行）。没有这个入口的话
+                // 用户只能整张重扫，而重扫大概率还是认不出那一行。
+                if ticket.play == .single {
+                    Button {
+                        addLine(to: ticket.id)
+                    } label: {
+                        Label("补一注", systemImage: "plus.circle")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(ticket.game.accent.accentColor)
+                }
+            }
+        }
+    }
+
+    /// 复式 / 胆拖的整票选号：一个号码区一行（胆拖是胆、拖各一行）。
+    /// 套餐票下半截那一块复式也是它。
+    @ViewBuilder
+    private func zoneBlock(_ ticket: ScannedTicket) -> some View {
                 ForEach(zoneRows(ticket), id: \.label) { row in
                     HStack(alignment: .top, spacing: 8) {
                         Text(row.label)
@@ -799,26 +835,6 @@ struct TicketScanView: View {
                         Spacer(minLength: 0)
                     }
                 }
-            }
-            HStack(spacing: 10) {
-                Text(ticket.play == .single ? "点一注可以改这一注的号码" : "点号码球可以改这一区")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Spacer(minLength: 0)
-                // 少认出一注是很常见的（折痕、反光压住一行）。没有这个入口的话
-                // 用户只能整张重扫，而重扫大概率还是认不出那一行。
-                if ticket.play == .single {
-                    Button {
-                        addLine(to: ticket.id)
-                    } label: {
-                        Label("补一注", systemImage: "plus.circle")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(ticket.game.accent.accentColor)
-                }
-            }
-        }
     }
 
     /// 删掉多认出来的那一注。
@@ -943,7 +959,7 @@ struct TicketScanView: View {
     private func shapeMenu(_ value: ScannedTicket) -> some View {
         let capsule = HStack(spacing: 3) {
             Text(headLabel(value))
-            if EntryMode.modes(for: value.game).count > 1 {
+            if EntryMode.modes(for: value.game).count > 1, !value.isPackage {
                 Image(systemName: "chevron.down").scaledFont(8, weight: .bold)
             }
         }
@@ -953,7 +969,8 @@ struct TicketScanView: View {
         .padding(.vertical, 3)
         .background(value.game.tint, in: Capsule())
 
-        if EntryMode.modes(for: value.game).count > 1 {
+        // 套餐票不给改票面类型：改成单式或复式都会丢掉另一半号码。
+        if EntryMode.modes(for: value.game).count > 1, !value.isPackage {
             Menu {
                 ForEach(TicketShape.allCases) { shape in
                     Button {
@@ -1357,7 +1374,11 @@ struct TicketScanView: View {
                         // 「组选单式票」「选八单式票」，而「扫描」两个字对核对毫无帮助。
                         var item = Ticket(numbers: numbers,
                                           playMode: mode,
-                                          entryLabel: ticket.play.label)
+                                          // 套餐票：前几注是单式，后面是复式那一块展开的，标签分开存，
+                                          // 票夹才能照票面的样子画回来。
+                                          entryLabel: !ticket.isPackage ? ticket.play.label
+                                              : (index < ticket.packageSingleCount
+                                                 ? TicketShape.packageLabel : TicketShape.packageSystemLabel))
                         item.addOn = ticket.addOn
                         if ticket.game == .k8, let count = Int(mode) { item.playCount = count }
                         return item
@@ -1449,7 +1470,8 @@ private struct ScanZoneEditor: View {
                         NumberPadSection(section: section,
                                          selection: $selection,
                                          required: ticket.pickCount(for: section),
-                                         mode: ticket.play.entryMode,
+                                         // 套餐票的这一块是复式，哪怕整张票按单式存着那几注
+                                         mode: ticket.isPackage ? .system : ticket.play.entryMode,
                                          danPicking: danPicking,
                                          onReject: { showToast($0, symbol: "hand.raised", feedback: .warning) })
                     }

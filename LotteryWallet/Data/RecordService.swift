@@ -436,6 +436,8 @@ struct TicketCard: Identifiable, Hashable {
     /// **核对仍然按每一注算**：底下的记录一注都没少，奖金、命中标记
     /// 全都是逐注算出来的，这里只是换个方式显示。
     let whole: [WholeZone]
+    /// 大乐透套餐票：`lines` 只有单式那几注，`whole` 是下面那一块复式。两样都画。
+    let isPackage: Bool
 
     /// 整票里的一个号码区。
     struct WholeZone: Identifiable, Hashable {
@@ -603,16 +605,23 @@ extension TicketCard {
         // 票面那句话，比如「组选单式票」「选八单式票」「追加单式票」。
         // 玩法取**整张票里所有注**的集合 —— 3D 和排列3 一张票上可以混玩法，
         // 只看第一注会把「组选」说成「组六」。
-        playLabel = batch.game.ticketLabel(
+        // 套餐票：单式那几注和复式那一块在记录里分开标着（见 `TicketShape.packageLabel`）。
+        let packageBlock = records.filter { TicketShape.isPackageSystem(entryLabel: $0.entryLabel) }
+        let package = !packageBlock.isEmpty && packageBlock.count < records.count
+        isPackage = package
+        let headLabel = batch.game.ticketLabel(
             modes: Set(records.map(\.playMode)),
             shape: TicketCard.shape(batch.entryLabel)
         )
+        playLabel = package
+            ? headLabel.replacingOccurrences(of: TicketShape.single.label, with: TicketShape.packageLabel)
+            : headLabel
         count = records.count
         createdAt = batch.createdAt
         // 整张票里只要还有一注的结果没被看过，这张票就还算「新结果」。
         // 已经出结果才谈得上看没看 —— 没开奖的票不该占着新结果那一区。
         isNewResult = batch.status.hasResult && records.contains { $0.resultSeenAt == nil }
-        whole = TicketCard.wholeZones(records, game: batch.game)
+        whole = TicketCard.wholeZones(package ? packageBlock : records, game: batch.game)
 
         var costSum = 0.0
         var prizeSum = 0.0
@@ -636,7 +645,9 @@ extension TicketCard {
 
         let key = batch.game
         let showsLineMode = TicketCard.showsLineModes(records, game: batch.game)
-        lines = records.prefix(TicketCard.lineLimit).map { record in
+        // 套餐票逐注只列单式那几注；复式那一块按整票画，不在这里铺开。
+        let listed = package ? records.filter { !TicketShape.isPackageSystem(entryLabel: $0.entryLabel) } : records
+        lines = listed.prefix(TicketCard.lineLimit).map { record in
             Line(id: record.id,
                  numbers: record.ticket.numbers.values,
                  matched: record.matched,

@@ -40,6 +40,28 @@ enum TicketShape: String, Codable, Hashable, Sendable, CaseIterable, Identifiabl
     /// 「扫描」「单式」「复式」「胆拖」，新记录存的是「单式票」「复式票」
     /// 「胆拖票」。全等匹配过一次线上事故 —— 文案改一个字，所有复式票的
     /// 标签就变成「单式」。包含判断对新旧写法都成立，以后再改文案也不会再犯。
+    // MARK: - 套餐票
+
+    /// 大乐透的「套餐票」：一张票上印着几注单式，下面再加一块复式选号。
+    ///
+    /// 它**不是第四种枚举值**。单式那几注和复式那一块在记录里各存各的标签：
+    /// 单式的几注是「套餐票」，复式展开出来的几注是「套餐票复式」。
+    /// 整张票仍然是一个批次、一张电子票，票头写「套餐票」，
+    /// 画的时候上面是那几注单式、下面是复式的整票选号，和纸质票一个样。
+    ///
+    /// 不加枚举值是因为它不是一种「选号方式」：录入页的单式 / 复式 / 胆拖
+    /// 三个分支都不该多出一个套餐来，它只能从扫描进来。
+    static let packageLabel = "套餐票"
+    static let packageSystemLabel = "套餐票复式"
+
+    /// 这条记录属于一张套餐票（不管是单式那几注还是复式那一块）。
+    static func isPackage(entryLabel raw: String) -> Bool { raw.contains("套餐") }
+
+    /// 这条记录是套餐票里复式那一块展开出来的。
+    static func isPackageSystem(entryLabel raw: String) -> Bool {
+        raw.contains("套餐") && raw.contains("复式")
+    }
+
     static func from(entryLabel raw: String) -> TicketShape {
         if raw.contains("胆拖") { return .dantuo }
         if raw.contains("复式") { return .system }

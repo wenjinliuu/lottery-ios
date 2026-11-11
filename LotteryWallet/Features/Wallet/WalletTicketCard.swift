@@ -41,7 +41,8 @@ struct WalletTicketCard: View {
     }
 
     private var hiddenCount: Int {
-        Swift.max(card.count - visibleLines.count, 0)
+        // 套餐票的逐注只算单式那几注，复式那一块另外画
+        Swift.max((card.isPackage ? card.lines.count : card.count) - visibleLines.count, 0)
     }
 
     var body: some View {
@@ -51,7 +52,12 @@ struct WalletTicketCard: View {
                 meta
                 TicketDivider(tint: game.tint).padding(.top, 10)
                 // 复式 / 胆拖按整票画；单式仍然一注一行
-                if card.whole.isEmpty {
+                if card.isPackage {
+                    // 套餐票照票面画：上面是那几注单式，下面是复式那一块。
+                    lines
+                    TicketDivider(tint: game.tint)
+                    wholeTicket
+                } else if card.whole.isEmpty {
                     lines
                 } else if isExpanded {
                     // 展开时两样都给：上面是票面的样子，下面是展开的每一注，
@@ -96,7 +102,8 @@ struct WalletTicketCard: View {
             if isCollapsible { onToggle() }
         }
         .contextMenu {
-            if let onEdit {
+            // 套餐票不给改：录入页只有单式 / 复式 / 胆拖三种，改完保存会把它变成别的票型。
+            if let onEdit, !card.isPackage {
                 Button("修改", systemImage: "square.and.pencil", action: onEdit)
             }
             Button("复制号码", systemImage: "doc.on.doc") {

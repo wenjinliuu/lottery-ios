@@ -48,6 +48,9 @@ struct ScannedTicket: Identifiable, Hashable {
     /// （有重复就是组三）。这两种情况都**不能拆票** —— 用户手里就是一张票，
     /// 票夹里也该是一张卡片，只是卡片里每一注各自标着自己的玩法。
     var lineModes: [String] = []
+    /// 大乐透套餐票：`lines` 是上面那几注单式，`selections` 是下面那一块复式。
+    /// 两样都有，整张票还是一张票（见 `TicketShape.packageLabel`）。
+    var isPackage = false
     var multiple: Int = 1
     /// 票面印的玩法键。
     ///
@@ -98,7 +101,13 @@ struct ScannedTicket: Identifiable, Hashable {
     var expandedLines: [NumberSet] {
         switch play {
         case .single:
-            return lines.filter { !$0.isEmpty }
+            let singles = lines.filter { !$0.isEmpty }
+            guard isPackage else { return singles }
+            // 套餐票：单式那几注在前，复式那一块展开的在后。导入时按这个顺序分标签。
+            let block = TicketBuilder.expand(game: game, selections: selections, mode: .system,
+                                             playMode: game == .dlt ? (addOn ? "add" : "normal") : playMode,
+                                             addOn: addOn)
+            return singles + (block ?? []).map(\.numbers)
         case .system, .dantuo:
             let playMode = game == .dlt ? (addOn ? "add" : "normal")
                                         : (self.playMode.isEmpty ? game.defaultPlayMode : self.playMode)
@@ -109,6 +118,12 @@ struct ScannedTicket: Identifiable, Hashable {
     }
 
     var count: Int { expandedLines.count }
+
+    /// 票面类型的显示名。套餐票不是 `ScanPlay` 的一种，单独给名字。
+    var shapeLabel: String { isPackage ? TicketShape.packageLabel : play.label }
+
+    /// 套餐票里单式那几注的个数。`expandedLines` 的前这么多条是单式，后面是复式展开的。
+    var packageSingleCount: Int { isPackage ? lines.filter { !$0.isEmpty }.count : 0 }
 
     /// 还有几位是问号 —— 票面上那一位没认出来，等着用户点一下补。
     ///
@@ -773,6 +788,13 @@ enum TicketTextParser {
         ticket.selections = selections
         ticket.lines = dedupe(singleLines)
 
+        // 套餐票：票头印着「套餐票」，上面几注单式、下面一块「前区 / 后区」的复式。
+        // 两样都读到了才算；它是一张票，不拆成两张，也不把单式那几注丢掉。
+        if block.contains("套餐"), !singleLines.isEmpty, !selections.isEmpty,
+           inferPlay(game: game, playMode: ticket.effectivePlayMode(), selections: selections) == .system {
+            ticket.isPackage = true
+            ticket.play = .single
+        } else
         // 标签行读到号码，但玩法没写「复式/胆拖」——按选号个数反推
         if !selections.isEmpty {
             let inferred = ticket.play == .single
