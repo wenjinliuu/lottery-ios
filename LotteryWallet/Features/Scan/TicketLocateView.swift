@@ -12,6 +12,10 @@ struct TicketLocateView: View {
         var quad: TicketQuad
         /// 猜出来的彩种。手动加的框、或者票头没读出来的，是 nil。
         var game: GameKey?
+        /// 后台还在认这张票。认完之前不下「没认出彩种」的结论，牌子上转圈。
+        var isResolving = false
+        /// 用户自己加的框。
+        var isManual = false
     }
 
     let image: UIImage
@@ -69,7 +73,9 @@ struct TicketLocateView: View {
                 .foregroundStyle(.white)
             Text(notice ?? (marks.isEmpty
                             ? "点「加一个框」，把框拖到票面四个角上"
-                            : "框得不准就点那个框、拖四个角；漏了的票点「加一个框」"))
+                            : marks.contains(where: \.isResolving)
+                                ? "正在逐张识别，框上的彩种稍后会更新"
+                                : "框得不准就点那个框、拖四个角；漏了的票点「加一个框」"))
                 .font(.caption)
                 .foregroundStyle(notice == nil ? .white.opacity(0.7) : Color.orange)
                 .multilineTextAlignment(.center)
@@ -123,7 +129,8 @@ struct TicketLocateView: View {
     /// 新框放在照片正中，占四成宽、五成高，并且直接选中。
     private func add() {
         let mark = Mark(quad: TicketQuad(topLeft: CGPoint(x: 0.3, y: 0.25), topRight: CGPoint(x: 0.7, y: 0.25),
-                                         bottomRight: CGPoint(x: 0.7, y: 0.75), bottomLeft: CGPoint(x: 0.3, y: 0.75)))
+                                         bottomRight: CGPoint(x: 0.7, y: 0.75), bottomLeft: CGPoint(x: 0.3, y: 0.75)),
+                        isManual: true)
         withAnimation(.easeOut(duration: 0.15)) {
             marks.append(mark)
             selected = mark.id
@@ -138,6 +145,13 @@ struct TicketLocateView: View {
 
     static func title(number: Int, game: GameKey?) -> String {
         game.map { "\(number) \($0.label)" } ?? "\(number) 没认出彩种"
+    }
+
+    /// 牌子上写什么：认出来了写彩种；还在认写「识别中」；自己加的框写「手动框」。
+    static func title(number: Int, mark: Mark) -> String {
+        if let game = mark.game { return "\(number) \(game.label)" }
+        if mark.isResolving { return "\(number) 识别中" }
+        return mark.isManual ? "\(number) 手动框" : "\(number) 没认出彩种"
     }
 
     private func displayFrame(in canvas: CGSize) -> CGRect {
@@ -180,8 +194,15 @@ struct TicketLocateView: View {
         return ZStack {
             shape.fill(color.opacity(isSelected ? 0.22 : 0.12))
             shape.stroke(color, style: StrokeStyle(lineWidth: isSelected ? 3 : 2, lineJoin: .round))
-            Text(Self.title(number: number, game: mark.game))
-                .font(.caption.weight(.bold))
+            HStack(spacing: 5) {
+                if mark.isResolving, mark.game == nil {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(.black)
+                }
+                Text(Self.title(number: number, mark: mark))
+                    .font(.caption.weight(.bold))
+            }
                 .foregroundStyle(mark.game == nil ? Color.black : Color.white)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -192,7 +213,7 @@ struct TicketLocateView: View {
         .contentShape(shape)
         .onTapGesture { selected = mark.id }
         .accessibilityElement()
-        .accessibilityLabel("第 \(number) 张票，\(mark.game?.label ?? "没认出彩种")")
+        .accessibilityLabel("第 \(number) 张票，\(mark.game?.label ?? (mark.isResolving ? "识别中" : "没认出彩种"))")
         .accessibilityAddTraits(.isButton)
     }
 

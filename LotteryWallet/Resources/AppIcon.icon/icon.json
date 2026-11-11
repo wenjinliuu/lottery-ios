@@ -11,7 +11,7 @@
   ],
   "groups" : [
     {
-      "blur-material" : 0.3,
+      "blur-material" : null,
       "hidden" : false,
       "layers" : [
         {
@@ -31,14 +31,15 @@
           "glass" : true,
           "hidden" : false,
           "image-name" : "FrontTicket.svg",
-          "name" : "FrontTicket"
+          "name" : "FrontTicket",
+          "opacity" : 0.65
         }
       ],
       "lighting" : "individual",
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.5
+        "value" : 0.8
       },
       "shadow-specializations" : [
         {
@@ -64,7 +65,7 @@
       ]
     },
     {
-      "blur-material" : 0.3,
+      "blur-material" : null,
       "hidden" : false,
       "layers" : [
         {
@@ -84,14 +85,15 @@
           "glass" : true,
           "hidden" : false,
           "image-name" : "MiddleTicket.svg",
-          "name" : "MiddleTicket"
+          "name" : "MiddleTicket",
+          "opacity" : 0.65
         }
       ],
       "lighting" : "individual",
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.5
+        "value" : 0.8
       },
       "shadow-specializations" : [
         {
@@ -117,7 +119,7 @@
       ]
     },
     {
-      "blur-material" : 0.3,
+      "blur-material" : null,
       "hidden" : false,
       "layers" : [
         {
@@ -137,14 +139,15 @@
           "glass" : true,
           "hidden" : false,
           "image-name" : "BackTicket.svg",
-          "name" : "BackTicket"
+          "name" : "BackTicket",
+          "opacity" : 0.65
         }
       ],
       "lighting" : "individual",
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.5
+        "value" : 0.8
       },
       "shadow-specializations" : [
         {

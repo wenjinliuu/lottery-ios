@@ -203,5 +203,9 @@ final class TicketLocatorTests: XCTestCase {
     func testLocateMarkTitles() {
         XCTAssertEqual(TicketLocateView.title(number: 2, game: .pl5), "2 排列5")
         XCTAssertEqual(TicketLocateView.title(number: 1, game: nil), "1 没认出彩种")
+        // 还在认的时候不下结论；自己加的框不叫「没认出」
+        XCTAssertEqual(TicketLocateView.title(number: 1, mark: .init(quad: .default, isResolving: true)), "1 识别中")
+        XCTAssertEqual(TicketLocateView.title(number: 3, mark: .init(quad: .default, isManual: true)), "3 手动框")
+        XCTAssertEqual(TicketLocateView.title(number: 2, mark: .init(quad: .default, game: .qxc, isResolving: true)), "2 七星彩")
     }
 }

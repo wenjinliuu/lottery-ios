@@ -490,4 +490,37 @@ final class WholeTicketDerivationTests: XCTestCase {
         XCTAssertEqual(ticket.selections[.blue]?.selected, [2, 11])
         XCTAssertEqual(ticket.totalCost, 28)
     }
+
+    /// 「蓝复」的第一个字认成什么的都有（藍、监……）：只要是「X复:」「X单:」后面跟着号码，
+    /// 红球已经有了，它就是蓝球。
+    func testGarbledBlueLabelIsTheBlueZoneWhenRedIsAlreadyRead() throws {
+        let text = """
+        Wen CD 中国福利彩票
+        玩法:双色球-复式 詳INA WEA税号:39130622
+        7692-3402-B25E-4034-AF48/11402378/22513
+        红复:09 21 22 24 26 28 33
+        监复:02 11
+        倍数:1
+        开奖期:2026129 26-11-10 合计28元
+        """
+        let ticket = try XCTUnwrap(TicketTextParser.parse(text).tickets.first)
+        XCTAssertEqual(ticket.selections[.blue]?.selected, [2, 11])
+        XCTAssertEqual(ticket.multiple, 1, "「倍数:1」不是号码行")
+        XCTAssertEqual(ticket.totalCost, 28)
+    }
+
+    /// 快乐8 行尾的「(1)」两个括号都没认出来，只剩一个 1：它不是第六个号。
+    func testBareMultipleAtTheEndOfARowIsNotANumber() throws {
+        let text = """
+        welch 中国福利科票
+        玩法:快乐8-选五单式 机号:31130622
+        6239-4967-136C-88D3-A01D/11402378/4A71D
+        A.04 05 24 35 39 1
+        B.09 15 39 58 80
+        开奖期:2026300 26-11-10 合计4元
+        """
+        let ticket = try XCTUnwrap(TicketTextParser.parse(text).tickets.first)
+        XCTAssertEqual(ticket.lines.map { $0[.nums] }, [[4, 5, 24, 35, 39], [9, 15, 39, 58, 80]])
+        XCTAssertEqual(TicketTextParser.dropTrailingMultiple("6 2 5 7 2"), "6 2 5 7 2", "数字型的号码不能动")
+    }
 }

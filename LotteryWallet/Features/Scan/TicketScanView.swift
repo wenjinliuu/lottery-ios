@@ -1271,7 +1271,7 @@ struct TicketScanView: View {
         let located = await TicketLocator.findTickets(in: image)
         // 横着或倒着拍的照片，找票时已经转正了；之后都用转正的那张。
         preview = located.image
-        marks = located.tickets.map { TicketLocateView.Mark(quad: $0.quad, game: $0.game) }
+        marks = located.tickets.map { TicketLocateView.Mark(quad: $0.quad, game: $0.game, isResolving: true) }
         prescans = [:]
         stage = .locate
         prescan(located.image)
@@ -1284,6 +1284,10 @@ struct TicketScanView: View {
         prescanTask = Task {
             for mark in pending {
                 guard !Task.isCancelled else { return }
+                // 不管认没认出来，这个框的「识别中」都要收掉
+                defer {
+                    if let index = marks.firstIndex(where: { $0.id == mark.id }) { marks[index].isResolving = false }
+                }
                 let corrected = await TicketImagePreprocessor.prepare(image, quad: mark.quad)
                 guard var page = try? await TicketVisionScanner.scan(corrected), !Task.isCancelled else { continue }
                 polish(&page)

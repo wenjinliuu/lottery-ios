@@ -388,6 +388,14 @@ enum TicketTextParser {
             let rest = String((line as NSString).substring(from: match.range.location + match.range.length))
             return (ZoneLabel(key: unlabelled, isDan: mark == "胆", isMultipleMark: false), rest)
         }
+        // 双色球同理：「X复:」「X单:」，X 不是「红 / 蓝」（真机上「蓝复」读成过「藍复」「监复」）。
+        if game == .ssq, let unlabelled,
+           let match = firstMatch(in: line, pattern: "^\\s*[^\\d\\s红蓝]\\s*([单复胆拖])\\s*[:：](?=\\s*\\d)"),
+           match.length > 0 {
+            let mark = match.groups.first ?? ""
+            let rest = String((line as NSString).substring(from: match.range.location + match.range.length))
+            return (ZoneLabel(key: unlabelled, isDan: mark == "胆", isMultipleMark: mark == "复"), rest)
+        }
         return nil
     }
 
@@ -449,15 +457,25 @@ enum TicketTextParser {
         // **至少要有一边括号在**。两边都写成可选的话，
         // `A.11 13 14 27 31 33-04` 结尾的 `-04` 会被当成倍数削掉 ——
         // 每一张双色球单式票都要少一个蓝球。
-        guard let body = betBody(line) else { return nil }
+        guard var body = betBody(line) else { return nil }
 
         let sections = game.sections
+        // 行尾的倍数「(1)」两个括号都没认出来，只剩一个孤零零的 1：号码都是两位数，
+        // 所以最后那个单个的数字不是号码（真机上快乐8 的一注因此多出一个号被丢）。
+        if let first = sections.first, first.range.upperBound > 9 { body = dropTrailingMultiple(body) }
         if sections.count == 1 {
             return singleZoneLine(body, game: game, section: sections[0], multiple: multiple)
         }
         guard sections.count == 2 else { return nil }
         if sections[0].range.lowerBound > 0 { return twoZoneLine(dropStrayIndex(body), game: game, multiple: multiple) }
         return twoZoneLine(body, game: game, multiple: multiple)
+    }
+
+    /// `04 05 24 35 39 1` → `04 05 24 35 39`。前面至少要有两个两位数，才认最后那一位是倍数。
+    static func dropTrailingMultiple(_ body: String) -> String {
+        guard let match = firstMatch(in: body, pattern: "^(.*\\d\\d\\D+\\d\\d)\\s+\\d\\s*$"),
+              let kept = match.groups.first else { return body }
+        return kept
     }
 
     /// 圈码被认成普通数字、还和第一个号码粘在一起：`501 0218 20 26+03 07`（票面是 `⑤ 01 02 18 20 26 + 03 07`）。
@@ -792,7 +810,10 @@ enum TicketTextParser {
         for line in lines {
             guard !line.isEmpty else { openLabel = nil; continue }
 
-            let vacant: SectionKey = (selections[.front]?.selected.isEmpty ?? true) ? .front : .back
+            // 标签的第一个字认坏了的时候，这一行算哪个区：第一个区还空着就是它，否则第二个
+            let vacant: SectionKey? = game.sections.count == 2
+                ? ((selections[game.sections[0].key]?.selected.isEmpty ?? true) ? game.sections[0].key : game.sections[1].key)
+                : nil
             if let (label, rest) = zoneLabel(line, game: game, unlabelled: vacant) {
                 let section = game.sections.first { $0.key == label.key }
                 let range = section?.range ?? 1...99

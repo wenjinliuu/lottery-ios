@@ -144,15 +144,43 @@ final class ModelFusionTests: XCTestCase {
         XCTAssertTrue(ticket.warnings.contains { $0.contains("两种读法不一致") })
     }
 
-    func testSystemAndBankerTicketsAreLeftAlone() {
+    /// 复式票：号码区里没有哪一行对得上它的两个区，就原样不动。胆拖票根本不看。
+    func testSystemTicketIsLeftAloneWhenNoRowMatchesAndBankerIsNeverTouched() {
         var ticket = ScannedTicket(game: .dlt)
         ticket.play = .system
         ticket.selections[.front] = SectionSelection(selected: [1, 4, 19, 21, 24, 35])
         ticket.selections[.back] = SectionSelection(selected: [6, 11])
         let before = ticket
-        let report = ModelFusion.fuse(&ticket, rows: rows.map(row))
+        ModelFusion.fuse(&ticket, rows: rows.map(row))
         XCTAssertEqual(ticket, before)
+
+        var banker = before
+        banker.play = .dantuo
+        let report = ModelFusion.fuse(&banker, rows: ["xx 01 04 19 21 24 35", "xx 06 11"].map(row))
         XCTAssertEqual(report.expected, 0)
+        XCTAssertEqual(banker.selections, before.selections)
+    }
+
+    /// 真机上那张双色球复式：「蓝复」读成了「监复」，蓝球一个都没有。模型那一行读到 02 11，
+    /// 前面的冒号被认成一个没把握的 1 —— 它不算号码。
+    func testSystemTicketGetsItsMissingZoneFromTheModel() {
+        var ticket = ScannedTicket(game: .ssq)
+        ticket.play = .system
+        ticket.selections[.red] = SectionSelection(selected: [9, 21, 22, 24, 26, 28, 33])
+        ModelFusion.fuse(&ticket, rows: ["09 21 22 24 26 28 33", "xl 02 11", "xx l"].map(row))
+        XCTAssertEqual(ticket.selections[.blue]?.selected, [2, 11])
+        XCTAssertEqual(ticket.selections[.red]?.selected, [9, 21, 22, 24, 26, 28, 33])
+    }
+
+    /// 快乐8 选五：Vision 只认出一注，模型两行都读成了，2 注 4 元对得上。
+    func testWelfareSingleTicketIsRebuiltToo() {
+        var ticket = ScannedTicket(game: .k8)
+        ticket.playMode = "5"
+        ticket.lines = [NumberSet([.nums: [9, 15, 39, 58, 80]])]
+        ticket.totalAmount = 4
+        let report = ModelFusion.fuse(&ticket, rows: ["x 04 05 24 35 39      x1x", "x 09 15 39 58 80      x1x", "xxx"].map(row))
+        XCTAssertTrue(report.rebuilt)
+        XCTAssertEqual(ticket.lines.map { $0[.nums] }, [[4, 5, 24, 35, 39], [9, 15, 39, 58, 80]])
     }
 
     // MARK: - 模型读到的行当骨架

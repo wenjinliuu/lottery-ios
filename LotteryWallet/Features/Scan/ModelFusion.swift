@@ -64,10 +64,15 @@ enum ModelFusion {
     @discardableResult
     static func fuse(_ ticket: inout ScannedTicket, rows: [[GlyphRows.Token]]) -> Report {
         var report = Report()
-        guard ticket.play == .single else { return report }
+        // 胆拖的版式没在真票上量过，不碰
+        guard ticket.play != .dantuo else { return report }
         if let rebuilt = rebuild(&ticket, rows: rows) { return rebuilt }
-        var slots: [Slot] = ticket.lines.indices.filter { !ticket.lines[$0].isEmpty }.map { .line($0) }
-        if ticket.isPackage { slots += ticket.game.sections.map { .zone($0.key) } }
+        var slots: [Slot] = []
+        if ticket.play == .single {
+            slots = ticket.lines.indices.filter { !ticket.lines[$0].isEmpty }.map { .line($0) }
+        }
+        // 套餐票下面那块、复式票的两个区：一个区一行
+        if ticket.isPackage || ticket.play == .system { slots += ticket.game.sections.map { .zone($0.key) } }
         report.expected = slots.count
         guard !slots.isEmpty, !rows.isEmpty else { return report }
 
@@ -91,39 +96,43 @@ enum ModelFusion {
 
     /// 模型自己读出来的整张票：每一注在号码区的第几行、读到了什么；套餐票下面那块的两个区。
     struct Skeleton {
+        /// 一注里每个区印几个号。
+        var parts: [(section: GameSection, count: Int)] = []
         var rows: [Int] = []
         var lines: [[Value]] = []
         var zones: [SectionKey: [Value]] = [:]
     }
 
-    /// 只凭模型读到的行，按这个彩种一行号码该有的样子，把整张票搭出来。只管体彩的四种。
+    /// 只凭模型读到的行，按这个彩种一行号码该有的样子，把整张票搭出来。
+    /// 一行一注的票都管（3D 除外）：体彩四种，加上双色球、七乐彩、快乐8 的单式。
     ///
     /// 一行号码「该有的样子」很死：大乐透 14 位、排列5 五位、排列3 三位、七星彩 7 或 8 位；
     /// 套餐票下面是「前区」「后区」各一行偶数位。`GlyphRows.readLine` 要求个数正好，
     /// 多一位少一位都不算，所以这里搭出来的每一行都是完整的一行。
-    static func skeleton(game: GameKey, rows: [[GlyphRows.Token]]) -> Skeleton? {
+    static func skeleton(game: GameKey, playMode: String = "", rows: [[GlyphRows.Token]]) -> Skeleton? {
         let sections = game.sections
-        var out = Skeleton()
+        // 一注里每个区印几个号。快乐8 看玩法（选五就是 5 个）。
+        var parts: [(section: GameSection, count: Int)] = sections.map { ($0, $0.count) }
+        if game == .k8 {
+            guard let want = Int(playMode), (1...10).contains(want) else { return nil }
+            parts = [(sections[0], want)]
+        }
+        guard game != .fc3d else { return nil }       // 3D 每注前面印着玩法，行的样子不固定
+        var out = Skeleton(parts: parts)
         for (index, tokens) in rows.enumerated() {
             var line: [Value]?
-            switch game {
-            case .dlt:
-                if let found = GlyphRows.readLine(tokens, count: 14) {
-                    line = numbers(found, parts: [(sections[0], 5), (sections[1], 2)])
-                }
-            case .pl3, .pl5:
-                if let found = GlyphRows.readLine(tokens, count: sections[0].count) { line = found.map(single) }
-            case .qxc:
+            if game == .qxc {
                 if let seven = GlyphRows.readLine(tokens, count: 7) {
                     line = seven.map(single)
                 } else if let eight = GlyphRows.readLine(tokens, count: 8), eight[6].digit == 1 {
                     line = eight.prefix(6).map(single)
                         + [Value(value: 10 + eight[7].digit, confidence: min(eight[6].confidence, eight[7].confidence))]
                 }
-            default:
-                return nil
+            } else {
+                let total = parts.reduce(0) { $0 + $1.count * digits(per: $1.section) }
+                if let found = GlyphRows.readLine(tokens, count: total) { line = numbers(found, parts: parts) }
             }
-            if let line, sound(line, sections: sections) {
+            if let line, sound(line, parts: parts) {
                 out.rows.append(index)
                 out.lines.append(line)
                 continue
@@ -146,12 +155,12 @@ enum ModelFusion {
     }
 
     /// 一注的每个区都在值域里、两位数的区升序不重复。
-    private static func sound(_ line: [Value], sections: [GameSection]) -> Bool {
+    private static func sound(_ line: [Value], parts: [(section: GameSection, count: Int)]) -> Bool {
         var cursor = 0
-        for section in sections {
-            guard cursor + section.count <= line.count else { return false }
-            guard ordered(line[cursor..<cursor + section.count].map(\.value), section: section) else { return false }
-            cursor += section.count
+        for part in parts {
+            guard cursor + part.count <= line.count else { return false }
+            guard ordered(line[cursor..<cursor + part.count].map(\.value), section: part.section) else { return false }
+            cursor += part.count
         }
         return cursor == line.count
     }
@@ -172,7 +181,7 @@ enum ModelFusion {
     static func rebuild(_ ticket: inout ScannedTicket, rows: [[GlyphRows.Token]]) -> Report? {
         let game = ticket.game
         guard ticket.play == .single, let total = ticket.totalAmount, total > 0,
-              let skeleton = skeleton(game: game, rows: rows) else { return nil }
+              let skeleton = skeleton(game: game, playMode: ticket.playMode, rows: rows) else { return nil }
         // 排列3 每一注还带着自己的玩法（组三 / 组六），注数变了就对不上了
         if !ticket.lineModes.isEmpty, ticket.lineModes.count != skeleton.lines.count { return nil }
         let sections = game.sections
@@ -204,9 +213,9 @@ enum ModelFusion {
             let vision = visionAt[row]
             var numbers = NumberSet()
             var cursor = 0
-            for section in sections {
+            for (section, count) in skeleton.parts {
                 var values: [Int] = []
-                for _ in 0..<section.count {
+                for _ in 0..<count {
                     let model = line[cursor]
                     let seen = vision.flatMap { cursor < $0.count ? $0[cursor] : nil } ?? NumberSet.unknown
                     cursor += 1
@@ -226,7 +235,7 @@ enum ModelFusion {
                 }
                 // 拿 Vision 的值顶上之后不合规了：这一区里 Vision 顶上的那几位退回问号
                 if !ordered(values, section: section) {
-                    for position in values.indices where line[cursor - section.count + position].confidence < threshold {
+                    for position in values.indices where line[cursor - count + position].confidence < threshold {
                         values[position] = NumberSet.unknown
                     }
                 }

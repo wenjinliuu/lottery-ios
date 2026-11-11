@@ -115,10 +115,11 @@ enum GlyphRows {
             for x in 0..<limit where ink[y * width + x] { count += 1 }
             profile[y] = count
         }
-        let found = bands(profile, floor: width * 6 / 1000)
-        guard !found.isEmpty else { return [] }
-        let heights = found.map { $0.1 - $0.0 }.sorted()
+        let rough = bands(profile, floor: width * 6 / 1000)
+        guard !rough.isEmpty else { return [] }
+        let heights = rough.map { $0.1 - $0.0 }.sorted()
         let tall = heights[heights.count / 2]
+        let found = splitTall(rough, profile: profile, tall: tall)
         var out: [Row] = []
         for (top, bottom) in found {
             let rowHeight = bottom - top
@@ -147,6 +148,33 @@ enum GlyphRows {
                 segments.append(Segment(x0: x0, x1: x1, y0: first, y1: last + 1))
             }
             out.append(Row(top: top, bottom: bottom, segments: segments))
+        }
+        return out
+    }
+
+    /// 比一般的行高出将近一半的行，多半是两行粘在了一起（表头的下半截贴着第一注 ——
+    /// 真机上一张套餐票就这样少了第一注）。
+    ///
+    /// 在它中间那一半里找墨最少的一条线，那条线上的墨不到这一行最浓处的 35% 就从那儿切开。
+    /// 每一行最多切一刀。
+    static func splitTall(_ rows: [(Int, Int)], profile: [Int], tall: Int) -> [(Int, Int)] {
+        var out: [(Int, Int)] = []
+        for (top, bottom) in rows {
+            let height = bottom - top
+            guard height * 100 > tall * 145, height >= 8 else {
+                out.append((top, bottom))
+                continue
+            }
+            let low = top + height / 4, high = bottom - height / 4
+            var cut = low
+            for y in low..<high where profile[y] < profile[cut] { cut = y }
+            let peak = profile[top..<bottom].max() ?? 0
+            if profile[cut] * 100 <= peak * 35 {
+                out.append((top, cut))
+                out.append((cut + 1, bottom))
+            } else {
+                out.append((top, bottom))
+            }
         }
         return out
     }
@@ -185,6 +213,11 @@ enum GlyphRows {
     static func readLine(_ tokens: [Token], count: Int) -> [Token]? {
         guard count > 0, tokens.count >= count else { return nil }
         func gap(_ left: Int, _ right: Int) -> Int { tokens[right].segment.x0 - tokens[left].segment.x1 }
+        // 紧挨着的那一段「是数字」而且模型有七成半以上的把握，才算号码还没完。
+        // 冒号、点常被认成没把握的 1，它们不算（「蓝复:02 11」前面那个冒号）。
+        func digit(_ index: Int) -> Bool {
+            tokens[index].digit != DigitClassifier.reject && tokens[index].confidence >= 0.75
+        }
         var hits: [[Token]] = []
         for start in 0...(tokens.count - count) {
             let window = Array(tokens[start..<start + count])
@@ -193,11 +226,9 @@ enum GlyphRows {
             if count > 1 {
                 for index in start..<(start + count - 1) { widest = max(widest, gap(index, index + 1)) }
             }
-            if start > 0, tokens[start - 1].digit != DigitClassifier.reject,
-               gap(start - 1, start) * 2 <= widest * 3 { continue }
+            if start > 0, digit(start - 1), gap(start - 1, start) * 2 <= widest * 3 { continue }
             let end = start + count
-            if end < tokens.count, tokens[end].digit != DigitClassifier.reject,
-               gap(end - 1, end) * 2 <= widest * 3 { continue }
+            if end < tokens.count, digit(end), gap(end - 1, end) * 2 <= widest * 3 { continue }
             hits.append(window)
         }
         return hits.count == 1 ? hits[0] : nil
