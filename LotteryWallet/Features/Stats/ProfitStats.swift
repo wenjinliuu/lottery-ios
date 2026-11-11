@@ -397,7 +397,8 @@ enum HeatTone {
 
     /// 这段时间里中奖那些天的奖金、没中那些天的投入，各自从小到大排好。
     static func scales(_ days: [ProfitDay]) -> (wins: [Double], losses: [Double]) {
-        (days.filter(isWin).map(\.prize).sorted(), days.filter { !isWin($0) }.map(\.cost).sorted())
+        let bought = days.filter { $0.count > 0 }
+        return (bought.filter(isWin).map(\.prize).sorted(), bought.filter { !isWin($0) }.map(\.cost).sorted())
     }
 
     static func level(of day: ProfitDay, wins: [Double], losses: [Double]) -> Int {

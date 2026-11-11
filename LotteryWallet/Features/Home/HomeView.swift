@@ -827,7 +827,8 @@ struct ProfitHeatmap: View {
     @ViewBuilder
     private func cellView(for date: Date?, byDay: [String: ProfitDay]) -> some View {
         let shape = RoundedRectangle(cornerRadius: cell > 18 ? 5 : 3, style: .continuous)
-        if let date, let day = byDay[DateText.day(date)] {
+        // 「全部」范围最前面补的那个零点不是真的买过，不涂色
+        if let date, let day = byDay[DateText.day(date)], day.count > 0 {
             shape
                 .fill(color(for: day))
                 .frame(width: cell, height: cell)
