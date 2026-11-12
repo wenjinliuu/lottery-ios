@@ -5,7 +5,7 @@ import XCTest
 final class JarPhysicsTests: XCTestCase {
 
     private func radii() -> [Double] {
-        Array(repeating: 6.3, count: 255) + Array(repeating: 10.7, count: 30) + Array(repeating: 15, count: 4)
+        Array(repeating: 8.0, count: 255)
     }
 
     private func check(_ physics: JarPhysics, file: StaticString = #filePath, line: UInt = #line) {

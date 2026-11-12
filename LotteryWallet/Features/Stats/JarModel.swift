@@ -7,7 +7,8 @@ import Foundation
 /// - 小珠子不是一个号码一颗：普通人一个月就买几百上千个号码，罐子里放不下。
 ///   几个号码合成一颗，**换算在一年里基本不变**，所以罐子是一个月一个月涨上去的。
 /// - 「全部」的罐子永远只装到六七成，留出地方让珠子能滚。
-/// - 中奖那一注里命中的号码不合并，一颗一个号，按那一注的奖金分三档。
+/// - 只分两类：买了没开出的、开出了的。中没中奖不另外区分（试过带号码、带金圈的中奖球，
+///   用户看了觉得太复杂，2026-11 去掉）。
 struct JarEntry {
     /// 开奖日，`yyyy-MM-dd`。
     var day: String
@@ -17,41 +18,18 @@ struct JarEntry {
     var prize: Double
 }
 
-/// 中奖球的档次。按**那一注**的奖金分，不按奖级名：各彩种的奖级叫法和金额差得很远。
-enum JarTier: Int, Comparable {
-    /// 小奖：不到 100 元。绝大多数中奖都在这一档。
-    case small
-    /// 100 元到不足 1 万元。
-    case medium
-    /// 1 万元以上。
-    case big
-
-    static func < (lhs: JarTier, rhs: JarTier) -> Bool { lhs.rawValue < rhs.rawValue }
-
-    static func of(prize: Double) -> JarTier {
-        if prize >= 10_000 { return .big }
-        return prize >= 100 ? .medium : .small
-    }
-}
-
 struct JarBead: Hashable {
     enum Kind: Hashable {
         /// 买了没开出。
         case miss
-        /// 开出了，但那一注没中奖。
+        /// 开出了。
         case hit
-        /// 中奖那一注里命中的号。
-        case win(JarTier)
     }
 
     var kind: Kind
     var game: GameKey
     /// 这个号码区的球色（双色球的红和蓝、大乐透的蓝和黄各算各的）。
     var color: BallColor
-    /// 只有中奖球带号码。
-    var number: Int?
-    /// 球上写的字，和票面一致（该补零的补零）。
-    var label: String?
 }
 
 enum JarScope: Hashable {
@@ -62,8 +40,6 @@ enum JarScope: Hashable {
 enum JarBuilder {
     /// 罐子里小珠子大约能放多少颗。
     static let capacity = 300
-    /// 中奖球最多放多少颗（放最近的）。
-    static let winLimit = 60
     /// 一颗小珠代表几个号码，只取这些「整」的数。取整之后换算不会三天两头变。
     static let steps = [1, 2, 5, 10, 20, 35, 50, 70, 100, 150, 200, 350, 500, 700, 1000, 1500, 2000, 3500, 5000]
 
@@ -73,8 +49,8 @@ enum JarBuilder {
         var per = 1
         /// 这一罐里一共多少个号码。
         var total = 0
-        /// 中奖球一共多少颗（可能比放进罐子的多）。
-        var wins = 0
+        /// 其中开出了的有多少个。
+        var hits = 0
     }
 
     /// 至少要这么大的换算才装得下。
@@ -111,26 +87,19 @@ enum JarBuilder {
 
         struct Tally { var bought = 0; var hits = 0 }
         var tallies: [String: (game: GameKey, color: BallColor, tally: Tally)] = [:]
-        var winners: [(day: String, bead: JarBead)] = []
-        var total = 0
+        var total = 0, hits = 0
         for entry in chosen {
-            let tier = entry.prize > 0 ? JarTier.of(prize: entry.prize) : nil
             for (index, section) in entry.game.sections.enumerated() {
                 let numbers = entry.numbers[section.key]
                 guard !numbers.isEmpty else { continue }
                 let flags = entry.matched[section.key] ?? []
                 let key = "\(entry.game.rawValue)-\(index)"
                 var slot = tallies[key] ?? (entry.game, section.color, Tally())
+                let matched = zip(numbers, flags).filter { $0.1 }.count
                 slot.tally.bought += numbers.count
+                slot.tally.hits += matched
                 total += numbers.count
-                for (position, number) in numbers.enumerated() where position < flags.count && flags[position] {
-                    if let tier {
-                        winners.append((entry.day, JarBead(kind: .win(tier), game: entry.game, color: section.color, number: number,
-                                                           label: section.padsNumbers ? String(format: "%02d", number) : String(number))))
-                    } else {
-                        slot.tally.hits += 1
-                    }
-                }
+                hits += matched
                 tallies[key] = slot
             }
         }
@@ -140,15 +109,13 @@ enum JarBuilder {
         var beads: [JarBead] = []
         for key in tallies.keys.sorted() {
             guard let slot = tallies[key] else { continue }
-            let winCount = winners.filter { $0.bead.game == slot.game && $0.bead.color == slot.color }.count
-            let misses = max(slot.tally.bought - slot.tally.hits - winCount, 0)
+            let misses = slot.tally.bought - slot.tally.hits
             let missBeads = Int((Double(misses) / Double(per)).rounded())
+            // 开出的号再少，只要有就至少留一颗
             let hitBeads = slot.tally.hits > 0 ? max(Int((Double(slot.tally.hits) / Double(per)).rounded()), 1) : 0
             beads += Array(repeating: JarBead(kind: .miss, game: slot.game, color: slot.color), count: missBeads)
             beads += Array(repeating: JarBead(kind: .hit, game: slot.game, color: slot.color), count: hitBeads)
         }
-        // 中奖球放最近的那些
-        let recent = winners.sorted { $0.day > $1.day }.prefix(winLimit).map(\.bead)
-        return Jar(beads: beads + recent, per: per, total: total, wins: winners.count)
+        return Jar(beads: beads, per: per, total: total, hits: hits)
     }
 }

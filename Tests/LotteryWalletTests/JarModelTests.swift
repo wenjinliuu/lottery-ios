@@ -24,14 +24,6 @@ final class JarModelTests: XCTestCase {
         jar.beads.filter { $0.kind == kind && (color == nil || $0.color == color) }.count
     }
 
-    func testPrizeTiers() {
-        XCTAssertEqual(JarTier.of(prize: 5), .small)
-        XCTAssertEqual(JarTier.of(prize: 99.9), .small)
-        XCTAssertEqual(JarTier.of(prize: 100), .medium)
-        XCTAssertEqual(JarTier.of(prize: 9_999), .medium)
-        XCTAssertEqual(JarTier.of(prize: 10_000), .big)
-    }
-
     func testStepIsTheSmallestRoundNumberThatFits() {
         XCTAssertEqual(JarBuilder.step(atLeast: 1), 1)
         XCTAssertEqual(JarBuilder.step(atLeast: 3), 5)
@@ -47,20 +39,18 @@ final class JarModelTests: XCTestCase {
         XCTAssertEqual(count(jar, .hit, .red), 2)
         XCTAssertEqual(count(jar, .miss, .red), 4)
         XCTAssertEqual(count(jar, .miss, .blue), 1)
-        XCTAssertEqual(jar.wins, 0)
+        XCTAssertEqual(jar.hits, 2)
     }
 
-    /// 中奖那一注里命中的号单独放、带号码、按奖金分档；同一注里没命中的照样是小珠子。
-    func testWinningLineHitsBecomeNumberedBalls() {
+    /// 中没中奖不另外区分：中奖那一注里命中的号和别的开出的号一样，都是实心珠子。
+    func testWinningLinesAreNotSpecial() {
         let jar = JarBuilder.build([ssq("2025-03-01", hits: 3, blue: true, prize: 200)],
                                    scope: .year(2025), now: date("2026-11-12"))
-        let wins = jar.beads.filter { if case .win = $0.kind { return true } else { return false } }
-        XCTAssertEqual(wins.count, 4)
-        XCTAssertEqual(jar.wins, 4)
-        XCTAssertTrue(wins.allSatisfy { $0.kind == .win(.medium) })
-        XCTAssertEqual(Set(wins.compactMap(\.number)), [1, 2, 3, 7])
-        XCTAssertEqual(count(jar, .hit), 0)
+        XCTAssertEqual(count(jar, .hit, .red), 3)
+        XCTAssertEqual(count(jar, .hit, .blue), 1)
         XCTAssertEqual(count(jar, .miss, .red), 3)
+        XCTAssertEqual(jar.hits, 4)
+        XCTAssertEqual(jar.beads.count, 7)
     }
 
     /// 年罐只装那一年的；「全部」都装。
@@ -102,15 +92,6 @@ final class JarModelTests: XCTestCase {
         let jar = JarBuilder.build(entries, scope: .year(2025), now: date("2026-11-12"))
         XCTAssertGreaterThan(jar.per, 1)
         XCTAssertEqual(count(jar, .hit, .red), 1)
-    }
-
-    /// 中奖球太多时只放最近的那些，总数照记。
-    func testWinningBallsAreCapped() {
-        let entries = (1...28).map { ssq(String(format: "2025-01-%02d", $0), hits: 4, prize: 10) }
-        let jar = JarBuilder.build(entries, scope: .year(2025), now: date("2026-11-12"))
-        let wins = jar.beads.filter { if case .win = $0.kind { return true } else { return false } }
-        XCTAssertEqual(jar.wins, 112)
-        XCTAssertEqual(wins.count, JarBuilder.winLimit)
     }
 
     func testEmpty() {
