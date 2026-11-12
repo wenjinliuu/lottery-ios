@@ -216,12 +216,6 @@ struct WalletView: View {
             onEdit: { editTarget = EntryDraft.load(batchId: item.id, context: context) },
             draw: drawStore.draw(for: item.game, expect: item.expect)
         )
-        // 卡片滑到屏幕边上时轻轻缩一点、淡一点，滚动起来有层次
-        .scrollTransition(.interactive, axis: .vertical) { content, phase in
-            content
-                .opacity(phase.isIdentity ? 1 : 0.72)
-                .scaleEffect(phase.isIdentity ? 1 : 0.975)
-        }
     }
 
     /// 首屏之外的票走一个单独的完整列表页，而不是在首页无限往下堆。

@@ -172,24 +172,9 @@ struct ProfitFlowChart: View {
         return series.flow.last { $0.day <= selectedDay } ?? series.flow.first
     }
 
-    /// 投入和奖金之间那一块的颜色：亏的时候是支出色，赚的时候是奖金色。
-    /// 第一版只涂了一成的主题蓝，叠在投入线自己的渐变上根本看不出来。
-    private var netBand: Color {
-        (series.prizeTotal > series.costTotal ? Palette.profit : Palette.loss).opacity(0.22)
-    }
-
     private var cumulativeChart: some View {
         Chart {
             line("投入", Self.spend, fill: 0.26, value: \.cost)
-            // 投入和奖金两条线之间的那一块就是净支出，再淡淡地涂一层
-            ForEach(series.flow) { point in
-                AreaMark(x: .value("日期", point.day),
-                         yStart: .value("奖金", point.prize),
-                         yEnd: .value("投入", point.cost),
-                         series: .value("类别", "净支出"))
-                    .interpolationMethod(.monotone)
-                    .foregroundStyle(netBand)
-            }
             line("公益金", Palette.warning, fill: 0.34, value: \.welfare)
             line("奖金", Palette.profit, fill: 0.38, value: \.prize)
             if let point = selectedPoint {

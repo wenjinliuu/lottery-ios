@@ -21,14 +21,20 @@ struct TicketPaper<Content: View>: View {
             // 票面就是一张白纸。右上角原来有一层彩种辉光，本意是区分彩种，
             // 实际效果是每张卡片都糊着一块颜色，一列卡片刷下来很脏；
             // 而且彩种已经有描边和标题两处在说了，第三处纯属重复。
-            .background(Palette.card, in: shape)
+            // 阴影画在这块纯色底上。直接给整张卡片加 `.shadow` 的话，系统要把里面的号码球、
+            // 文字全部离屏渲染一遍再算阴影，票夹一屏十几张卡片，滑动时就掉帧。
+            .background {
+                shape.fill(Palette.card)
+                    .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 3)
+            }
             // 原来每张票一圈彩种色的描边：几张叠在一起红紫蓝各一圈，显得花。
             // 现在只留一道极淡的发丝线，靠一层很浅的阴影把卡片托起来；认彩种靠左上角的彩种名。
             .overlay {
                 shape.strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
             }
-            .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 3)
             .overlay(alignment: .topLeading) { notches }
+            // 长按弹菜单时，预览按卡片自己的圆角裁，不再闪一块深色的方角
+            .contentShape(.contextMenuPreview, shape)
     }
 
     /// 左右两个撕票孔。

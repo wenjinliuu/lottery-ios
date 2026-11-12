@@ -223,6 +223,11 @@ struct HomeView: View {
             Group {
                 if chartStyle == HomeChartStyle.grid.rawValue, !series.days.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
+                        // 方格图自己读不出金额，上面放和曲线图同样的两个数
+                        HStack(alignment: .top, spacing: 8) {
+                            gridTotal("投入", series.costTotal, Color.accentColor)
+                            gridTotal("奖金", series.prizeTotal, Palette.profit)
+                        }
                         ProfitHeatmap(days: series.days, range: range, width: screenWidth - 64)
                         HStack(spacing: 12) {
                             heatLegend(Palette.profit, "当天有中奖")
@@ -244,6 +249,58 @@ struct HomeView: View {
         .sensoryFeedback(.selection, trigger: range)
         .sensoryFeedback(.selection, trigger: chartStyle)
         .contentCard()
+    }
+
+    private func gridTotal(_ title: String, _ value: Double, _ tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 4) {
+                Circle().fill(tint).frame(width: 7, height: 7)
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(MoneyText.grouped(value))
+                .font(.system(.callout, design: .rounded, weight: .semibold))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// 概览卡上那三个快捷范围选中了哪个；都不是（比如选了去年某个月）返回 -1。
+    private var overviewQuick: Int {
+        let now = AppClock.now
+        let year = Calendar.chinaCalendar.component(.year, from: now)
+        let month = Calendar.chinaCalendar.component(.month, from: now)
+        if isOverviewAll { return 2 }
+        guard overviewYear == year else { return -1 }
+        if overviewMonth == nil { return 1 }
+        return overviewMonth == month ? 0 : -1
+    }
+
+    private func setOverviewQuick(_ choice: Int) {
+        let now = AppClock.now
+        isOverviewAll = choice == 2
+        guard choice != 2 else { return }
+        overviewYear = Calendar.chinaCalendar.component(.year, from: now)
+        overviewMonth = choice == 0 ? Calendar.chinaCalendar.component(.month, from: now) : nil
+    }
+
+    /// 在概览卡上左右滑：看着某个月时换到上个月 / 下个月。不往未来翻。
+    private func shiftOverviewMonth(_ delta: Int) {
+        guard !isOverviewAll, let month = overviewMonth else { return }
+        var year = overviewYear, next = month + delta
+        if next < 1 { next = 12; year -= 1 }
+        if next > 12 { next = 1; year += 1 }
+        let now = AppClock.now
+        let thisYear = Calendar.chinaCalendar.component(.year, from: now)
+        let thisMonth = Calendar.chinaCalendar.component(.month, from: now)
+        guard year < thisYear || (year == thisYear && next <= thisMonth) else { return }
+        withAnimation(.snappy(duration: 0.3)) {
+            overviewYear = year
+            overviewMonth = next
+        }
     }
 
     private func heatLegend(_ tint: Color, _ title: String) -> some View {
@@ -473,6 +530,14 @@ struct HomeView: View {
                 }
                 .accessibilityIdentifier("home.overview.period")
             }
+            // 和上面那张卡一样的三档；要看别的月份点「选择时间」，或者在这张卡上左右滑
+            Picker("概览范围", selection: Binding(get: { overviewQuick }, set: { setOverviewQuick($0) })) {
+                Text("本月").tag(0)
+                Text("本年").tag(1)
+                Text("累计").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("home.overview.quick")
 
             // 收支是这张卡的主角，单独占一行给足字号；
             // 票面金额和奖金退到下面一行当支撑数据。
@@ -503,7 +568,7 @@ struct HomeView: View {
             }
 
             HStack(spacing: 10) {
-                miniStat("票面金额", MoneyText.format(monthStats.cost), "arrow.down.circle.fill", .secondary)
+                miniStat("票面金额", MoneyText.format(monthStats.cost), "yensign.circle.fill", .secondary)
                 miniStat("奖金", MoneyText.format(monthStats.prize), "trophy.fill", Palette.profit)
             }
 
@@ -522,6 +587,16 @@ struct HomeView: View {
             }
         }
         .contentCard()
+        .sensoryFeedback(.selection, trigger: overviewMonth)
+        // 横着滑才算；竖着滑是页面在滚
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { value in
+                    let dx = value.translation.width, dy = value.translation.height
+                    guard abs(dx) > 60, abs(dx) > abs(dy) * 2 else { return }
+                    shiftOverviewMonth(dx < 0 ? 1 : -1)
+                }
+        )
     }
 
     private func miniStat(_ title: String, _ value: String, _ symbol: String, _ tint: Color) -> some View {
