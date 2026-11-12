@@ -28,6 +28,11 @@ struct HomeView: View {
     /// 卡片里画曲线还是方格。两种二选一，记住上次选的。
     @AppStorage("home.chartStyle") private var chartStyle = HomeChartStyle.line.rawValue
     @State private var series = ProfitSeries()
+    /// 号码球罐：看哪一罐、罐里放什么。
+    @State private var jarScope = JarScope.all
+    @State private var jar = JarBuilder.Jar()
+    @State private var jarEntries: [JarEntry] = []
+    @State private var jarYears: [Int] = []
     @State private var monthStats = ProfitStats.PeriodStats()
     /// 下面那张概览卡看哪一段：某年某月、某年全年（月份为 nil）、或者全部。
     @State private var overviewYear = Calendar.chinaCalendar.component(.year, from: AppClock.now)
@@ -109,7 +114,13 @@ struct HomeView: View {
                 await drawStore.loadCalendar(year: ChinaClock.year())
             }
             // 换范围时曲线和数字一起过渡，不是啪地一下换掉
-            .onChange(of: range) { _, _ in withAnimation(.snappy(duration: 0.35)) { recomputeSeries() } }
+            .onChange(of: range) { _, _ in
+                // 球罐跟着上面的范围走：累计看全部那一罐，本月 / 本年看今年那一罐
+                jarScope = defaultJarScope
+                withAnimation(.snappy(duration: 0.35)) { recomputeSeries() }
+            }
+            .onChange(of: jarScope) { _, _ in recomputeJar() }
+            .onChange(of: chartStyle) { _, _ in recomputeJar() }
             .onChange(of: overviewYear) { _, _ in recompute() }
             .onChange(of: overviewMonth) { _, _ in recompute() }
             .onChange(of: isOverviewAll) { _, _ in recompute() }
@@ -127,9 +138,29 @@ struct HomeView: View {
     private func recompute() {
         entries = ProfitStats.snapshot(records)
         recomputeSeries()
+        jarEntries = []
+        recomputeJar()
         let all = ProfitStats.snapshotAll(records)
         overviewYears = ProfitStats.availableYears(entries: all)
         monthStats = ProfitStats.period(entries: all, year: isOverviewAll ? nil : overviewYear, month: overviewMonth)
+    }
+
+    private var defaultJarScope: JarScope {
+        range == .all ? .all : .year(Calendar.chinaCalendar.component(.year, from: AppClock.now))
+    }
+
+    /// 球罐要把每张票的号码和逐球命中都解出来，只在选了球罐的时候算。
+    private func recomputeJar() {
+        guard chartStyle == HomeChartStyle.jar.rawValue else { return }
+        if jarEntries.isEmpty {
+            jarEntries = records.compactMap { record in
+                guard record.status == .won || record.status == .lost else { return nil }
+                return JarEntry(day: record.profitDay, game: record.game, numbers: record.ticket.numbers,
+                                matched: record.matched, prize: record.prizeAmount)
+            }
+            jarYears = Set(jarEntries.compactMap { Int($0.day.prefix(4)) }).sorted(by: >)
+        }
+        jar = JarBuilder.build(jarEntries, scope: jarScope, now: AppClock.now)
     }
 
     private func recomputeSeries() {
@@ -203,7 +234,7 @@ struct HomeView: View {
                     // 八个彩种不是同一个比例，不能拿总额乘一个数。
                     inlineStat("公益金", "\(MoneyText.grouped(series.welfareTotal)) 元", tint: Palette.warning)
                     Spacer(minLength: 0)
-                    // 曲线看总数怎么涨，方格看每一天。二选一。
+                    // 曲线看总数怎么涨，方格看每一天，球罐看买过的号码。三选一。
                     Picker("图表样式", selection: $chartStyle) {
                         Image(systemName: "chart.xyaxis.line")
                             .accessibilityLabel("曲线")
@@ -211,6 +242,9 @@ struct HomeView: View {
                         Image(systemName: "square.grid.3x3.fill")
                             .accessibilityLabel("方格")
                             .tag(HomeChartStyle.grid.rawValue)
+                        Image(systemName: "circle.hexagongrid.fill")
+                            .accessibilityLabel("球罐")
+                            .tag(HomeChartStyle.jar.rawValue)
                     }
                     .pickerStyle(.segmented)
                     .fixedSize()
@@ -221,7 +255,10 @@ struct HomeView: View {
             // 原来这里是逐日方格图加四个数字方块。方块里的数现在都在图上面那一行，
             // 而且按住图表拖动时会跟着变成那一天的数。
             Group {
-                if chartStyle == HomeChartStyle.grid.rawValue, !series.days.isEmpty {
+                if chartStyle == HomeChartStyle.jar.rawValue {
+                    BallJarView(jar: jar, scope: $jarScope, years: jarYears)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                } else if chartStyle == HomeChartStyle.grid.rawValue, !series.days.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         // 方格图自己读不出金额，上面放和曲线图同样的两个数
                         HStack(alignment: .top, spacing: 8) {
@@ -665,7 +702,7 @@ extension EnvironmentValues {
 
 /// 首页那张卡片里画哪一种图。
 enum HomeChartStyle: String {
-    case line, grid
+    case line, grid, jar
 }
 
 // MARK: - 收支热力图

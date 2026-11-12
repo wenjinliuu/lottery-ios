@@ -9,3 +9,4 @@
 - 截图和 UI 测试用 `--demo-data` 启动：内存里的示例票据（2026-06-01 至 09-27 的双色球、大乐透、七乐彩、七星彩），数据由 `Scripts/make-demo-data.py` 生成，不要手改 `DemoDataset.swift`。
 - App Store 截图：手动运行 Build & Test 并勾选 record_snapshots，`AppStoreScreenshotTests` 会把四张图（首页、票夹、扫描复核、设置）提交到 `Tests/LotteryWalletUITests/__Snapshots__/AppStoreScreenshotTests/`。
 - 扫描复核截图要一张票据照片 `Tests/LotteryWalletUITests/Fixtures/review-ticket.jpg`；示例模式下预览图整张打马赛克。没有这张照片时扫描截图会跳过。
+- 首页号码球罐的样子：录制快照时 `KeyFlowTests.testHomeBallJar` 会存两张图到 `Tests/LotteryWalletUITests/__Snapshots__/KeyFlowTests/`（停稳的、摇起来的），只是给人看的，不做比对。

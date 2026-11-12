@@ -42,4 +42,38 @@ final class KeyFlowTests: XCTestCase {
                                                           "双色球", "大乐透", "七乐彩", "七星彩")).firstMatch
         XCTAssertTrue(ticket.waitForExistence(timeout: 10), "票夹里没有示例票据")
     }
+
+    /// 首页切到号码球罐：罐子出来，点「摇一摇」球会被吹起来。
+    /// 录制快照时顺手存两张图（停稳的、吹起来的），改了罐子的样子可以直接看。
+    func testHomeBallJar() {
+        let style = app.segmentedControls["home.chart.style"]
+        XCTAssertTrue(style.waitForExistence(timeout: 10), "首页没有图表样式切换")
+        XCTAssertEqual(style.buttons.count, 3, "图表样式应该是曲线、方格、球罐三种")
+        style.buttons.element(boundBy: 2).tap()
+
+        let shake = app.buttons["home.jar.shake"]
+        XCTAssertTrue(shake.waitForExistence(timeout: 10), "切到球罐后没有「摇一摇」")
+        XCTAssertTrue(app.buttons["home.jar.scope"].exists, "球罐上没有选年份的按钮")
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        capture("home-jar")
+
+        shake.tap()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.9))
+        capture("home-jar-shaking")
+    }
+
+    private func capture(_ name: String, file: StaticString = #filePath) {
+        let screenshot = XCUIScreen.main.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        guard ProcessInfo.processInfo.environment["SNAPSHOT_TESTING_RECORD"] != nil else { return }
+        let folder = URL(fileURLWithPath: "\(file)")
+            .deletingLastPathComponent()
+            .appendingPathComponent("__Snapshots__/KeyFlowTests", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? screenshot.pngRepresentation.write(to: folder.appendingPathComponent("\(name).png"))
+    }
 }
