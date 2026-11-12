@@ -249,7 +249,7 @@ final class JarScene {
                             in context: inout GraphicsContext) {
         let centre = CGPoint(x: rect.midX, y: rect.midY)
         let radius = Double(rect.width / 2)
-        let ring: Double = tier == .big ? 3 : (tier == .medium ? 2.3 : 1.7)
+        let ring: Double = tier == .big ? 3.8 : (tier == .medium ? 3 : 2.4)
 
         if tier == .big {
             // 光晕一呼一吸
@@ -263,15 +263,20 @@ final class JarScene {
 
         // 金圈：一圈深浅相间的金色绕着转，亮的那一段扫过去就是「闪」
         let speed = tier == .small ? 0.7 : 1.5
-        let sheen = Gradient(colors: [Color(hex: 0xFFF6D6), Self.gold, Color(hex: 0xC98A12), Self.gold,
-                                      Color(hex: 0xFFFBEA), Self.gold, Color(hex: 0xC98A12), Color(hex: 0xFFF6D6)])
+        // 深浅要拉开：真机截图上第一版的圈太淡，压在黄球上几乎看不出来
+        let sheen = Gradient(colors: [Color(hex: 0xFFFDF2), Color(hex: 0xF2B01E), Color(hex: 0x9A6508), Color(hex: 0xF2B01E),
+                                      Color(hex: 0xFFFDF2), Color(hex: 0xF2B01E), Color(hex: 0x9A6508), Color(hex: 0xFFFDF2)])
         context.stroke(Path(ellipseIn: rect.insetBy(dx: ring / 2, dy: ring / 2)),
                        with: .conicGradient(sheen, center: centre, angle: .radians(time * speed + phase)),
                        lineWidth: ring)
 
+        // 金圈里外各压一道很细的深色线，圈才立得起来
+        context.stroke(Path(ellipseIn: rect.insetBy(dx: 0.3, dy: 0.3)), with: .color(Color(hex: 0x7A4E05).opacity(0.55)), lineWidth: 0.6)
+        context.stroke(Path(ellipseIn: rect.insetBy(dx: ring, dy: ring)), with: .color(.white.opacity(0.55)), lineWidth: 0.6)
+
         if let label = bead.label {
             let text = Text(label)
-                .font(.system(size: radius * 0.92, weight: .bold, design: .rounded))
+                .font(.system(size: radius * 0.86, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
             context.draw(text, at: centre)
         }
