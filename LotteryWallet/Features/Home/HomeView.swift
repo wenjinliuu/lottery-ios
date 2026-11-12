@@ -707,7 +707,7 @@ enum HomeChartStyle: String {
     /// 选的样式记在哪。示例模式（截图、界面测试）每次启动都用一份清空了的，
     /// 不然一条测试切到球罐，后面的测试和截图打开首页看到的都是球罐。
     static let store: UserDefaults = {
-        guard DemoData.isEnabled, let demo = UserDefaults(suiteName: "demo.home") else { return .standard }
+        guard ProcessInfo.processInfo.arguments.contains("--demo-data"), let demo = UserDefaults(suiteName: "demo.home") else { return .standard }
         demo.removePersistentDomain(forName: "demo.home")
         return demo
     }()
