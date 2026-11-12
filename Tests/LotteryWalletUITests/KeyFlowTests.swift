@@ -9,8 +9,7 @@ final class KeyFlowTests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication()
-        // 图表样式会记住上次选的；测试之间不能互相带着走，每次都从曲线开始
-        app.launchArguments += ["--demo-data", "-home.chartStyle", "line"]
+        app.launchArguments += ["--demo-data"]
         app.launch()
     }
 
