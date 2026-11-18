@@ -5,6 +5,9 @@ on:
       build:
         type: string
         required: true
+      profiles_only:
+        type: boolean
+        default: false
 permissions: {}
 jobs:
   inspect:
@@ -14,13 +17,14 @@ jobs:
       - run: python -m pip install 'pyjwt[crypto]==2.10.1'
       - name: Read App Store Connect build status
         env:
+          CHECK_PROFILES: ${{ inputs.profiles_only }}
           CHECK_BUILD: ${{ inputs.build }}
           ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
         run: |
           python - <<'PY'
-          import json, os, time, urllib.parse, urllib.request
+          import base64, json, os, plistlib, subprocess, time, urllib.parse, urllib.request
           import jwt
 
           def get(path, params=None):
@@ -35,6 +39,22 @@ jobs:
                                            headers={"Authorization": "Bearer " + auth})
               with urllib.request.urlopen(req, timeout=20) as response:
                   return json.load(response)["data"]
+
+          if os.environ["CHECK_PROFILES"] == "true":
+              bundles = get("/v1/bundleIds", {"filter[identifier]": "com.wenjinliu.lotterywallet"})
+              profiles = get(f"/v1/bundleIds/{bundles[0]['id']}/profiles", {"limit": 200})
+              for profile in profiles:
+                  info = profile["attributes"]
+                  encoded = info.get("profileContent")
+                  if info["profileType"] != "IOS_APP_STORE" or not encoded:
+                      continue
+                  xml = subprocess.check_output(["openssl", "cms", "-verify", "-noverify", "-inform", "DER"],
+                                                input=base64.b64decode(encoded), stderr=subprocess.DEVNULL)
+                  entitlements = plistlib.loads(xml)["Entitlements"]
+                  print("MAIN_SIGNING_PROFILE", info["profileState"], info["expirationDate"],
+                        "APNS=" + str(entitlements.get("aps-environment") == "production"),
+                        "ICLOUD=" + str(bool(entitlements.get("com.apple.developer.icloud-container-identifiers"))))
+              raise SystemExit(0)
 
           app = get("/v1/apps", {"filter[bundleId]": "com.wenjinliu.lotterywallet"})[0]["id"]
           number = os.environ["CHECK_BUILD"]
