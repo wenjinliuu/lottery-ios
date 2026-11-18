@@ -174,26 +174,6 @@ enum Palette {
     static let separator = Color(.separator)
 }
 
-extension RecordStatus {
-    var tint: Color {
-        switch self {
-        case .pending: Palette.warning
-        case .won: Palette.profit
-        case .lost: Color.secondary
-        case .prizeFloat: Palette.warning
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .pending: "clock"
-        case .won: "checkmark.seal.fill"
-        case .lost: "xmark.circle"
-        case .prizeFloat: "hourglass"
-        }
-    }
-}
-
 // MARK: - 跟随 Dynamic Type 的小字号
 
 /// 固定视觉尺寸、但跟着系统字号一起缩放的小字。
