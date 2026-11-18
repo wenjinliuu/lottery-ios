@@ -119,6 +119,62 @@ final class DrawPushTests: XCTestCase {
         XCTAssertNil(outcome.text)
     }
 
+    func testExtensionUsesOnlyPendingTicketsForThatGameIssueAndDate() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let local = DrawNotificationStore(directory: directory)
+        let draw = try XCTUnwrap(DrawPushPayload.parse(ssqPush()))
+
+        try saveSSQ([([1, 2, 3, 4, 7, 8], 11), ([1, 2, 3, 4, 7, 8], 9)], multiple: 2)
+        try saveSSQ([([1, 2, 3, 4, 7, 8], 11)], issue: "2026131")
+        try service.save(tickets: [Ticket()], game: .dlt, entryKind: .manual, price: 2, multiple: 1,
+                         target: DrawTarget(expect: "2026130", openDate: "2026-11-10", status: .confirmed),
+                         source: "manual")
+        try service.save(tickets: [Ticket()], game: .ssq, entryKind: .manual, price: 2, multiple: 1,
+                         target: DrawTarget(expect: "2026130", openDate: "2026-11-11", status: .confirmed),
+                         source: "manual")
+        try service.save(tickets: [Ticket()], game: .ssq, entryKind: .manual, price: 2, multiple: 1,
+                         target: DrawTarget(expect: "2026130", openDate: "2026-11-10", status: .review),
+                         source: "manual")
+
+        let snapshot = try DrawPushCenter.pendingTickets(in: container.mainContext)
+        XCTAssertEqual(snapshot.count, 5)
+        try local.replacePendingTickets(snapshot)
+        let summary = try XCTUnwrap(local.summary(for: draw))
+        XCTAssertEqual(summary.purchased, 2)
+        XCTAssertEqual(summary.cost, 8)
+        XCTAssertEqual(summary.winners, 1)
+        XCTAssertEqual(summary.prize, 10)
+        XCTAssertEqual(summary.body, "2 注 · 投入 8元 · 中 1 注 · 奖金 10元")
+
+        try local.record(draw)
+        let receipt = try XCTUnwrap(local.receiptFiles().first)
+        let received = try JSONDecoder().decode(Draw.self, from: Data(contentsOf: receipt))
+        let settled = try DrawPushCenter.shared.settle(with: received, in: container.mainContext,
+                                                       requireMatchingDate: true)
+        XCTAssertEqual(settled.tickets, 2)
+        try local.replacePendingTickets(DrawPushCenter.pendingTickets(in: container.mainContext))
+        XCTAssertNil(try local.summary(for: draw))
+    }
+
+    func testExtensionReportsLossAndPendingPrizeButRejectsIncompleteDraws() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let local = DrawNotificationStore(directory: directory)
+        var draw = try XCTUnwrap(DrawPushPayload.parse(ssqPush(prizes: nil)))
+
+        try saveSSQ([([1, 2, 3, 4, 7, 8], 9)])
+        try local.replacePendingTickets(DrawPushCenter.pendingTickets(in: container.mainContext))
+        XCTAssertEqual(try local.summary(for: draw)?.body, "1 注 · 投入 2元 · 未中奖")
+
+        try saveSSQ([([5, 6, 10, 25, 27, 30], 11)])
+        try local.replacePendingTickets(DrawPushCenter.pendingTickets(in: container.mainContext))
+        XCTAssertEqual(try local.summary(for: draw)?.body, "2 注 · 投入 4元 · 中 1 注 · 奖金待公布")
+
+        draw.drawValues[.blue] = []
+        XCTAssertNil(try local.summary(for: draw))
+    }
+
     // MARK: - 文案
 
     func testOutcomeWording() {

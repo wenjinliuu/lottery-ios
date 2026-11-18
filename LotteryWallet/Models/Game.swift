@@ -58,9 +58,6 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     static let rows: [[GameKey]] = [[.ssq, .dlt, .k8, .fc3d], [.pl3, .qlc, .qxc, .pl5]]
     static let ordered: [GameKey] = rows.flatMap { $0 }
 
-    // 远端彩种标识（`k8` ↔ `kl8`）在 `LotteryEndpoint.swift` 里，
-    // 和端点路径、缓存键放在一起 —— 那三样东西必须一起改。
-
     var label: String {
         switch self {
         case .ssq: "双色球"
@@ -288,4 +285,19 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     }
 
     private static let chineseDigits = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
+}
+
+// MARK: - 彩种标识
+
+extension GameKey {
+    /// 远端（CloudBase 与 GitHub 兜底共用）的彩种标识。
+    ///
+    /// **只有快乐8 两边不一样：App 内是 `k8`，远端是 `kl8`。**
+    /// 这个映射只能有这一处。散在页面里做字符串替换，漏掉一处的表现是
+    /// 「其它七个彩种都好，就快乐8 没有数据」，而且不报错。
+    var apiKey: String { self == .k8 ? "kl8" : rawValue }
+
+    static func fromAPIKey(_ key: String) -> GameKey? {
+        key == "kl8" ? .k8 : GameKey(rawValue: key)
+    }
 }

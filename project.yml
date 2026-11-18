@@ -24,6 +24,9 @@ targets:
     platform: iOS
     sources:
       - path: LotteryWallet
+    dependencies:
+      - target: DrawNotificationService
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wenjinliu.lotterywallet
@@ -73,6 +76,45 @@ targets:
             NSUbiquitousContainerIsDocumentScopePublic: true
             NSUbiquitousContainerName: 对个号
             NSUbiquitousContainerSupportedFolderLevels: Any
+
+  DrawNotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: DrawNotificationService
+        excludes:
+          - Info.plist
+          - DrawNotificationService.entitlements
+      - path: LotteryWallet/Data/Push/DrawPushPayload.swift
+      - path: LotteryWallet/Data/Push/DrawNotificationStore.swift
+      - path: LotteryWallet/Data/V2/LotteryV2DTO.swift
+      - path: LotteryWallet/Data/V2/LotteryV2DrawMapper.swift
+      - path: LotteryWallet/Design/BallView.swift
+      - path: LotteryWallet/Design/LiquidGlass.swift
+      - path: LotteryWallet/Design/Palette.swift
+      - path: LotteryWallet/Models/Draw.swift
+      - path: LotteryWallet/Models/Game.swift
+      - path: LotteryWallet/Models/NumberSet.swift
+      - path: LotteryWallet/Models/TextFormat.swift
+      - path: LotteryWallet/Models/TicketShape.swift
+      - path: LotteryWallet/Rules/PrizeRules.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wenjinliu.lotterywallet.notificationservice
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "1.3.0"
+        CURRENT_PROJECT_VERSION: "1"
+        APPLICATION_EXTENSION_API_ONLY: YES
+        CODE_SIGN_ENTITLEMENTS: DrawNotificationService/DrawNotificationService.entitlements
+        SKIP_INSTALL: YES
+    info:
+      path: DrawNotificationService/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
 
   LotteryWalletTests:
     type: bundle.unit-test

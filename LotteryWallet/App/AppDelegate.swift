@@ -23,6 +23,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /// 后台唤醒是可选的。即使系统跳过回调，远程通知本身也会显示开奖号码。
     func application(_ application: UIApplication,
                      didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
+        if DrawPushPayload.usesServiceExtension(userInfo) {
+            return DrawPushCenter.shared.applyNotificationResults() ? .newData : .noData
+        }
         guard application.applicationState != .active else { return .noData }
         let result = await DrawPushCenter.shared.handleRemoteNotification(userInfo)
         return result == .unchanged ? .noData : .newData
@@ -31,9 +34,21 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         if notification.request.trigger is UNPushNotificationTrigger {
-            let result = await DrawPushCenter.shared.handleRemoteNotification(notification.request.content.userInfo)
-            if result == .displayedWin { return [] }
+            let userInfo = notification.request.content.userInfo
+            if DrawPushPayload.usesServiceExtension(userInfo) {
+                DrawPushCenter.shared.applyNotificationResults()
+            } else {
+                let result = await DrawPushCenter.shared.handleRemoteNotification(userInfo)
+                if result == .displayedWin { return [] }
+            }
         }
         return [.banner, .list, .sound]
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse) async {
+        if DrawPushPayload.usesServiceExtension(response.notification.request.content.userInfo) {
+            DrawPushCenter.shared.applyNotificationResults()
+        }
     }
 }

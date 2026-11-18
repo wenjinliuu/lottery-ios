@@ -11,6 +11,11 @@ enum DrawPushPayload {
         "draw-\(game.apiKey)-\(issue)"
     }
 
+    static func usesServiceExtension(_ userInfo: [AnyHashable: Any]) -> Bool {
+        userInfo["lottery_type"] != nil &&
+            (userInfo["aps"] as? [String: Any])?["mutable-content"] as? Int == 1
+    }
+
     /// 解析通知里的 `lottery_type` 和 `draw`。
     ///
     /// `draw` 和 `/v2/draws` 里的单条开奖是同一个结构，所以直接走
@@ -42,11 +47,11 @@ enum DrawPushPayload {
             var count: Int
         }
 
-        mutating func add(status: RecordStatus, prizeName: String, amount: Double) {
+        mutating func add(winning: Bool, isFloating: Bool, prizeName: String, amount: Double) {
             tickets += 1
-            guard status == .won || status == .prizeFloat else { return }
+            guard winning else { return }
             won += 1
-            if status == .prizeFloat { floating += 1 }
+            if isFloating { floating += 1 }
             self.amount += amount
             if let index = prizes.firstIndex(where: { $0.name == prizeName }) {
                 prizes[index].count += 1

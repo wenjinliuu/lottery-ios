@@ -72,21 +72,6 @@ enum LotteryEndpoint: Hashable, Sendable {
     }
 }
 
-// MARK: - 彩种标识
-
-extension GameKey {
-    /// 远端（CloudBase 与 GitHub 兜底共用）的彩种标识。
-    ///
-    /// **只有快乐8 两边不一样：App 内是 `k8`，远端是 `kl8`。**
-    /// 这个映射只能有这一处。散在页面里做字符串替换，漏掉一处的表现是
-    /// 「其它七个彩种都好，就快乐8 没有数据」，而且不报错。
-    var apiKey: String { self == .k8 ? "kl8" : rawValue }
-
-    static func fromAPIKey(_ key: String) -> GameKey? {
-        key == "kl8" ? .k8 : GameKey(rawValue: key)
-    }
-}
-
 /// 这次数据是从哪儿来的。只用于日志和诊断，不影响展示。
 enum LotteryDataSource: String, Sendable {
     case cloudBase
