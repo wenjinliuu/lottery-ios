@@ -27,6 +27,11 @@ struct BallJarView: View {
             .frame(height: Self.height)
             .clipShape(shape)
             .glassJar(in: shape)
+            .background(Color.primary.opacity(0.025), in: shape)
+            .overlay {
+                shape.strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
             .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
             .accessibilityElement()
             .accessibilityLabel("号码球罐")
