@@ -20,13 +20,20 @@ enum ProfitRange: String, CaseIterable, Identifiable {
         }
     }
 
-    /// 方格图要铺多少天。
-    var gridSpan: Int {
+    func startDay(firstDay: String, lastDay: String, now: Date) -> String {
         switch self {
-        case .month: 31
-        case .half: 183
-        case .year: 365
-        case .all: 365
+        case .all:
+            return firstDay
+        case .month:
+            return String(DateText.day(now).prefix(7)) + "-01"
+        case .year:
+            return String(DateText.day(now).prefix(4)) + "-01-01"
+        case .half:
+            guard let end = DateText.parse(lastDay),
+                  let start = Calendar.chinaCalendar.date(byAdding: .day, value: -182, to: end) else {
+                return firstDay
+            }
+            return DateText.day(start)
         }
     }
 }
@@ -164,7 +171,7 @@ enum ProfitStats {
 
     /// 只在**有记录的日子**上打点，不再逐日填充空白天。
     /// 逐日填充在跨度大时会生成上万个点，既拖慢渲染又没有信息量。
-    static func series(entries: [SettledEntry], range: ProfitRange, now: Date = Date()) -> ProfitSeries {
+    static func series(entries: [SettledEntry], range: ProfitRange, now: Date = Date(), sampleDays: Bool = true) -> ProfitSeries {
         guard !entries.isEmpty else { return ProfitSeries(rangeLabel: range.label) }
 
         var byDay: [String: [SettledEntry]] = [:]
@@ -172,15 +179,16 @@ enum ProfitStats {
         let allDays = byDay.keys.sorted()
         guard let lastDay = allDays.last else { return ProfitSeries(rangeLabel: range.label) }
 
-        let startDay = rangeStart(range: range, lastDay: lastDay, firstDay: allDays[0], now: now)
+        let startDay = range.startDay(firstDay: allDays[0], lastDay: lastDay, now: now)
 
         // 区间之前的记录压成起始余额，曲线才接得上
+        let endDay = DateText.day(now)
         var balance = 0.0
         var visible: [String] = []
         for day in allDays {
             if day < startDay {
                 balance += byDay[day]?.reduce(0) { $0 + $1.net } ?? 0
-            } else {
+            } else if range == .all || day <= endDay {
                 visible.append(day)
             }
         }
@@ -253,7 +261,7 @@ enum ProfitStats {
                                     games: byGame.values.sorted { $0.cost > $1.cost }))
         }
 
-        return ProfitSeries(days: downsample(points),
+        return ProfitSeries(days: sampleDays ? downsample(points) : points,
                             flow: downsample(flow),
                             months: Array(months.suffix(12)),
                             costTotal: costTotal,
@@ -263,25 +271,6 @@ enum ProfitStats {
                             wonCount: wonTotal,
                             closingBalance: balance,
                             rangeLabel: range.label)
-    }
-
-    private static func rangeStart(range: ProfitRange, lastDay: String, firstDay: String, now: Date) -> String {
-        switch range {
-        case .all:
-            return firstDay
-        case .month:
-            return String(DateText.day(now).prefix(7)) + "-01"
-        case .year:
-            // 本年：从今年 1 月 1 日起（原来是「近一年」的 365 天，首页改成本月 / 本年 / 累计三档之后按自然年算）
-            return String(DateText.day(now).prefix(4)) + "-01-01"
-        case .half:
-            let span = Int(range.rawValue) ?? 183
-            guard let end = DateText.parse(lastDay),
-                  let shifted = Calendar.chinaCalendar.date(byAdding: .day, value: -(max(span, 1) - 1), to: end) else {
-                return firstDay
-            }
-            return DateText.day(shifted)
-        }
     }
 
     /// 点数超上限时等距抽稀，保留首尾，累计值本身仍然正确。

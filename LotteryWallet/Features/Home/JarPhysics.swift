@@ -24,6 +24,9 @@ struct JarPhysics {
     private(set) var blowing = 0.0
     /// 连着多少步几乎没动。
     private(set) var quietSteps = 0
+    private var previousPositions: [(x: Double, y: Double)] = []
+    private var heads: [Int] = []
+    private var next: [Int] = []
     private var seed: UInt64 = 0x9E3779B97F4A7C15
 
     /// 都停稳了，不用再算。
@@ -58,6 +61,47 @@ struct JarPhysics {
         }
     }
 
+    /// 同半径的球直接从底部六角排布，打开罐子时无需在主线程上模拟落稳。
+    mutating func fillPacked(count: Int, radius: Double, width: Double, height: Double) {
+        self.width = width
+        self.height = height
+        seed = 0x9E3779B97F4A7C15
+        blowing = 0
+        quietSteps = 30
+        balls.removeAll(keepingCapacity: true)
+        guard count > 0, radius > 0 else { return }
+
+        let diameter = radius * 2
+        var y = height - radius
+        var row = 0
+        let c = min(corner, min(width, height) / 2)
+        while y >= radius && balls.count < count {
+            let dy = max(c - y, y - (height - c), 0)
+            let left: Double
+            if c > radius && dy > 0 {
+                left = c - max(0, (c - radius) * (c - radius) - dy * dy).squareRoot()
+            } else {
+                left = radius
+            }
+            // 固定网格的奇偶错列保持相邻行的球互不重叠。最后一行对称地铺开。
+            let columns = max(1, Int((width / diameter).rounded(.down)))
+            let firstX = (width - Double(columns - 1) * diameter) / 2
+            let offset = row.isMultiple(of: 2) ? 0 : radius
+            let xs = (0..<columns).map { firstX + Double($0) * diameter - offset }
+                .filter { $0 >= left && $0 <= width - left }
+            let take = min(xs.count, count - balls.count)
+            for x in xs.dropFirst((xs.count - take) / 2).prefix(take) {
+                balls.append(Ball(x: x, y: y, radius: radius))
+            }
+            y -= radius * Double(3).squareRoot()
+            row += 1
+        }
+        // 几何容量低于预期时稍缩球径，保持一次命中仍对应一颗球。
+        if balls.count < count {
+            fillPacked(count: count, radius: radius * 0.9, width: width, height: height)
+        }
+    }
+
     /// 吹一阵：罐子里的球被从下往上吹起来翻滚。
     mutating func blow(seconds: Double = 1.6) {
         blowing = seconds
@@ -71,10 +115,13 @@ struct JarPhysics {
         let substeps = 2
         let h = dt / Double(substeps)
         var moving = 0
+        if previousPositions.count != balls.count {
+            previousPositions = Array(repeating: (0, 0), count: balls.count)
+        }
         for _ in 0..<substeps {
-            let previous = balls
             for index in balls.indices {
                 var ball = balls[index]
+                previousPositions[index] = (ball.x, ball.y)
                 var ax = gravityX, ay = gravityY
                 if blowing > 0 {
                     // 摇号机：中间一股气流往上喷，球被顶到上面再从两边落下来，整罐翻滚。
@@ -104,8 +151,8 @@ struct JarPhysics {
             for _ in 0..<3 { separate() }
             for index in balls.indices {
                 // 稍微损耗一点，球才停得下来
-                balls[index].vx = (balls[index].x - previous[index].x) / h * 0.985
-                balls[index].vy = (balls[index].y - previous[index].y) / h * 0.985
+                balls[index].vx = (balls[index].x - previousPositions[index].x) / h * 0.985
+                balls[index].vy = (balls[index].y - previousPositions[index].y) / h * 0.985
             }
         }
         for ball in balls where abs(ball.vx) + abs(ball.vy) > 14 { moving += 1 }
@@ -121,8 +168,10 @@ struct JarPhysics {
         let largest = balls.reduce(0.0) { max($0, $1.radius) }
         let cell = max(largest * 2, 1)
         let columns = Int(width / cell) + 1, rows = Int(height / cell) + 1
-        var heads = [Int](repeating: -1, count: columns * rows)
-        var next = [Int](repeating: -1, count: count)
+        let cellCount = columns * rows
+        if heads.count != cellCount { heads = Array(repeating: -1, count: cellCount) }
+        else { for index in heads.indices { heads[index] = -1 } }
+        if next.count != count { next = Array(repeating: -1, count: count) }
         func slot(_ ball: Ball) -> (Int, Int) {
             (min(max(Int(ball.x / cell), 0), columns - 1), min(max(Int(ball.y / cell), 0), rows - 1))
         }

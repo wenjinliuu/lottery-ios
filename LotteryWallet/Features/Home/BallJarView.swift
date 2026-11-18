@@ -1,224 +1,164 @@
 import CoreMotion
+import Observation
 import SwiftUI
 
-/// 号码球罐：买过的号码装在一个罐子里，跟着手机的重力滚。
-///
-/// - 颜色跟彩种（号码区）走。**淡色**是买了没开出的，**实心**是开出了的。只分这两类。
-/// - 右上角的按钮像摇号机那样从底下吹一阵。
-///
-/// 放什么球见 `JarBuilder`，球怎么动见 `JarPhysics`。
 struct BallJarView: View {
     let jar: JarBuilder.Jar
-    @Binding var scope: JarScope
-    /// 有数据的年份，新的在前。
-    let years: [Int]
+    let range: ProfitRange
 
     @State private var scene = JarScene()
+    @State private var size = CGSize.zero
+    @State private var isVisible = false
     @State private var shakes = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
     static let height: CGFloat = 230
+    private static let corner: CGFloat = 22
+    private var isActive: Bool { isVisible && scenePhase == .active && !jar.colors.isEmpty }
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Self.corner)
+        let frame = scene.frame
         VStack(alignment: .leading, spacing: 8) {
-            ZStack(alignment: .top) {
-                TimelineView(.animation(paused: scenePhase != .active)) { timeline in
-                    Canvas { context, size in
-                        scene.load(jar, size: size, settled: reduceMotion || DemoData.isEnabled)
-                        scene.advance(to: timeline.date)
-                        scene.draw(in: &context)
-                    }
+            Canvas { context, _ in
+                scene.draw(in: &context, frame: frame)
+            }
+            .frame(height: Self.height)
+            .clipShape(shape)
+            .glassJar(in: shape)
+            .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
+            .accessibilityElement()
+            .accessibilityLabel("号码球罐")
+            .accessibilityValue("\(range.label)\(summary)")
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    scene.shake()
+                    shakes += 1
+                } label: {
+                    Label("摇一摇", systemImage: "wind")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.regularMaterial, in: Capsule())
                 }
-                .frame(height: Self.height)
-                .background(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(Color.primary.opacity(0.045))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .accessibilityElement()
-                .accessibilityLabel("号码球罐")
-                .accessibilityValue(summary)
-
-                HStack {
-                    scopeMenu
-                    Spacer(minLength: 0)
-                    Button {
-                        scene.physics.blow()
-                        shakes += 1
-                    } label: {
-                        Label("摇一摇", systemImage: "wind")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(.regularMaterial, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(jar.beads.isEmpty)
-                    .accessibilityIdentifier("home.jar.shake")
-                }
+                .buttonStyle(.plain)
+                .disabled(jar.colors.isEmpty)
+                .accessibilityIdentifier("home.jar.shake")
                 .padding(8)
-
-                if jar.beads.isEmpty {
-                    Text("这一段还没有开过奖的号码")
+            }
+            .overlay {
+                if jar.colors.isEmpty {
+                    Text("这段时间没有命中的号码")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: Self.height)
+                        .allowsHitTesting(false)
                 }
             }
-            legend
+
+            Text(jar.isSampled ? "\(summary) · 示意展示 \(jar.colors.count.formatted()) 颗" : summary)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("home.jar.total")
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: shakes)
-        .onAppear { scene.startMotion() }
+        .onChange(of: jar, initial: true) { _, _ in load() }
+        .onChange(of: size) { _, _ in load() }
+        .onScrollVisibilityChange(threshold: 0.1) { isVisible = $0 }
+        .onChange(of: isActive && !reduceMotion, initial: true) { _, active in
+            if active && !DemoData.isEnabled { scene.startMotion() }
+            else { scene.stopMotion() }
+        }
         .onDisappear { scene.stopMotion() }
-    }
-
-    private var scopeTitle: String {
-        switch scope {
-        case .all: "全部"
-        case .year(let year): "\(String(year)) 年"
-        }
-    }
-
-    private var scopeMenu: some View {
-        Menu {
-            Picker("看哪一罐", selection: $scope) {
-                Text("全部").tag(JarScope.all)
-                ForEach(years, id: \.self) { year in
-                    Text("\(String(year)) 年").tag(JarScope.year(year))
-                }
+        .task(id: isActive && scene.isAnimating) {
+            guard isActive, scene.isAnimating else { return }
+            let clock = ContinuousClock()
+            var nextFrame = clock.now
+            while !Task.isCancelled && scene.isAnimating {
+                scene.advance()
+                nextFrame = max(nextFrame + .milliseconds(33), clock.now)
+                try? await clock.sleep(until: nextFrame)
             }
-        } label: {
-            HStack(spacing: 3) {
-                Text(scopeTitle)
-                Image(systemName: "chevron.up.chevron.down")
-                    .imageScale(.small)
-            }
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.regularMaterial, in: Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("home.jar.scope")
-    }
-
-    private var summary: String {
-        var text = "\(scopeTitle)共 \(jar.total) 个号码"
-        if jar.hits > 0 { text += "，开出 \(jar.hits) 个" }
-        return text
-    }
-
-    private var legend: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 12) {
-                sample("没开出", fill: Color.accentColor.opacity(0.22), stroke: Color.accentColor.opacity(0.45))
-                sample("开出了", fill: Color.accentColor, stroke: .clear)
-            }
-            Text(caption)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
     }
 
-    private var caption: String {
-        var parts = ["共 \(jar.total) 个号码"]
-        if jar.per > 1 { parts.append("一颗小珠 ≈ \(jar.per) 个") }
-        if jar.hits > 0 { parts.append("开出 \(jar.hits) 个") }
-        return parts.joined(separator: " · ")
-    }
+    private var summary: String { "命中 \(jar.hits.formatted()) 个号码" }
 
-    private func sample(_ title: String, fill: Color, stroke: Color) -> some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(fill)
-                .overlay(Circle().strokeBorder(stroke, lineWidth: 1.5))
-                .frame(width: 10, height: 10)
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
+    private func load() {
+        scene.load(jar.colors, size: size, corner: Self.corner)
     }
 }
 
-/// 罐子的现场：球、物理、重力感应。放在类里是因为每一帧都要改它，而画面不需要为此重排。
+@MainActor @Observable
 final class JarScene {
-    var physics = JarPhysics()
-    private var beads: [JarBead] = []
-    private var loaded: JarBuilder.Jar?
-    private var size = CGSize.zero
-    private var last: Date?
-    private let motion = CMMotionManager()
-    /// 停稳时的重力方向。手机动了才把球叫醒。
-    private var restGravity = (x: 0.0, y: 1.0)
+    private(set) var frame = 0
+    private(set) var isAnimating = false
+    @ObservationIgnored private var physics = JarPhysics()
+    @ObservationIgnored private var colors: [BallColor] = []
+    @ObservationIgnored private let motion = CMMotionManager()
+    @ObservationIgnored private var restGravity = (x: 0.0, y: 1.0)
 
-    /// 小珠子的半径：罐子装满（容量那么多颗）时正好铺满。
-    static func beadRadius(size: CGSize) -> Double {
-        (Double(size.width * size.height) * 0.8 / (Double.pi * Double(JarBuilder.capacity))).squareRoot()
-    }
-
-    func load(_ jar: JarBuilder.Jar, size: CGSize, settled: Bool) {
-        guard jar != loaded || size != self.size, size.width > 0, size.height > 0 else { return }
-        loaded = jar
-        self.size = size
-        beads = jar.beads
-        let base = Self.beadRadius(size: size)
-        physics.fill(radii: Array(repeating: base, count: beads.count),
-                     width: size.width, height: size.height, settled: settled)
-        last = nil
+    func load(_ colors: [BallColor], size: CGSize, corner: CGFloat) {
+        guard size.width > 0, size.height > 0 else { return }
+        self.colors = colors
+        physics.corner = corner
+        let radius = JarBuilder.radius(count: colors.count, width: size.width, height: size.height)
+        physics.fillPacked(count: colors.count, radius: radius, width: size.width, height: size.height)
+        restGravity = (0, 1)
+        physics.gravityX = 0
+        physics.gravityY = 1400
+        isAnimating = false
+        frame &+= 1
     }
 
     func startMotion() {
         guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
         motion.deviceMotionUpdateInterval = 1.0 / 30
-        motion.startDeviceMotionUpdates()
-    }
-
-    func stopMotion() {
-        motion.stopDeviceMotionUpdates()
-    }
-
-    func advance(to date: Date) {
-        defer { last = date }
-        if let gravity = motion.deviceMotion?.gravity {
-            // 设备坐标：x 向右、y 向上；画布的 y 向下
-            physics.gravityX = gravity.x * 1400
-            physics.gravityY = -gravity.y * 1400
-            if abs(gravity.x - restGravity.x) + abs(-gravity.y - restGravity.y) > 0.12 { physics.wake() }
-            if !physics.isResting { restGravity = (gravity.x, -gravity.y) }
+        motion.startDeviceMotionUpdates(to: .main) { [weak self] sample, _ in
+            guard let gravity = sample?.gravity else { return }
+            let x = gravity.x
+            let y = -gravity.y
+            Task { @MainActor in self?.updateGravity(x: x, y: y) }
         }
-        guard let last, !physics.isResting else { return }
-        // 掉帧时不追着补算：最多补两步
-        let steps = min(max(Int((date.timeIntervalSince(last) * 60).rounded()), 1), 2)
-        for _ in 0..<steps { physics.step(1.0 / 60) }
     }
 
-    func draw(in context: inout GraphicsContext) {
-        let balls = physics.balls
-        guard balls.count == beads.count else { return }
-        for (index, bead) in beads.enumerated() {
-            let ball = balls[index]
+    func stopMotion() { motion.stopDeviceMotionUpdates() }
+
+    private func updateGravity(x: Double, y: Double) {
+        guard motion.isDeviceMotionActive, !colors.isEmpty else { return }
+        physics.gravityX = x * 1400
+        physics.gravityY = y * 1400
+        if !isAnimating && abs(x - restGravity.x) + abs(y - restGravity.y) > 0.12 {
+            physics.wake()
+            isAnimating = true
+        }
+    }
+
+    func shake() {
+        guard !colors.isEmpty else { return }
+        physics.blow()
+        isAnimating = true
+    }
+
+    func advance() {
+        for _ in 0..<2 where !physics.isResting { physics.step(1.0 / 60) }
+        if physics.isResting {
+            restGravity = (physics.gravityX / 1400, physics.gravityY / 1400)
+            isAnimating = false
+        }
+        frame &+= 1
+    }
+
+    func draw(in context: inout GraphicsContext, frame _: Int) {
+        var paths: [BallColor: Path] = [:]
+        for (color, ball) in zip(colors, physics.balls) {
+            let diameter = ball.radius * 2
             let rect = CGRect(x: ball.x - ball.radius, y: ball.y - ball.radius,
-                              width: ball.radius * 2, height: ball.radius * 2)
-            switch bead.kind {
-            case .miss:
-                let path = Path(ellipseIn: rect.insetBy(dx: 0.5, dy: 0.5))
-                context.fill(path, with: .color(bead.color.accentColor.opacity(0.2)))
-                context.stroke(path, with: .color(bead.color.accentColor.opacity(0.42)), lineWidth: 0.8)
-            case .hit:
-                context.fill(Path(ellipseIn: rect.insetBy(dx: 0.3, dy: 0.3)), with: shading(bead.color, rect))
-            }
+                              width: diameter, height: diameter).insetBy(dx: 0.25, dy: 0.25)
+            paths[color, default: Path()].addEllipse(in: rect)
         }
-    }
-
-    private func shading(_ color: BallColor, _ rect: CGRect) -> GraphicsContext.Shading {
-        .linearGradient(Gradient(colors: [color.light, color.deep]),
-                        startPoint: CGPoint(x: rect.minX, y: rect.minY),
-                        endPoint: CGPoint(x: rect.maxX, y: rect.maxY))
+        for color in paths.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+            if let path = paths[color] { context.fill(path, with: .color(color.accentColor)) }
+        }
     }
 }

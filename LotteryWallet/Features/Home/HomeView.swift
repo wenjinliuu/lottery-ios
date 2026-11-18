@@ -24,15 +24,12 @@ struct HomeView: View {
     @Environment(DrawStore.self) private var drawStore
     @Query(sort: \TicketRecord.createdAt, order: .reverse) private var records: [TicketRecord]
 
-    @State private var range: ProfitRange = .all
-    /// 卡片里画曲线还是方格。两种二选一，记住上次选的。
+    @State private var range: ProfitRange = .year
+    /// 曲线、方格和球罐共用同一个时间范围。
     @AppStorage("home.chartStyle", store: HomeChartStyle.store) private var chartStyle = HomeChartStyle.line.rawValue
     @State private var series = ProfitSeries()
-    /// 号码球罐：看哪一罐、罐里放什么。
-    @State private var jarScope = JarScope.all
     @State private var jar = JarBuilder.Jar()
-    @State private var jarEntries: [JarEntry] = []
-    @State private var jarYears: [Int] = []
+    @State private var jarEntries: [JarEntry]?
     @State private var monthStats = ProfitStats.PeriodStats()
     /// 下面那张概览卡看哪一段：某年某月、某年全年（月份为 nil）、或者全部。
     @State private var overviewYear = Calendar.chinaCalendar.component(.year, from: AppClock.now)
@@ -115,12 +112,15 @@ struct HomeView: View {
             }
             // 换范围时曲线和数字一起过渡，不是啪地一下换掉
             .onChange(of: range) { _, _ in
-                // 球罐跟着上面的范围走：累计看全部那一罐，本月 / 本年看今年那一罐
-                jarScope = defaultJarScope
-                withAnimation(.snappy(duration: 0.35)) { recomputeSeries() }
+                withAnimation(.snappy(duration: 0.35)) {
+                    recomputeSeries()
+                    recomputeJar()
+                }
             }
-            .onChange(of: jarScope) { _, _ in recomputeJar() }
-            .onChange(of: chartStyle) { _, _ in recomputeJar() }
+            .onChange(of: chartStyle) { _, _ in
+                recomputeSeries()
+                recomputeJar()
+            }
             .onChange(of: overviewYear) { _, _ in recompute() }
             .onChange(of: overviewMonth) { _, _ in recompute() }
             .onChange(of: isOverviewAll) { _, _ in recompute() }
@@ -138,33 +138,30 @@ struct HomeView: View {
     private func recompute() {
         entries = ProfitStats.snapshot(records)
         recomputeSeries()
-        jarEntries = []
+        jarEntries = nil
         recomputeJar()
         let all = ProfitStats.snapshotAll(records)
         overviewYears = ProfitStats.availableYears(entries: all)
         monthStats = ProfitStats.period(entries: all, year: isOverviewAll ? nil : overviewYear, month: overviewMonth)
     }
 
-    private var defaultJarScope: JarScope {
-        range == .all ? .all : .year(Calendar.chinaCalendar.component(.year, from: AppClock.now))
-    }
-
-    /// 球罐要把每张票的号码和逐球命中都解出来，只在选了球罐的时候算。
     private func recomputeJar() {
         guard chartStyle == HomeChartStyle.jar.rawValue else { return }
-        if jarEntries.isEmpty {
+        if jarEntries == nil {
             jarEntries = records.compactMap { record in
-                guard record.status == .won || record.status == .lost else { return nil }
+                guard record.status.hasResult else { return nil }
                 return JarEntry(day: record.profitDay, game: record.game, numbers: record.ticket.numbers,
-                                matched: record.matched, prize: record.prizeAmount)
+                                matched: record.matched)
             }
-            jarYears = Set(jarEntries.compactMap { Int($0.day.prefix(4)) }).sorted(by: >)
         }
-        jar = JarBuilder.build(jarEntries, scope: jarScope, now: AppClock.now)
+        jar = JarBuilder.build(jarEntries ?? [], range: range, now: AppClock.now)
     }
 
     private func recomputeSeries() {
-        series = ProfitStats.series(entries: entries, range: range, now: AppClock.now)
+        series = ProfitStats.series(
+            entries: entries, range: range, now: AppClock.now,
+            sampleDays: chartStyle != HomeChartStyle.grid.rawValue
+        )
     }
 
     private func refreshSchedule() {
@@ -202,7 +199,7 @@ struct HomeView: View {
                     Picker("范围", selection: $range) {
                         Text("本月").tag(ProfitRange.month)
                         Text("本年").tag(ProfitRange.year)
-                        Text("累计").tag(ProfitRange.all)
+                        Text("全部").tag(ProfitRange.all)
                     }
                     .pickerStyle(.segmented)
                     .fixedSize()
@@ -256,9 +253,9 @@ struct HomeView: View {
             // 而且按住图表拖动时会跟着变成那一天的数。
             Group {
                 if chartStyle == HomeChartStyle.jar.rawValue {
-                    BallJarView(jar: jar, scope: $jarScope, years: jarYears)
+                    BallJarView(jar: jar, range: range)
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                } else if chartStyle == HomeChartStyle.grid.rawValue, !series.days.isEmpty {
+                } else if chartStyle == HomeChartStyle.grid.rawValue {
                     VStack(alignment: .leading, spacing: 8) {
                         // 方格图自己读不出金额，上面放和曲线图同样的两个数
                         HStack(alignment: .top, spacing: 8) {
@@ -266,6 +263,7 @@ struct HomeView: View {
                             gridTotal("奖金", series.prizeTotal, Palette.profit)
                         }
                         ProfitHeatmap(days: series.days, range: range, width: screenWidth - 64)
+                            .id(range)
                         HStack(spacing: 12) {
                             heatLegend(Palette.profit, "当天有中奖")
                             heatLegend(Palette.loss, "当天没中")
@@ -779,27 +777,22 @@ struct ProfitHeatmap: View {
 
     @State private var selectedWeek: Int?
 
-    /// 「全部」画多少天：从第一条记录往前再留两周，最少 16 周、最多一年。
-    /// 固定画一整年的话，只有几个月记录的人看到的是一大片空格子。
-    private static func span(range: ProfitRange, days: [ProfitDay], today: Date) -> Int {
-        guard range == .all else { return range.gridSpan }
-        guard let first = days.filter({ $0.count > 0 }).map(\.day).min() else { return 16 * 7 }
-        let recorded = (Calendar.chinaCalendar.dateComponents([.day], from: first, to: today).day ?? 0) + 14
-        return Swift.min(Swift.max(recorded, 16 * 7), 365)
-    }
-
     private static func buildGrid(days: [ProfitDay], range: ProfitRange) -> Grid {
         var byDay: [String: ProfitDay] = [:]
         byDay.reserveCapacity(days.count)
         for day in days where day.count > 0 { byDay[day.date] = day }
 
         let calendar = Calendar.chinaCalendar
-        let today = AppClock.now
-        let span = Self.span(range: range, days: days, today: today)
-        guard let start = calendar.date(byAdding: .day, value: -(span - 1), to: today) else {
+        let today = calendar.startOfDay(for: AppClock.now)
+        let daysWithRecords = days.filter { $0.count > 0 }
+        let firstDay = daysWithRecords.first?.date ?? DateText.day(today)
+        let lastDay = daysWithRecords.last?.date ?? firstDay
+        let startDay = range.startDay(firstDay: firstDay, lastDay: lastDay, now: today)
+        let end = range == .all ? max(today, daysWithRecords.last?.day ?? today) : today
+        guard let start = DateText.parse(startDay) else {
             return Grid(byDay: byDay, weeks: [], monthLabels: [])
         }
-        // 回退到那一周的周一，列才不会错位
+        // 先对齐到周一，再把区间外的格子留空。
         let weekdayIndex = (calendar.component(.weekday, from: start) + 5) % 7
         guard let gridStart = calendar.date(byAdding: .day, value: -weekdayIndex, to: start) else {
             return Grid(byDay: byDay, weeks: [], monthLabels: [])
@@ -807,10 +800,10 @@ struct ProfitHeatmap: View {
 
         var weeks: [[Date?]] = []
         var cursor = gridStart
-        while cursor <= today {
+        while cursor <= end {
             var column: [Date?] = []
             for _ in 0..<7 {
-                column.append(cursor <= today ? cursor : nil)
+                column.append(cursor >= start && cursor <= end ? cursor : nil)
                 guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
                 cursor = next
             }
@@ -861,7 +854,7 @@ struct ProfitHeatmap: View {
         return VStack(alignment: .leading, spacing: 7) {
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .top, spacing: gap) {
+                    LazyHStack(alignment: .top, spacing: gap) {
                         ForEach(Array(grid.weeks.enumerated()), id: \.offset) { index, column in
                             VStack(spacing: gap) {
                                 ForEach(Array(column.enumerated()), id: \.offset) { _, date in
@@ -898,7 +891,7 @@ struct ProfitHeatmap: View {
                     }
                     // 月份刻度跟着方格一起横向滚，所以必须画在 ScrollView **里面**，
                     // 而且每个标签要和它那一列对齐 —— 用等宽的列去铺。
-                    HStack(alignment: .top, spacing: gap) {
+                    LazyHStack(alignment: .top, spacing: gap) {
                         ForEach(Array(grid.monthLabels.enumerated()), id: \.offset) { _, label in
                             Text(label)
                                 .scaledFont(10)

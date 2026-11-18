@@ -138,10 +138,9 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             // 示例模式的票据只在内存里，不该变成一份备份文件留在沙盒里
             // 自动备份常开（一天一次、留两份，见 `BackupPolicy`），开关只决定存本机还是 iCloud。
-            guard phase == .background, !DemoData.isEnabled else { return }
-            autoBackup()
-            // 这一轮可能新录了别的彩种的票：把订阅的彩种跟上。没变就不发请求。
-            Task { await DrawPushCenter.shared.syncSubscription() }
+            guard !DemoData.isEnabled else { return }
+            if phase == .background { autoBackup() }
+            if phase == .active { Task { await DrawPushCenter.shared.refreshOnLaunch() } }
         }
         .sheet(item: $activeSheet, onDismiss: {
             guard let next = queuedSheet else {
@@ -218,9 +217,10 @@ struct RootView: View {
             // 弹抽屉时不要把背后染灰 —— 那套行为在这里恢复得不跟手，
             // 设置页「外观」那一行的图标甚至根本恢复不回来。见 TintDimming。
             TintDimming.disable()
+            async let pushRegistration: Void = DrawPushCenter.shared.refreshOnLaunch()
             await drawStore.bootstrap()
             await runStartupChecks()
-            await DrawPushCenter.shared.refreshOnLaunch()
+            await pushRegistration
         }
     }
 

@@ -4,7 +4,7 @@ import SwiftData
 import UIKit
 import UserNotifications
 
-/// 开奖通知：向苹果要令牌、告诉云端订哪些彩种、收到通知后在本机核对。
+/// 开奖通知：登记设备令牌，收到开奖后在本机核对。
 ///
 /// 做成单例是因为令牌和后台通知都从 `AppDelegate` 进来，那里拿不到 SwiftUI 的环境。
 @MainActor
@@ -43,11 +43,15 @@ final class DrawPushCenter {
     }
 
     private let defaults = UserDefaults.standard
+    private var lastRegistration: Date?
+    private var isUpdatingRegistration = false
+    private var registrationNeedsUpdate = false
+    private var presenting: Set<String> = []
+    private var presented: Set<String> = []
     private enum Keys {
         static let enabled = "push.drawEnabled"
         static let token = "push.deviceToken"
-        /// 上次成功登记的「令牌 + 彩种」，没变就不重复请求。
-        static let registered = "push.registeredSignature"
+        static let pendingUnsubscribe = "push.pendingUnsubscribe"
     }
 
     private static let endpoint = URL(string: "https://wenjin-cloudbase-d1empq882391ac1-1311287495.ap-shanghai.app.tcloudbase.com/lottery/v2/devices")!
@@ -70,28 +74,33 @@ final class DrawPushCenter {
         }
         isEnabled = true
         defaults.set(true, forKey: Keys.enabled)
+        defaults.removeObject(forKey: Keys.pendingUnsubscribe)
+        lastRegistration = nil
         status = .registering
         UIApplication.shared.registerForRemoteNotifications()
     }
 
-    /// 用户关掉开关：告诉云端一个彩种都不订，本机也不再登记。
     func disable() async {
         isEnabled = false
         defaults.set(false, forKey: Keys.enabled)
+        defaults.set(true, forKey: Keys.pendingUnsubscribe)
+        lastRegistration = nil
         status = .off
-        if let token = defaults.string(forKey: Keys.token) {
-            try? await register(token: token, lotteries: [])
-        }
-        defaults.removeObject(forKey: Keys.registered)
+        UIApplication.shared.unregisterForRemoteNotifications()
+        await syncRegistration()
     }
 
-    /// 每次启动：之前开过就重新要一次令牌（苹果会不定期换）。不主动弹授权。
+    /// 冷启动刷新登记。回到前台也会重试未完成的操作。
     func refreshOnLaunch() async {
-        guard isEnabled else { return }
+        guard !DemoData.isEnabled else { return }
+        guard isEnabled else {
+            if defaults.bool(forKey: Keys.pendingUnsubscribe) { await syncRegistration() }
+            return
+        }
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         switch settings.authorizationStatus {
         case .authorized, .provisional, .ephemeral:
-            if status == .off { status = .registering }
+            if status != .on { status = .registering }
             UIApplication.shared.registerForRemoteNotifications()
         case .denied:
             status = .denied
@@ -100,11 +109,11 @@ final class DrawPushCenter {
         }
     }
 
-    // MARK: - 登记
-
     func didRegister(deviceToken: Data) async {
-        defaults.set(deviceToken.map { String(format: "%02x", $0) }.joined(), forKey: Keys.token)
-        await syncSubscription()
+        let token = deviceToken.map { String(format: "%02x", $0) }.joined()
+        if defaults.string(forKey: Keys.token) != token { lastRegistration = nil }
+        defaults.set(token, forKey: Keys.token)
+        if isEnabled || defaults.bool(forKey: Keys.pendingUnsubscribe) { await syncRegistration() }
     }
 
     func didFailToRegister(_ error: Error) {
@@ -112,26 +121,39 @@ final class DrawPushCenter {
         status = .failed(error.localizedDescription)
     }
 
-    /// 订阅的彩种跟着票夹走。令牌和彩种都没变就什么都不发。
-    func syncSubscription() async {
-        guard isEnabled, let token = defaults.string(forKey: Keys.token), let container else { return }
-        let records = (try? container.mainContext.fetch(FetchDescriptor<TicketRecord>())) ?? []
-        let lotteries = DrawPushPayload.subscription(records.map {
-            (game: $0.game, createdAt: $0.createdAt, isPending: $0.status == .pending)
-        })
-        let signature = ([token] + lotteries).joined(separator: "|")
-        if defaults.string(forKey: Keys.registered) == signature {
-            status = .on
-            return
-        }
-        do {
-            try await register(token: token, lotteries: lotteries)
-            defaults.set(signature, forKey: Keys.registered)
-            status = .on
-        } catch RegistrationError.noKey {
-            status = .unavailable
-        } catch {
-            status = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+    private func syncRegistration() async {
+        registrationNeedsUpdate = true
+        guard !isUpdatingRegistration else { return }
+        isUpdatingRegistration = true
+        defer { isUpdatingRegistration = false }
+        while registrationNeedsUpdate {
+            registrationNeedsUpdate = false
+            guard let token = defaults.string(forKey: Keys.token) else { return }
+            let enabled = isEnabled
+            let recent = lastRegistration.map { Date().timeIntervalSince($0) < 15 * 60 } ?? false
+            if enabled && status == .on && recent { return }
+            if !enabled && !defaults.bool(forKey: Keys.pendingUnsubscribe) { return }
+            do {
+                try await register(token: token, enabled: enabled)
+                guard enabled == isEnabled, token == defaults.string(forKey: Keys.token) else {
+                    registrationNeedsUpdate = true
+                    continue
+                }
+                if enabled {
+                    lastRegistration = Date()
+                    status = .on
+                } else {
+                    defaults.removeObject(forKey: Keys.pendingUnsubscribe)
+                    status = .off
+                }
+            } catch RegistrationError.noKey {
+                if enabled == isEnabled && enabled { status = .unavailable }
+            } catch {
+                if enabled == isEnabled {
+                    let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                    status = .failed(message)
+                }
+            }
         }
     }
 
@@ -147,7 +169,7 @@ final class DrawPushCenter {
         }
     }
 
-    private func register(token: String, lotteries: [String]) async throws {
+    private func register(token: String, enabled: Bool) async throws {
         guard let key = GeneratedLotteryReadKey.value, !key.isEmpty else { throw RegistrationError.noKey }
         var request = URLRequest(url: Self.endpoint, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
         request.httpMethod = "POST"
@@ -155,18 +177,23 @@ final class DrawPushCenter {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: Self.registrationBody(
             token: token,
-            lotteries: lotteries,
+            enabled: enabled,
             bundleID: Bundle.main.bundleIdentifier ?? ""))
-        let (_, response) = try await URLSession.shared.data(for: request, delegate: LotteryReadRedirectGuard())
+        let (data, response) = try await URLSession.shared.data(for: request, delegate: LotteryReadRedirectGuard())
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard code == 200 else { throw RegistrationError.server(code) }
+        guard code == 200,
+              (try? JSONDecoder().decode(RegistrationResponse.self, from: data))?.ok == true else {
+            throw RegistrationError.server(code)
+        }
     }
 
-    static func registrationBody(token: String, lotteries: [String], bundleID: String) -> [String: Any] {
+    private struct RegistrationResponse: Decodable { let ok: Bool }
+
+    static func registrationBody(token: String, enabled: Bool, bundleID: String) -> [String: Any] {
         ["token": token,
          "environment": usesSandboxPush ? "sandbox" : "production",
          "bundle_id": bundleID,
-         "lotteries": lotteries]
+         "enabled": enabled]
     }
 
     /// Xcode 直接装的调试包走苹果的沙盒推送环境；TestFlight 和正式包走生产环境。
@@ -184,9 +211,11 @@ final class DrawPushCenter {
     ///
     /// 写库走的是 `RecordService.write`，和打开 App 时的自动核对是同一个函数 ——
     /// 之后 App 拿到正式开奖数据再核对一遍，结论一样就不会重写。
-    func settle(with draw: Draw, in context: ModelContext) -> DrawPushPayload.Outcome {
-        let records = ((try? context.fetch(FetchDescriptor<TicketRecord>())) ?? [])
-            .filter { $0.game == draw.gameKey && $0.targetExpect == draw.expect }
+    func settle(with draw: Draw, in context: ModelContext) throws -> DrawPushPayload.Outcome {
+        let issue = draw.expect
+        let records = try context.fetch(FetchDescriptor<TicketRecord>(
+            predicate: #Predicate { $0.targetExpect == issue }
+        )).filter { $0.game == draw.gameKey }
         var outcome = DrawPushPayload.Outcome()
         for record in records {
             // 还没结论的、和奖金待公布的才重算；已经定了的直接用。
@@ -199,39 +228,53 @@ final class DrawPushCenter {
             }
             outcome.add(status: record.status, prizeName: record.prizeName, amount: record.prizeAmount)
         }
-        try? context.save()
+        if context.hasChanges { try context.save() }
         return outcome
     }
 
-    /// 后台被开奖通知唤醒：核对，然后用同一个标识符的本地通知换掉那条开奖号码。
-    /// 返回 false 表示这条通知不是开奖通知，或者我没有这一期的票。
-    @discardableResult
-    func handleRemoteNotification(_ userInfo: [AnyHashable: Any]) async -> Bool {
-        guard let draw = DrawPushPayload.parse(userInfo), let container else { return false }
-        let outcome = settle(with: draw, in: container.mainContext)
-        guard let text = outcome.text else { return false }
+    enum NotificationResult: Equatable {
+        case unchanged
+        case settled
+        case displayedWin
+    }
+
+    /// 只有中奖且本地通知提交成功，前台才隐藏原始开奖通知。
+    func handleRemoteNotification(_ userInfo: [AnyHashable: Any]) async -> NotificationResult {
+        guard isEnabled, let draw = DrawPushPayload.parse(userInfo), let container else { return .unchanged }
+        let id = DrawPushPayload.identifier(game: draw.gameKey, issue: draw.expect)
+        if presented.contains(id) { return .displayedWin }
+        guard !presenting.contains(id) else { return .unchanged }
+        presenting.insert(id)
+        defer { presenting.remove(id) }
+        // 独立上下文避免通知写入失败时影响正在录入的票据。
+        let context = ModelContext(container)
+        guard let outcome = try? settle(with: draw, in: context), outcome.tickets > 0 else { return .unchanged }
+        guard let text = outcome.winAlert else { return .settled }
 
         let content = UNMutableNotificationContent()
         let alert = (userInfo["aps"] as? [String: Any])?["alert"] as? [String: Any]
         content.title = alert?["title"] as? String ?? "\(draw.gameName) \(draw.expect) 期开奖"
-        // 开奖号码挪到副标题，正文让给中奖情况。
         content.subtitle = alert?["body"] as? String ?? ""
         content.body = text
-        content.sound = outcome.won > 0 ? .default : nil
+        content.sound = .default
         content.threadIdentifier = "draw-\(draw.gameKey.apiKey)"
-        let request = UNNotificationRequest(
-            identifier: DrawPushPayload.identifier(game: draw.gameKey, issue: draw.expect),
-            content: content,
-            trigger: nil)
-        try? await UNUserNotificationCenter.current().add(request)
-        return true
-    }
 
-    /// App 正开着时收到开奖通知：有这一期的票就不弹那条开奖号码
-    ///（马上会弹核对结果），没有就照常弹。
-    func hasTickets(for userInfo: [AnyHashable: Any]) -> Bool {
-        guard let draw = DrawPushPayload.parse(userInfo), let container else { return false }
-        let records = (try? container.mainContext.fetch(FetchDescriptor<TicketRecord>())) ?? []
-        return records.contains { $0.game == draw.gameKey && $0.targetExpect == draw.expect }
+        let center = UNUserNotificationCenter.current()
+        let request = UNNotificationRequest(identifier: "win-\(id)", content: content, trigger: nil)
+        do {
+            try await center.add(request)
+            if presented.count >= 128 { presented.removeAll(keepingCapacity: true) }
+            presented.insert(id)
+            // 只移除系统已经投递的同期开奖通知，不猜测它的 APNs identifier。
+            let ordinary = await center.deliveredNotifications().filter {
+                $0.request.trigger is UNPushNotificationTrigger &&
+                $0.request.content.userInfo["lottery_type"] as? String == draw.gameKey.apiKey &&
+                ($0.request.content.userInfo["draw"] as? [String: Any])?["issue"] as? String == draw.expect
+            }
+            center.removeDeliveredNotifications(withIdentifiers: ordinary.map(\.request.identifier))
+            return .displayedWin
+        } catch {
+            return .settled
+        }
     }
 }

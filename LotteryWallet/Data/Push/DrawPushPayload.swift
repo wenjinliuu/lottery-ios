@@ -6,8 +6,7 @@ import Foundation
 /// 中没中是 App 被通知唤醒后在本机算出来的。
 enum DrawPushPayload {
 
-    /// 通知的标识符。云端发的那条用它当 `apns-collapse-id`，本机替换用的
-    /// 那条本地通知也用它 —— 同一个标识符的通知会互相顶掉。
+    /// 每个彩种、期号的本机去重键。
     static func identifier(game: GameKey, issue: String) -> String {
         "draw-\(game.apiKey)-\(issue)"
     }
@@ -57,6 +56,8 @@ enum DrawPushPayload {
         }
 
         /// 通知正文。没有票时返回 nil —— 那条开奖号码的通知原样留着就行。
+        var winAlert: String? { won > 0 ? text : nil }
+
         var text: String? {
             guard tickets > 0 else { return nil }
             guard won > 0 else { return "\(tickets) 注都没中" }
@@ -71,16 +72,5 @@ enum DrawPushPayload {
             }
             return "\(tickets) 注中 \(won) 注：\(list)，\(money)"
         }
-    }
-
-    /// 要订阅哪些彩种：手里有待开奖的票，或者最近 60 天买过。
-    ///
-    /// 不让用户一个个勾：买了什么就推什么，很久不买的自动不再推。
-    /// 云端因此只知道「这台设备最近关心哪几个彩种」，不知道任何一张票。
-    static func subscription(_ records: [(game: GameKey, createdAt: Date, isPending: Bool)],
-                             now: Date = Date()) -> [String] {
-        let cutoff = now.addingTimeInterval(-60 * 86_400)
-        let games = Set(records.filter { $0.isPending || $0.createdAt >= cutoff }.map(\.game))
-        return games.map(\.apiKey).sorted()
     }
 }
