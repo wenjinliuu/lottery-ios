@@ -8,7 +8,7 @@
 每次提交前照文末的对照表复核一遍，避免备注和实现漂移。
 
 **下次提交前必须重写（2026-11-12）：** 中国区已被苹果按第 5 条下架（账号主体不是彩票机构），备案号已从 App 里拿掉。
-新加的「开奖通知」会向云端登记推送令牌和订阅的彩种，下面正文里 "Requests carry no user data or identifiers"、
+新加的「开奖通知」仅在用户启用通知后向云端登记设备推送令牌、推送环境和开关状态（所有彩种，票据和核对留在设备上），下面正文里 "Requests carry no user data or identifiers"、
 "Data Not Collected"、"unauthenticated HTTPS GET" 三处都不再成立，App Store Connect 的隐私标签也要改成收集了设备标识（用于 App 功能）。
 
 **措辞原则（1.2.0 (70) 因 5.2.1 被拒后定下）：** 如实说，但不反复强调。定位是「个人票据
