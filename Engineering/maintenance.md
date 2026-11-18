@@ -30,3 +30,10 @@
 - 首页/票夹视觉状态改变时按 AGENTS.md 录制快照再跑检查。示例数据通过指定脚本生成，不手改 `DemoDataset.swift`。
 
 构建细节见 `docs/API_ACCESS.md`；服务端维护入口为开奖仓库 `docs/MAINTENANCE.md`。
+
+## 通知服务扩展
+
+- 云端照常发全部彩种，开奖 payload 带 `aps.mutable-content: 1`。旧包继续显示开奖号码，新包由 `com.wenjinliu.lotterywallet.notificationservice` 检查待开奖票据的彩种、期号和开奖日。
+- 主 App 与扩展共用 `group.com.wenjinliu.lotterywallet`。发布前核对两份 provisioning profile 都包含实际 App Group。原 SwiftData 票夹继续用原沙盒，App Group 只存待开奖摘要所需的注单和扩展接收的开奖数据，且不参与备份。设备重启后首次解锁之前，系统可能无法让扩展读取快照。
+- 过滤需要 Apple 批准 `com.apple.developer.usernotifications.filtering`，并签入扩展。Capabilities 中的普通 Push Notifications 和 App Group 注册不足以取消远程通知。发 TestFlight 前要检查实际签好的 `.appex` 和 profile 是否包含该权限。
+- 真机验收覆盖锁屏时同期开了但未中奖、中奖、奖金待公布、同彩种另一期开了、空票夹和关闭通知。打开 App 后检查票夹结果与通知相符。展开通知时核对号码球附件，快乐8 应包含全部 20 个号码。

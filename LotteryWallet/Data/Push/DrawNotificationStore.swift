@@ -97,6 +97,10 @@ struct DrawNotificationStore {
 
     private func write<T: Encodable>(_ value: T, to file: URL) throws {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var localDirectory = directory
+        var properties = URLResourceValues()
+        properties.isExcludedFromBackup = true
+        try localDirectory.setResourceValues(properties)
         try JSONEncoder().encode(value).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 }
