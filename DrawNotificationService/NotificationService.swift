@@ -18,19 +18,17 @@ final class NotificationService: UNNotificationServiceExtension {
             return
         }
 
-        lock.withLock { delivery = Delivery(handler: contentHandler, fallback: UNMutableNotificationContent()) }
+        lock.withLock { delivery = Delivery(handler: contentHandler, fallback: request.content) }
         guard let draw = DrawPushPayload.parse(request.content.userInfo),
               let store = DrawNotificationStore.shared,
               let summary = try? store.summary(for: draw),
-              let content = request.content.mutableCopy() as? UNMutableNotificationContent else {
+              let content = DrawPushPayload.personalizedContent(request.content, draw: draw, summary: summary) else {
             finish()
             return
         }
 
         // The app can reconcile the wallet on its next wake, even if iOS suspends this extension.
         try? store.record(draw)
-        content.subtitle = content.body
-        content.body = summary.body
         lock.withLock { delivery?.fallback = content }
 
         Task { @MainActor in

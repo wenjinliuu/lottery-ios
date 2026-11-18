@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             let userInfo = notification.request.content.userInfo
             if DrawPushPayload.usesServiceExtension(userInfo) {
                 DrawPushCenter.shared.applyNotificationResults()
+                if notification.request.content.interruptionLevel == .passive { return [.list] }
             } else {
                 let result = await DrawPushCenter.shared.handleRemoteNotification(userInfo)
                 if result == .displayedWin { return [] }

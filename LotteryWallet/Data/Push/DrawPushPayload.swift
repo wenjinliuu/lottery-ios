@@ -1,10 +1,22 @@
 import Foundation
+import UserNotifications
 
 /// 开奖通知里带下来的东西，以及「拿它核对完之后怎么说」。
 ///
 /// 这里全是纯函数：云端只推开奖号码，**票据从不离开手机**。
 /// 中没中是 App 被通知唤醒后在本机算出来的。
 enum DrawPushPayload {
+
+    static func personalizedContent(_ original: UNNotificationContent, draw: Draw,
+                                    summary: DrawNotificationStore.Summary) -> UNMutableNotificationContent? {
+        guard let content = original.mutableCopy() as? UNMutableNotificationContent else { return nil }
+        content.interruptionLevel = .active
+        content.sound = .default
+        content.threadIdentifier = "draw-\(draw.gameKey.apiKey)"
+        content.subtitle = original.body
+        content.body = summary.body
+        return content
+    }
 
     /// 每个彩种、期号的本机去重键。
     static func identifier(game: GameKey, issue: String) -> String {

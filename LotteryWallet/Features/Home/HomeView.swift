@@ -853,9 +853,9 @@ struct ProfitHeatmap: View {
         // 图例不再单独占一行：红赚绿亏写在首页那行说明里，「最好的一天」挪到大数字下面。
         return VStack(alignment: .leading, spacing: 7) {
             ScrollView(.horizontal, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 5) {
-                    LazyHStack(alignment: .top, spacing: gap) {
-                        ForEach(Array(grid.weeks.enumerated()), id: \.offset) { index, column in
+                LazyHStack(alignment: .top, spacing: gap) {
+                    ForEach(Array(grid.weeks.enumerated()), id: \.offset) { index, column in
+                        VStack(alignment: .leading, spacing: 5) {
                             VStack(spacing: gap) {
                                 ForEach(Array(column.enumerated()), id: \.offset) { _, date in
                                     cellView(for: date, byDay: grid.byDay)
@@ -887,17 +887,14 @@ struct ProfitHeatmap: View {
                                     // 很小的一块，不铺满、不抢戏
                                     .presentationCompactAdaptation(.popover)
                             }
-                        }
-                    }
-                    // 月份刻度跟着方格一起横向滚，所以必须画在 ScrollView **里面**，
-                    // 而且每个标签要和它那一列对齐 —— 用等宽的列去铺。
-                    LazyHStack(alignment: .top, spacing: gap) {
-                        ForEach(Array(grid.monthLabels.enumerated()), id: \.offset) { _, label in
-                            Text(label)
+                            // 标签和本周方格一起布局，空刻度也预留一行高度。
+                            let label = grid.monthLabels[index]
+                            Text(label.isEmpty ? " " : label)
                                 .scaledFont(10)
                                 .foregroundStyle(.secondary)
                                 .fixedSize()
                                 .frame(width: cell, alignment: .leading)
+                                .allowsHitTesting(false)
                         }
                     }
                 }

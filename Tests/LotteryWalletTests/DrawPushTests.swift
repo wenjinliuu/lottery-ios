@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import UserNotifications
 @testable import LotteryWallet
 
 /// 开奖通知：云端只推开奖号码，中没中在本机算。
@@ -195,11 +196,30 @@ final class DrawPushTests: XCTestCase {
 
     /// 登记用的请求体和云端 `registerDevice` 的字段一一对应。
     func testRegistrationBodyMatchesTheServerContract() {
-        let body = DrawPushCenter.registrationBody(token: "ab", enabled: true, bundleID: "app")
-        XCTAssertEqual(Set(body.keys), ["token", "environment", "bundle_id", "enabled"])
+        let body = DrawPushCenter.registrationBody(token: "ab", enabled: true, bundleID: "app", passiveDraws: true)
+        XCTAssertEqual(Set(body.keys), ["token", "environment", "bundle_id", "enabled", "passive_draws"])
         XCTAssertEqual(body["token"] as? String, "ab")
         XCTAssertEqual(body["enabled"] as? Bool, true)
+        XCTAssertEqual(body["passive_draws"] as? Bool, true)
         XCTAssertNil(body["lotteries"])
         XCTAssertTrue(["production", "sandbox"].contains(body["environment"] as? String ?? ""))
+    }
+
+    func testMatchedDrawBecomesAnActiveNotificationWithoutChangingThePassiveFallback() throws {
+        let original = UNMutableNotificationContent()
+        original.body = "05 06 10 25 27 30 + 11"
+        original.interruptionLevel = .passive
+        original.threadIdentifier = "draw-other"
+        let draw = try XCTUnwrap(DrawPushPayload.parse(ssqPush()))
+        let summary = DrawNotificationStore.Summary(purchased: 2, cost: 4)
+
+        let personal = try XCTUnwrap(DrawPushPayload.personalizedContent(original, draw: draw, summary: summary))
+        XCTAssertEqual(personal.interruptionLevel, .active)
+        XCTAssertNotNil(personal.sound)
+        XCTAssertEqual(personal.threadIdentifier, "draw-ssq")
+        XCTAssertEqual(personal.body, summary.body)
+        XCTAssertEqual(personal.subtitle, original.body)
+        XCTAssertEqual(original.interruptionLevel, .passive)
+        XCTAssertNil(original.sound)
     }
 }

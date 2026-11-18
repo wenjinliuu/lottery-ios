@@ -242,7 +242,8 @@ final class DrawPushCenter {
         request.httpBody = try JSONSerialization.data(withJSONObject: Self.registrationBody(
             token: token,
             enabled: enabled,
-            bundleID: Bundle.main.bundleIdentifier ?? ""))
+            bundleID: Bundle.main.bundleIdentifier ?? "",
+            passiveDraws: DrawNotificationStore.shared != nil))
         let (data, response) = try await URLSession.shared.data(for: request, delegate: LotteryReadRedirectGuard())
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200,
@@ -253,11 +254,12 @@ final class DrawPushCenter {
 
     private struct RegistrationResponse: Decodable { let ok: Bool }
 
-    static func registrationBody(token: String, enabled: Bool, bundleID: String) -> [String: Any] {
+    static func registrationBody(token: String, enabled: Bool, bundleID: String, passiveDraws: Bool) -> [String: Any] {
         ["token": token,
          "environment": usesSandboxPush ? "sandbox" : "production",
          "bundle_id": bundleID,
-         "enabled": enabled]
+         "enabled": enabled,
+         "passive_draws": passiveDraws]
     }
 
     /// Xcode 直接装的调试包走苹果的沙盒推送环境；TestFlight 和正式包走生产环境。

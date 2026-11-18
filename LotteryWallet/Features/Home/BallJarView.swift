@@ -19,55 +19,53 @@ struct BallJarView: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Self.corner)
-        let frame = scene.frame
         VStack(alignment: .leading, spacing: 8) {
-            Canvas { context, size in
-                scene.draw(in: &context, size: size, frame: frame)
-            }
-            .frame(height: Self.height)
-            .clipShape(shape)
-            .glassJar(in: shape)
-            .background {
-                shape.fill(LinearGradient(
-                    colors: [Color(light: 0xECF3F8, dark: 0x26323B),
-                             Color(light: 0xFAFCFD, dark: 0x181F26),
-                             Color(light: 0xE8F0F7, dark: 0x283640)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                ))
-            }
-            .overlay {
-                JarGlassWall(shape: shape)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-            .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
-            .accessibilityElement()
-            .accessibilityLabel("号码球罐")
-            .accessibilityValue("\(range.label)\(summary)")
-            .overlay(alignment: .topTrailing) {
-                Button {
-                    scene.shake()
-                    shakes += 1
-                } label: {
-                    Label("摇一摇", systemImage: "wind")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.regularMaterial, in: Capsule())
+            JarBallLayer(scene: scene)
+                .frame(height: Self.height)
+                .clipShape(shape)
+                .background {
+                    Color.clear.glassJar(in: shape).background {
+                        shape.fill(LinearGradient(
+                            colors: [Color(light: 0xECF3F8, dark: 0x26323B),
+                                     Color(light: 0xFAFCFD, dark: 0x181F26),
+                                     Color(light: 0xE8F0F7, dark: 0x283640)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(jar.colors.isEmpty)
-                .accessibilityIdentifier("home.jar.shake")
-                .padding(8)
-            }
-            .overlay {
-                if jar.colors.isEmpty {
-                    Text("这段时间没有命中的号码")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                .overlay {
+                    JarGlassWall(shape: shape)
                         .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
-            }
+                .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
+                .accessibilityElement()
+                .accessibilityLabel("号码球罐")
+                .accessibilityValue("\(range.label)\(summary)")
+                .overlay(alignment: .topTrailing) {
+                    Button {
+                        scene.shake()
+                        shakes += 1
+                    } label: {
+                        Label("摇一摇", systemImage: "wind")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.regularMaterial, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(jar.colors.isEmpty)
+                    .accessibilityIdentifier("home.jar.shake")
+                    .padding(8)
+                }
+                .overlay {
+                    if jar.colors.isEmpty {
+                        Text("这段时间没有命中的号码")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .allowsHitTesting(false)
+                    }
+                }
 
             Text(jar.isSampled ? "\(summary) · 示意展示 \(jar.colors.count.formatted()) 颗" : summary)
                 .font(.caption2)
@@ -89,7 +87,7 @@ struct BallJarView: View {
             var nextFrame = clock.now
             while !Task.isCancelled && scene.isAnimating {
                 scene.advance()
-                nextFrame = max(nextFrame + .milliseconds(33), clock.now)
+                nextFrame = max(nextFrame + .microseconds(16_667), clock.now)
                 try? await clock.sleep(until: nextFrame)
             }
         }
@@ -99,6 +97,17 @@ struct BallJarView: View {
 
     private func load() {
         scene.load(jar.colors, size: size, corner: Self.corner)
+    }
+}
+
+private struct JarBallLayer: View {
+    let scene: JarScene
+
+    var body: some View {
+        let frame = scene.frame
+        return Canvas { context, _ in
+            scene.draw(in: &context, frame: frame)
+        }
     }
 }
 
@@ -186,7 +195,7 @@ final class JarScene {
     }
 
     func advance() {
-        for _ in 0..<2 where !physics.isResting { physics.step(1.0 / 60) }
+        if !physics.isResting { physics.step(1.0 / 60) }
         if physics.isResting {
             restGravity = (physics.gravityX / 1400, physics.gravityY / 1400)
             isAnimating = false
@@ -194,11 +203,9 @@ final class JarScene {
         frame &+= 1
     }
 
-    func draw(in context: inout GraphicsContext, size: CGSize, frame _: Int) {
-        let balls = physics.balls
-        drawWallReflections(in: &context, size: size, balls: balls)
+    func draw(in context: inout GraphicsContext, frame _: Int) {
         let resolved = sprites.mapValues { context.resolve($0) }
-        for (color, ball) in zip(colors, balls) {
+        for (color, ball) in zip(colors, physics.balls) {
             let diameter = ball.radius * 2
             let rect = CGRect(x: ball.x - ball.radius, y: ball.y - ball.radius,
                               width: diameter, height: diameter).insetBy(dx: 0.25, dy: 0.25)
@@ -210,35 +217,6 @@ final class JarScene {
                     startPoint: CGPoint(x: rect.midX, y: rect.minY),
                     endPoint: CGPoint(x: rect.midX, y: rect.maxY)
                 ))
-            }
-        }
-    }
-
-    /// 贴近罐壁的球会留下低饱和度的色影，和球一起移动。
-    private func drawWallReflections(in context: inout GraphicsContext, size: CGSize, balls: [JarPhysics.Ball]) {
-        guard !balls.isEmpty else { return }
-        let bounds = CGRect(origin: .zero, size: size)
-        let wallWidth: CGFloat = 11
-        var wall = RoundedRectangle(cornerRadius: physics.corner).path(in: bounds)
-        wall.addPath(RoundedRectangle(cornerRadius: max(physics.corner - wallWidth, 0))
-            .path(in: bounds.insetBy(dx: wallWidth, dy: wallWidth)))
-        var reflection = context
-        reflection.clip(to: wall, style: FillStyle(eoFill: true))
-        reflection.drawLayer { layer in
-            layer.opacity = 0.30
-            layer.addFilter(.blur(radius: 2.8))
-            for (color, ball) in zip(colors, balls) {
-                let reach = ball.radius + 8
-                let left = ball.x < reach
-                let right = size.width - ball.x < reach
-                let top = ball.y < reach
-                let bottom = size.height - ball.y < reach
-                guard left || right || top || bottom else { continue }
-                let x = left ? wallWidth * 0.55 : (right ? size.width - wallWidth * 0.55 : ball.x)
-                let y = top ? wallWidth * 0.55 : (bottom ? size.height - wallWidth * 0.55 : ball.y)
-                let radius = max(ball.radius, 3)
-                let glow = CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)
-                layer.fill(Path(ellipseIn: glow), with: .color(color.accentColor))
             }
         }
     }
