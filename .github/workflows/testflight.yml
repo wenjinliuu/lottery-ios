@@ -1,46 +1,58 @@
-name: TestFlight
-
+name: Check TestFlight build availability
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
-      lookup_only:
-        description: 只核对 Apple 注册（Bundle ID、App），不打包
-        type: boolean
-        default: false
-      dry_run:
-        description: 跑测试并打包，但不签名不上传
-        type: boolean
-        default: false
-      marketing_version:
-        description: 版本号（留空用工程里的）
+      build:
         type: string
-        default: ''
-      build_number:
-        description: 构建号（留空用运行编号）
-        type: string
-        default: ''
-
-permissions:
-  contents: read
-  issues: write     # 开发版验收 Issue；testflight.acceptance_issue 为 false 时可去掉
-
-concurrency:
-  group: lottery-ios-testflight
-  cancel-in-progress: false
-
+        required: true
+permissions: {}
 jobs:
-  release:
-    uses: wenjinliuu/ios-ci-workflows/.github/workflows/testflight-release.yml@99db8363c485fc8125075ab3cdde6e3bcd7f6974 # v1.0.0 + optional App read key
-    with:
-      lookup_only: ${{ inputs.lookup_only || false }}
-      dry_run: ${{ inputs.dry_run || false }}
-      marketing_version: ${{ inputs.marketing_version || '' }}
-      build_number: ${{ inputs.build_number || '' }}
-    secrets:
-      APP_RUNTIME_API_KEY: ${{ secrets.LOTTERY_READ_API_KEY }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-      APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+  inspect:
+    timeout-minutes: 9
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -m pip install 'pyjwt[crypto]==2.10.1'
+      - name: Read App Store Connect build status
+        env:
+          CHECK_BUILD: ${{ inputs.build }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        run: |
+          python - <<'PY'
+          import json, os, time, urllib.parse, urllib.request
+          import jwt
+
+          def get(path, params=None):
+              now = int(time.time())
+              auth = jwt.encode(
+                  {"iss": os.environ["ASC_ISSUER_ID"], "iat": now, "exp": now + 300, "aud": "appstoreconnect-v1"},
+                  os.environ["ASC_PRIVATE_KEY"], algorithm="ES256",
+                  headers={"kid": os.environ["ASC_KEY_ID"], "typ": "JWT"},
+              )
+              query = "?" + urllib.parse.urlencode(params) if params else ""
+              req = urllib.request.Request("https://api.appstoreconnect.apple.com" + path + query,
+                                           headers={"Authorization": "Bearer " + auth})
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  return json.load(response)["data"]
+
+          app = get("/v1/apps", {"filter[bundleId]": "com.wenjinliu.lotterywallet"})[0]["id"]
+          number = os.environ["CHECK_BUILD"]
+          for attempt in range(13):
+              builds = get("/v1/builds", {"filter[app]": app, "filter[version]": number})
+              if not builds:
+                  print("BUILD_AVAILABILITY not_visible_yet", flush=True)
+              for build in builds:
+                  state = build["attributes"]["processingState"]
+                  print("BUILD_AVAILABILITY", number, state, flush=True)
+                  if state == "VALID":
+                      detail = get(f"/v1/builds/{build['id']}/buildBetaDetail")
+                      beta = detail["attributes"]["internalBuildState"]
+                      print("BUILD_INTERNAL_BETA", beta, flush=True)
+                      if beta == "IN_BETA_TESTING":
+                          raise SystemExit(0)
+                  elif state in {"FAILED", "INVALID"}:
+                      raise SystemExit(1)
+              if attempt < 12:
+                  time.sleep(25)
+          PY
