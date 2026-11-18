@@ -36,6 +36,16 @@ extension View {
         listRowBackground(Palette.card)
     }
 
+    /// 球罐用系统透明玻璃，球在前景单独绘制。
+    func glassJar(in shape: RoundedRectangle) -> some View {
+        glassEffect(.clear, in: shape)
+    }
+
+    /// 拖动图表时浮在曲线上的当日金额。
+    func glassChartReadout() -> some View {
+        glassEffect(.regular, in: .rect(cornerRadius: 15))
+    }
+
     /// 胶囊玻璃：悬浮在内容之上的筛选 chip、分段控件。
     func glassPill(tint: Color? = nil, interactive: Bool = true) -> some View {
         glassEffect(GlassStyle.pill(tint: tint, interactive: interactive), in: Capsule())

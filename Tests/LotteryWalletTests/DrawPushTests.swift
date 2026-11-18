@@ -76,7 +76,7 @@ final class DrawPushTests: XCTestCase {
         try saveSSQ([(red: [5, 6, 10, 25, 27, 30], blue: 11)], issue: "2026131")   // 别的期，不能碰
 
         let draw = try XCTUnwrap(DrawPushPayload.parse(ssqPush()))
-        let outcome = DrawPushCenter.shared.settle(with: draw, in: container.mainContext)
+        let outcome = try DrawPushCenter.shared.settle(with: draw, in: container.mainContext)
 
         XCTAssertEqual(outcome.tickets, 2)
         XCTAssertEqual(outcome.won, 1)
@@ -95,7 +95,7 @@ final class DrawPushTests: XCTestCase {
     func testWinWithoutPrizeTableIsFloating() throws {
         try saveSSQ([(red: [1, 2, 3, 4, 7, 8], blue: 11)])
         let draw = try XCTUnwrap(DrawPushPayload.parse(ssqPush(prizes: nil)))
-        let outcome = DrawPushCenter.shared.settle(with: draw, in: container.mainContext)
+        let outcome = try DrawPushCenter.shared.settle(with: draw, in: container.mainContext)
         XCTAssertEqual(outcome.floating, 1)
         XCTAssertEqual(outcome.text, "1 注中 1 注：六等奖 1 注，奖金待公布")
         XCTAssertEqual(service.allRecords().first?.status, .prizeFloat)
@@ -105,8 +105,8 @@ final class DrawPushTests: XCTestCase {
     func testSettlingTwiceGivesTheSameAnswer() throws {
         try saveSSQ([(red: [1, 2, 3, 4, 7, 8], blue: 11)])
         let draw = try XCTUnwrap(DrawPushPayload.parse(ssqPush()))
-        let first = DrawPushCenter.shared.settle(with: draw, in: container.mainContext)
-        let second = DrawPushCenter.shared.settle(with: draw, in: container.mainContext)
+        let first = try DrawPushCenter.shared.settle(with: draw, in: container.mainContext)
+        let second = try DrawPushCenter.shared.settle(with: draw, in: container.mainContext)
         XCTAssertEqual(first, second)
         XCTAssertEqual(service.allRecords().first?.prizeAmount, 5)
     }
@@ -114,7 +114,7 @@ final class DrawPushTests: XCTestCase {
     /// 没有这一期的票：不出结论，那条开奖号码的通知原样留着。
     func testNoTicketsMeansNoReplacement() throws {
         let draw = try XCTUnwrap(DrawPushPayload.parse(ssqPush()))
-        let outcome = DrawPushCenter.shared.settle(with: draw, in: container.mainContext)
+        let outcome = try DrawPushCenter.shared.settle(with: draw, in: container.mainContext)
         XCTAssertEqual(outcome.tickets, 0)
         XCTAssertNil(outcome.text)
     }
@@ -125,7 +125,7 @@ final class DrawPushTests: XCTestCase {
         var none = DrawPushPayload.Outcome()
         none.add(status: .lost, prizeName: "未中奖", amount: 0)
         none.add(status: .lost, prizeName: "未中奖", amount: 0)
-        XCTAssertEqual(none.text, "2 注都没中")
+        XCTAssertNil(none.winAlert, "Keep the original draw alert when no ticket wins")
 
         var mixed = DrawPushPayload.Outcome()
         mixed.add(status: .won, prizeName: "六等奖", amount: 5)
@@ -137,27 +137,13 @@ final class DrawPushTests: XCTestCase {
 
     // MARK: - 订阅
 
-    /// 订阅跟着票夹走：有待开奖的票、或 60 天内买过才订。
-    func testSubscriptionFollowsTheWallet() {
-        let now = DateText.parse("2026-11-12 12:00:00")!
-        let day: TimeInterval = 86_400
-        let lotteries = DrawPushPayload.subscription([
-            (game: .ssq, createdAt: now.addingTimeInterval(-3 * day), isPending: false),
-            (game: .k8, createdAt: now.addingTimeInterval(-59 * day), isPending: false),
-            (game: .dlt, createdAt: now.addingTimeInterval(-200 * day), isPending: false),   // 太久了
-            (game: .qxc, createdAt: now.addingTimeInterval(-200 * day), isPending: true),    // 但还没开奖
-            (game: .ssq, createdAt: now, isPending: true)
-        ], now: now)
-        XCTAssertEqual(lotteries, ["kl8", "qxc", "ssq"])
-        XCTAssertEqual(DrawPushPayload.subscription([], now: now), [])
-    }
-
     /// 登记用的请求体和云端 `registerDevice` 的字段一一对应。
     func testRegistrationBodyMatchesTheServerContract() {
-        let body = DrawPushCenter.registrationBody(token: "ab", lotteries: ["ssq"], bundleID: "app")
-        XCTAssertEqual(Set(body.keys), ["token", "environment", "bundle_id", "lotteries"])
+        let body = DrawPushCenter.registrationBody(token: "ab", enabled: true, bundleID: "app")
+        XCTAssertEqual(Set(body.keys), ["token", "environment", "bundle_id", "enabled"])
         XCTAssertEqual(body["token"] as? String, "ab")
-        XCTAssertEqual(body["lotteries"] as? [String], ["ssq"])
+        XCTAssertEqual(body["enabled"] as? Bool, true)
+        XCTAssertNil(body["lotteries"])
         XCTAssertTrue(["production", "sandbox"].contains(body["environment"] as? String ?? ""))
     }
 }

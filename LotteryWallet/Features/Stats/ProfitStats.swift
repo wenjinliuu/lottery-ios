@@ -20,13 +20,20 @@ enum ProfitRange: String, CaseIterable, Identifiable {
         }
     }
 
-    /// 方格图要铺多少天。
-    var gridSpan: Int {
+    func startDay(firstDay: String, lastDay: String, now: Date) -> String {
         switch self {
-        case .month: 31
-        case .half: 183
-        case .year: 365
-        case .all: 365
+        case .all:
+            return firstDay
+        case .month:
+            return String(DateText.day(now).prefix(7)) + "-01"
+        case .year:
+            return String(DateText.day(now).prefix(4)) + "-01-01"
+        case .half:
+            guard let end = DateText.parse(lastDay),
+                  let start = Calendar.chinaCalendar.date(byAdding: .day, value: -182, to: end) else {
+                return firstDay
+            }
+            return DateText.day(start)
         }
     }
 }
@@ -85,6 +92,15 @@ struct FlowPoint: Identifiable, Hashable {
     var id: Date { day }
 }
 
+/// 日期选择用的当天金额，独立于曲线抽稀。
+struct DailyFlow: Equatable {
+    var cost: Double = 0
+    var prize: Double = 0
+    var welfare: Double = 0
+
+    var net: Double { prize - cost }
+}
+
 /// 一个月的投入去了哪。
 struct FlowMonth: Identifiable, Hashable {
     /// yyyy-MM
@@ -108,6 +124,7 @@ struct ProfitSeries {
     var days: [ProfitDay] = []
     /// 累计投入 / 奖金 / 公益金，首页的渐变线画的是它。
     var flow: [FlowPoint] = []
+    var dailyFlow: [String: DailyFlow] = [:]
     /// 按月汇总，最多最近十二个月。
     var months: [FlowMonth] = []
     var costTotal: Double = 0
@@ -164,7 +181,7 @@ enum ProfitStats {
 
     /// 只在**有记录的日子**上打点，不再逐日填充空白天。
     /// 逐日填充在跨度大时会生成上万个点，既拖慢渲染又没有信息量。
-    static func series(entries: [SettledEntry], range: ProfitRange, now: Date = Date()) -> ProfitSeries {
+    static func series(entries: [SettledEntry], range: ProfitRange, now: Date = Date(), sampleDays: Bool = true) -> ProfitSeries {
         guard !entries.isEmpty else { return ProfitSeries(rangeLabel: range.label) }
 
         var byDay: [String: [SettledEntry]] = [:]
@@ -172,15 +189,16 @@ enum ProfitStats {
         let allDays = byDay.keys.sorted()
         guard let lastDay = allDays.last else { return ProfitSeries(rangeLabel: range.label) }
 
-        let startDay = rangeStart(range: range, lastDay: lastDay, firstDay: allDays[0], now: now)
+        let startDay = range.startDay(firstDay: allDays[0], lastDay: lastDay, now: now)
 
         // 区间之前的记录压成起始余额，曲线才接得上
+        let endDay = DateText.day(now)
         var balance = 0.0
         var visible: [String] = []
         for day in allDays {
             if day < startDay {
                 balance += byDay[day]?.reduce(0) { $0 + $1.net } ?? 0
-            } else {
+            } else if range == .all || day <= endDay {
                 visible.append(day)
             }
         }
@@ -204,6 +222,8 @@ enum ProfitStats {
                                     close: 0, cost: 0, prize: 0, count: 0, wonCount: 0, games: []))
         }
 
+        var dailyFlow: [String: DailyFlow] = [:]
+        dailyFlow.reserveCapacity(visible.count)
         var costTotal = 0.0
         var prizeTotal = 0.0
         var welfareTotal = 0.0
@@ -233,6 +253,7 @@ enum ProfitStats {
             welfareTotal += welfare
             let parsed = DateText.parse(day) ?? Date()
             flow.append(FlowPoint(day: parsed, cost: costTotal, prize: prizeTotal, welfare: welfareTotal))
+            dailyFlow[day] = DailyFlow(cost: cost, prize: prize, welfare: welfare)
             let month = String(day.prefix(7))
             if months.last?.month == month {
                 months[months.count - 1].cost += cost
@@ -244,7 +265,7 @@ enum ProfitStats {
             settledCount += items.count
             wonTotal += won
             points.append(ProfitDay(date: day,
-                                    day: DateText.parse(day) ?? Date(),
+                                    day: parsed,
                                     close: balance,
                                     cost: cost,
                                     prize: prize,
@@ -253,8 +274,9 @@ enum ProfitStats {
                                     games: byGame.values.sorted { $0.cost > $1.cost }))
         }
 
-        return ProfitSeries(days: downsample(points),
+        return ProfitSeries(days: sampleDays ? downsample(points) : points,
                             flow: downsample(flow),
+                            dailyFlow: dailyFlow,
                             months: Array(months.suffix(12)),
                             costTotal: costTotal,
                             prizeTotal: prizeTotal,
@@ -263,25 +285,6 @@ enum ProfitStats {
                             wonCount: wonTotal,
                             closingBalance: balance,
                             rangeLabel: range.label)
-    }
-
-    private static func rangeStart(range: ProfitRange, lastDay: String, firstDay: String, now: Date) -> String {
-        switch range {
-        case .all:
-            return firstDay
-        case .month:
-            return String(DateText.day(now).prefix(7)) + "-01"
-        case .year:
-            // 本年：从今年 1 月 1 日起（原来是「近一年」的 365 天，首页改成本月 / 本年 / 累计三档之后按自然年算）
-            return String(DateText.day(now).prefix(4)) + "-01-01"
-        case .half:
-            let span = Int(range.rawValue) ?? 183
-            guard let end = DateText.parse(lastDay),
-                  let shifted = Calendar.chinaCalendar.date(byAdding: .day, value: -(max(span, 1) - 1), to: end) else {
-                return firstDay
-            }
-            return DateText.day(shifted)
-        }
     }
 
     /// 点数超上限时等距抽稀，保留首尾，累计值本身仍然正确。

@@ -53,7 +53,21 @@ final class KeyFlowTests: XCTestCase {
 
         let shake = app.buttons["home.jar.shake"]
         XCTAssertTrue(shake.waitForExistence(timeout: 10), "切到球罐后没有「摇一摇」")
-        XCTAssertTrue(app.buttons["home.jar.scope"].exists, "球罐上没有选年份的按钮")
+        let range = app.segmentedControls["home.range"]
+        XCTAssertTrue(range.buttons["本年"].isSelected)
+        let total = app.staticTexts["home.jar.total"]
+        XCTAssertTrue(total.waitForExistence(timeout: 10))
+        let yearTotal = total.label
+        range.buttons["本月"].tap()
+        XCTAssertNotEqual(total.label, yearTotal, "球罐应按当前月份统计")
+        style.buttons.element(boundBy: 1).tap()
+        XCTAssertTrue(range.buttons["本月"].isSelected)
+        style.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(range.buttons["本月"].isSelected)
+        style.buttons.element(boundBy: 2).tap()
+        XCTAssertNotEqual(total.label, yearTotal, "切回球罐应保留本月")
+        range.buttons["本年"].tap()
+        XCTAssertEqual(total.label, yearTotal)
         RunLoop.current.run(until: Date().addingTimeInterval(1.5))
         capture("home-jar")
 

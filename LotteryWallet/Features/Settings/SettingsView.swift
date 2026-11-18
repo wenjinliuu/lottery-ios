@@ -33,8 +33,7 @@ struct SettingsView: View {
                     Section {
                         Toggle(isOn: pushBinding) {
                             LabeledContent {
-                                // 开着且一切正常时不用再说一遍「已开启」。
-                                if push.status != .on && push.status != .off {
+                                if push.status != .off {
                                     Text(push.status.label)
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
@@ -45,7 +44,7 @@ struct SettingsView: View {
                             }
                         }
                     } footer: {
-                        Text("手里有票的彩种开奖后推送一条通知，并在本机核对好中没中。票据不会上传，云端只知道这台设备订了哪几个彩种。")
+                        Text("接收全部彩种的开奖通知。手机能完成核对并确认中奖时，会提醒你。本机票据不会上传。")
                     }
 
                     Section {

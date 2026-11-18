@@ -27,13 +27,6 @@ struct BallView: View {
     /// 第一版是实心中性灰 —— 一排灰球里只有命中的有颜色，整张票显得没精神。
     /// 也不是把彩色球整体调透明：那样白字跟着变淡，像没加载完。
     /// 现在底是淡的、字是实的，一眼看得出是哪个彩种的球，命中的实心球照样跳得出来。
-    private var fill: LinearGradient {
-        isDimmed
-            ? LinearGradient(colors: [color.accentColor.opacity(0.13), color.accentColor.opacity(0.19)],
-                             startPoint: .top, endPoint: .bottom)
-            : color.gradient
-    }
-
     var body: some View {
         Text(label)
             .font(.system(size: size * 0.44, weight: .heavy, design: .rounded))
@@ -53,12 +46,7 @@ struct BallView: View {
                         .fill(color.accentColor.opacity(0.12))
                         .overlay(Circle().strokeBorder(color.accentColor.opacity(0.38), lineWidth: 1))
                 } else {
-                    Circle()
-                        .fill(fill)
-                        .overlay(Circle().strokeBorder(.white.opacity(isDimmed ? 0 : 0.35), lineWidth: 0.8))
-                        // 黄球、琥珀球本身很亮，压在浅色卡片上边缘会糊掉，
-                        // 补一圈同色深端把轮廓勾出来。
-                        .overlay(Circle().strokeBorder(isDimmed ? .clear : color.rimStroke, lineWidth: 0.8))
+                    BallSurface(color: color, isDimmed: isDimmed)
                 }
             }
             // 阴影只给命中的球。一屏几百个阴影图层是票夹卡顿的来源之一，
@@ -84,6 +72,27 @@ struct BallView: View {
         if isUnknown { return "这一位没认出来，点一下补" }
         if isHit { return "\(label) 已命中" }
         return isDimmed ? "\(label) 未命中" : label
+    }
+}
+
+/// 普通号码球与球罐共用这一层材质。球罐将它预渲染成小图，逐帧只画图。
+struct BallSurface: View {
+    let color: BallColor
+    var isDimmed = false
+
+    private var fill: LinearGradient {
+        if isDimmed {
+            return LinearGradient(colors: [color.accentColor.opacity(0.13), color.accentColor.opacity(0.19)],
+                                  startPoint: .top, endPoint: .bottom)
+        }
+        return color.gradient
+    }
+
+    var body: some View {
+        Circle()
+            .fill(fill)
+            .overlay(Circle().strokeBorder(.white.opacity(isDimmed ? 0 : 0.35), lineWidth: 0.8))
+            .overlay(Circle().strokeBorder(isDimmed ? .clear : color.rimStroke, lineWidth: 0.8))
     }
 }
 
