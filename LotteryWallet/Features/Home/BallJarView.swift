@@ -14,50 +14,40 @@ struct BallJarView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     static let height: CGFloat = 230
-    private static let corner: CGFloat = 22
+    private static let corner: CGFloat = 28
+    private static let wallWidth: CGFloat = 6
+    private static let rimInset: CGFloat = 11
+    private static let baseInset: CGFloat = 7
+    private static let innerCorner = corner - wallWidth
     private var isActive: Bool { isVisible && scenePhase == .active && !jar.colors.isEmpty }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Self.corner)
         VStack(alignment: .leading, spacing: 8) {
             JarBallLayer(scene: scene)
-                .frame(height: Self.height)
+                .frame(height: Self.height - Self.rimInset - Self.baseInset)
+                .clipShape(RoundedRectangle(cornerRadius: Self.innerCorner))
+                .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
+                .padding(.horizontal, Self.wallWidth)
+                .padding(.top, Self.rimInset)
+                .padding(.bottom, Self.baseInset)
                 .clipShape(shape)
                 .background {
-                    Color.clear.glassJar(in: shape).background {
-                        shape.fill(LinearGradient(
-                            colors: [Color(light: 0xECF3F8, dark: 0x26323B),
-                                     Color(light: 0xFAFCFD, dark: 0x181F26),
-                                     Color(light: 0xE8F0F7, dark: 0x283640)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ))
-                    }
+                    shape.fill(LinearGradient(
+                        stops: [.init(color: Color(light: 0xDDE9F1, dark: 0x273744), location: 0),
+                                .init(color: Color(light: 0xF8FAFB, dark: 0x172129), location: 0.56),
+                                .init(color: Color(light: 0xCBDCE8, dark: 0x344652), location: 1)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
                 }
                 .overlay {
                     JarGlassWall(shape: shape)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
-                .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
                 .accessibilityElement()
                 .accessibilityLabel("号码球罐")
                 .accessibilityValue("\(range.label)\(summary)")
-                .overlay(alignment: .topTrailing) {
-                    Button {
-                        scene.shake()
-                        shakes += 1
-                    } label: {
-                        Label("摇一摇", systemImage: "wind")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(.regularMaterial, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(jar.colors.isEmpty)
-                    .accessibilityIdentifier("home.jar.shake")
-                    .padding(8)
-                }
                 .overlay {
                     if jar.colors.isEmpty {
                         Text("这段时间没有命中的号码")
@@ -67,10 +57,26 @@ struct BallJarView: View {
                     }
                 }
 
-            Text(jar.isSampled ? "\(summary) · 示意展示 \(jar.colors.count.formatted()) 颗" : summary)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("home.jar.total")
+            HStack(spacing: 8) {
+                Text(jar.isSampled ? "\(summary) · 示意展示 \(jar.colors.count.formatted()) 颗" : summary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("home.jar.total")
+                Button {
+                    scene.shake()
+                    shakes += 1
+                } label: {
+                    Label("摇一摇", systemImage: "wind")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .glassPill()
+                }
+                .buttonStyle(.plain)
+                .disabled(jar.colors.isEmpty)
+                .accessibilityIdentifier("home.jar.shake")
+            }
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: shakes)
         .onChange(of: jar, initial: true) { _, _ in load() }
@@ -96,7 +102,7 @@ struct BallJarView: View {
     private var summary: String { "命中 \(jar.hits.formatted()) 个号码" }
 
     private func load() {
-        scene.load(jar.colors, size: size, corner: Self.corner)
+        scene.load(jar.colors, size: size, corner: Self.innerCorner)
     }
 }
 
@@ -111,29 +117,48 @@ private struct JarBallLayer: View {
     }
 }
 
-/// 玻璃壁用两道间隔的边缘和斜向高光表现厚度。
+/// 罐口、前壁和厚底都在号码球前面。
 private struct JarGlassWall: View {
     let shape: RoundedRectangle
 
     var body: some View {
-        shape
-            .strokeBorder(LinearGradient(
-                colors: [Color(light: 0x99ACC0, dark: 0x607689).opacity(0.60),
-                         .white.opacity(0.72), Color(light: 0x8DA5BB, dark: 0x435B71).opacity(0.44)],
+        ZStack {
+            shape.strokeBorder(Color(light: 0x8CA3B5, dark: 0x647F93).opacity(0.62), lineWidth: 1)
+            shape.inset(by: 2).strokeBorder(LinearGradient(
+                stops: [.init(color: .white.opacity(0.9), location: 0),
+                        .init(color: .white.opacity(0.5), location: 0.28),
+                        .init(color: .clear, location: 0.52),
+                        .init(color: .white.opacity(0.65), location: 1)],
                 startPoint: .topLeading, endPoint: .bottomTrailing
-            ), lineWidth: 1)
-            .overlay {
-                shape.inset(by: 2).strokeBorder(LinearGradient(
-                    stops: [.init(color: .white.opacity(0.9), location: 0),
-                            .init(color: .white.opacity(0.5), location: 0.25),
-                            .init(color: .clear, location: 0.53),
-                            .init(color: .white.opacity(0.62), location: 0.95)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                ), lineWidth: 3)
+            ), lineWidth: 4)
+            shape.inset(by: 5).strokeBorder(Color(light: 0x7892A6, dark: 0x9DB7CA).opacity(0.22), lineWidth: 2)
+
+            VStack(spacing: 0) {
+                Color.clear
+                    .frame(height: 13)
+                    .glassJarRim()
+                    .overlay {
+                        Ellipse().strokeBorder(LinearGradient(
+                            colors: [.white.opacity(0.94), Color(light: 0x7F98AC, dark: 0x9FB6C8).opacity(0.7)],
+                            startPoint: .top, endPoint: .bottom
+                        ), lineWidth: 1)
+                    }
+                    .padding(.horizontal, 15)
+                    .padding(.top, 3)
+                Spacer(minLength: 0)
+                Capsule()
+                    .fill(LinearGradient(
+                        stops: [.init(color: .clear, location: 0),
+                                .init(color: Color(light: 0xA9C1D2, dark: 0x648296).opacity(0.42), location: 0.47),
+                                .init(color: .white.opacity(0.72), location: 0.72),
+                                .init(color: Color(light: 0x7494AC, dark: 0x486379).opacity(0.55), location: 1)],
+                        startPoint: .top, endPoint: .bottom
+                    ))
+                    .frame(height: 16)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 2)
             }
-            .overlay {
-                shape.inset(by: 5).strokeBorder(Color.primary.opacity(0.055), lineWidth: 1)
-            }
+        }
     }
 }
 
