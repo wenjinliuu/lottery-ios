@@ -21,16 +21,24 @@ struct BallJarView: View {
         let shape = RoundedRectangle(cornerRadius: Self.corner)
         let frame = scene.frame
         VStack(alignment: .leading, spacing: 8) {
-            Canvas { context, _ in
-                scene.draw(in: &context, frame: frame)
+            Canvas { context, size in
+                scene.draw(in: &context, size: size, frame: frame)
             }
             .frame(height: Self.height)
             .clipShape(shape)
             .glassJar(in: shape)
-            .background(Color.primary.opacity(0.025), in: shape)
+            .background {
+                shape.fill(LinearGradient(
+                    colors: [Color(light: 0xECF3F8, dark: 0x26323B),
+                             Color(light: 0xFAFCFD, dark: 0x181F26),
+                             Color(light: 0xE8F0F7, dark: 0x283640)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ))
+            }
             .overlay {
-                shape.strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+                JarGlassWall(shape: shape)
                     .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
             .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
             .accessibilityElement()
@@ -94,18 +102,50 @@ struct BallJarView: View {
     }
 }
 
+/// 玻璃壁用两道间隔的边缘和斜向高光表现厚度。
+private struct JarGlassWall: View {
+    let shape: RoundedRectangle
+
+    var body: some View {
+        shape
+            .strokeBorder(LinearGradient(
+                colors: [Color(light: 0x99ACC0, dark: 0x607689).opacity(0.60),
+                         .white.opacity(0.72), Color(light: 0x8DA5BB, dark: 0x435B71).opacity(0.44)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            ), lineWidth: 1)
+            .overlay {
+                shape.inset(by: 2).strokeBorder(LinearGradient(
+                    stops: [.init(color: .white.opacity(0.9), location: 0),
+                            .init(color: .white.opacity(0.5), location: 0.25),
+                            .init(color: .clear, location: 0.53),
+                            .init(color: .white.opacity(0.62), location: 0.95)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ), lineWidth: 3)
+            }
+            .overlay {
+                shape.inset(by: 5).strokeBorder(Color.primary.opacity(0.055), lineWidth: 1)
+            }
+    }
+}
+
 @MainActor @Observable
 final class JarScene {
     private(set) var frame = 0
     private(set) var isAnimating = false
     @ObservationIgnored private var physics = JarPhysics()
     @ObservationIgnored private var colors: [BallColor] = []
+    @ObservationIgnored private var sprites: [BallColor: Image] = [:]
     @ObservationIgnored private let motion = CMMotionManager()
     @ObservationIgnored private var restGravity = (x: 0.0, y: 1.0)
 
     func load(_ colors: [BallColor], size: CGSize, corner: CGFloat) {
         guard size.width > 0, size.height > 0 else { return }
         self.colors = colors
+        for color in Set(colors) where sprites[color] == nil {
+            let renderer = ImageRenderer(content: BallSurface(color: color).frame(width: 24, height: 24))
+            renderer.scale = 3
+            if let image = renderer.uiImage { sprites[color] = Image(uiImage: image) }
+        }
         physics.corner = corner
         let radius = JarBuilder.radius(count: colors.count, width: size.width, height: size.height)
         physics.fillPacked(count: colors.count, radius: radius, width: size.width, height: size.height)
@@ -154,16 +194,52 @@ final class JarScene {
         frame &+= 1
     }
 
-    func draw(in context: inout GraphicsContext, frame _: Int) {
-        var paths: [BallColor: Path] = [:]
-        for (color, ball) in zip(colors, physics.balls) {
+    func draw(in context: inout GraphicsContext, size: CGSize, frame _: Int) {
+        let balls = physics.balls
+        drawWallReflections(in: &context, size: size, balls: balls)
+        let resolved = sprites.mapValues { context.resolve($0) }
+        for (color, ball) in zip(colors, balls) {
             let diameter = ball.radius * 2
             let rect = CGRect(x: ball.x - ball.radius, y: ball.y - ball.radius,
                               width: diameter, height: diameter).insetBy(dx: 0.25, dy: 0.25)
-            paths[color, default: Path()].addEllipse(in: rect)
+            if let sprite = resolved[color] {
+                context.draw(sprite, in: rect)
+            } else {
+                context.fill(Path(ellipseIn: rect), with: .linearGradient(
+                    Gradient(colors: [color.light, color.deep]),
+                    startPoint: CGPoint(x: rect.midX, y: rect.minY),
+                    endPoint: CGPoint(x: rect.midX, y: rect.maxY)
+                ))
+            }
         }
-        for color in paths.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
-            if let path = paths[color] { context.fill(path, with: .color(color.accentColor)) }
+    }
+
+    /// 贴近罐壁的球会留下低饱和度的色影，和球一起移动。
+    private func drawWallReflections(in context: inout GraphicsContext, size: CGSize, balls: [JarPhysics.Ball]) {
+        guard !balls.isEmpty else { return }
+        let bounds = CGRect(origin: .zero, size: size)
+        let wallWidth: CGFloat = 11
+        var wall = RoundedRectangle(cornerRadius: physics.corner).path(in: bounds)
+        wall.addPath(RoundedRectangle(cornerRadius: max(physics.corner - wallWidth, 0))
+            .path(in: bounds.insetBy(dx: wallWidth, dy: wallWidth)))
+        var reflection = context
+        reflection.clip(to: wall, style: FillStyle(eoFill: true))
+        reflection.drawLayer { layer in
+            layer.opacity = 0.30
+            layer.addFilter(.blur(radius: 2.8))
+            for (color, ball) in zip(colors, balls) {
+                let reach = ball.radius + 8
+                let left = ball.x < reach
+                let right = size.width - ball.x < reach
+                let top = ball.y < reach
+                let bottom = size.height - ball.y < reach
+                guard left || right || top || bottom else { continue }
+                let x = left ? wallWidth * 0.55 : (right ? size.width - wallWidth * 0.55 : ball.x)
+                let y = top ? wallWidth * 0.55 : (bottom ? size.height - wallWidth * 0.55 : ball.y)
+                let radius = max(ball.radius, 3)
+                let glow = CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)
+                layer.fill(Path(ellipseIn: glow), with: .color(color.accentColor))
+            }
         }
     }
 }

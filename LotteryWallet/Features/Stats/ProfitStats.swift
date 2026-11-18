@@ -92,6 +92,15 @@ struct FlowPoint: Identifiable, Hashable {
     var id: Date { day }
 }
 
+/// 日期选择用的当天金额，独立于曲线抽稀。
+struct DailyFlow: Equatable {
+    var cost: Double = 0
+    var prize: Double = 0
+    var welfare: Double = 0
+
+    var net: Double { prize - cost }
+}
+
 /// 一个月的投入去了哪。
 struct FlowMonth: Identifiable, Hashable {
     /// yyyy-MM
@@ -115,6 +124,7 @@ struct ProfitSeries {
     var days: [ProfitDay] = []
     /// 累计投入 / 奖金 / 公益金，首页的渐变线画的是它。
     var flow: [FlowPoint] = []
+    var dailyFlow: [String: DailyFlow] = [:]
     /// 按月汇总，最多最近十二个月。
     var months: [FlowMonth] = []
     var costTotal: Double = 0
@@ -212,6 +222,8 @@ enum ProfitStats {
                                     close: 0, cost: 0, prize: 0, count: 0, wonCount: 0, games: []))
         }
 
+        var dailyFlow: [String: DailyFlow] = [:]
+        dailyFlow.reserveCapacity(visible.count)
         var costTotal = 0.0
         var prizeTotal = 0.0
         var welfareTotal = 0.0
@@ -241,6 +253,7 @@ enum ProfitStats {
             welfareTotal += welfare
             let parsed = DateText.parse(day) ?? Date()
             flow.append(FlowPoint(day: parsed, cost: costTotal, prize: prizeTotal, welfare: welfareTotal))
+            dailyFlow[day] = DailyFlow(cost: cost, prize: prize, welfare: welfare)
             let month = String(day.prefix(7))
             if months.last?.month == month {
                 months[months.count - 1].cost += cost
@@ -252,7 +265,7 @@ enum ProfitStats {
             settledCount += items.count
             wonTotal += won
             points.append(ProfitDay(date: day,
-                                    day: DateText.parse(day) ?? Date(),
+                                    day: parsed,
                                     close: balance,
                                     cost: cost,
                                     prize: prize,
@@ -263,6 +276,7 @@ enum ProfitStats {
 
         return ProfitSeries(days: sampleDays ? downsample(points) : points,
                             flow: downsample(flow),
+                            dailyFlow: dailyFlow,
                             months: Array(months.suffix(12)),
                             costTotal: costTotal,
                             prizeTotal: prizeTotal,

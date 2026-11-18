@@ -54,6 +54,11 @@ final class ProfitFlowTests: XCTestCase {
         let series = ProfitStats.series(entries: many, range: .all)
         XCTAssertLessThanOrEqual(series.flow.count, ProfitStats.maxChartPoints)
         XCTAssertEqual(series.flow.last?.cost, 800)
+        let plotted = Set(series.flow.map { DateText.day($0.day) })
+        let omitted = try XCTUnwrap(many.first { !plotted.contains($0.day) })
+        let omittedDay = try XCTUnwrap(series.dailyFlow[omitted.day])
+        XCTAssertEqual(omittedDay.cost, omitted.cost)
+        XCTAssertEqual(omittedDay.prize, omitted.prize)
         XCTAssertEqual(series.flow.last?.prize, series.prizeTotal)
         // 累计值只增不减
         for (previous, next) in zip(series.flow, series.flow.dropFirst()) {
@@ -105,6 +110,16 @@ final class ProfitFlowTests: XCTestCase {
     }
 
     // MARK: - 读数
+
+    func testDailyAmountsAreNotCumulative() throws {
+        let series = ProfitStats.series(entries: entries, range: .all)
+        let day = try XCTUnwrap(series.dailyFlow["2026-09-02"])
+        XCTAssertEqual(day.cost, 30)
+        XCTAssertEqual(day.prize, 5)
+        XCTAssertEqual(day.welfare, 10.2, accuracy: 0.0001)
+        XCTAssertEqual(day.net, -25)
+        XCTAssertNil(series.dailyFlow["2026-09-06"])
+    }
 
     func testReadingShowsTotalsWhenNothingIsSelected() {
         let series = ProfitStats.series(entries: entries, range: .all)

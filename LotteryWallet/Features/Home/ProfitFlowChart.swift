@@ -88,7 +88,7 @@ struct FlowReading: Equatable {
 ///
 /// **每月**：一个月一根柱子，自下而上是奖金、公益金、其余，总高等于当月投入。
 ///
-/// 按住拖动（每月模式下是点一下）时，上面那行读数跟着变。
+/// 拖动累计曲线时，浮窗显示所选日期的当天金额。
 struct ProfitFlowChart: View {
     let series: ProfitSeries
     let mode: FlowMode
@@ -96,7 +96,7 @@ struct ProfitFlowChart: View {
     @State private var selectedDay: Date?
     @State private var selectedMonth: String?
 
-    private static let spend = Color.accentColor
+    private static let spend = Palette.chartSpending
 
     private var reading: FlowReading {
         FlowReading.make(series: series, mode: mode, day: selectedDay, month: selectedMonth)
@@ -104,7 +104,7 @@ struct ProfitFlowChart: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            readout
+            if mode == .monthly { readout }
             Group {
                 switch mode {
                 case .cumulative: cumulativeChart
@@ -115,7 +115,7 @@ struct ProfitFlowChart: View {
         }
         // 换范围、换模式之后，原来选中的那一天多半已经不在图上了。
         .onChange(of: mode) { _, _ in clearSelection() }
-        .onChange(of: series.flow.count) { _, _ in clearSelection() }
+        .onChange(of: series.flow) { _, _ in clearSelection() }
     }
 
     private func clearSelection() {
@@ -167,9 +167,8 @@ struct ProfitFlowChart: View {
 
     // MARK: - 累计
 
-    private var selectedPoint: FlowPoint? {
-        guard let selectedDay else { return nil }
-        return series.flow.last { $0.day <= selectedDay } ?? series.flow.first
+    private var selectedCalendarDay: Date? {
+        selectedDay.map { Calendar.chinaCalendar.startOfDay(for: $0) }
     }
 
     private var cumulativeChart: some View {
@@ -177,13 +176,15 @@ struct ProfitFlowChart: View {
             line("投入", Self.spend, fill: 0.26, value: \.cost)
             line("公益金", Palette.warning, fill: 0.34, value: \.welfare)
             line("奖金", Palette.profit, fill: 0.38, value: \.prize)
-            if let point = selectedPoint {
-                RuleMark(x: .value("日期", point.day))
+            if let day = selectedCalendarDay {
+                RuleMark(x: .value("日期", day))
                     .foregroundStyle(Color.secondary)
                     .lineStyle(StrokeStyle(lineWidth: 1))
-                marker(point, point.cost, Self.spend)
-                marker(point, point.welfare, Palette.warning)
-                marker(point, point.prize, Palette.profit)
+                if let point = series.flow.first(where: { $0.day == day }) {
+                    marker(point, point.cost, Self.spend)
+                    marker(point, point.welfare, Palette.warning)
+                    marker(point, point.prize, Palette.profit)
+                }
             }
         }
         .chartLegend(.hidden)
@@ -203,6 +204,26 @@ struct ProfitFlowChart: View {
         .chartYScale(domain: 0...(max(series.costTotal, series.prizeTotal, 1) * 1.04))
         // 系统自带的选中手势：按住再拖，和页面的上下滚动不打架。
         .chartXSelection(value: $selectedDay)
+        .chartOverlay { proxy in
+            GeometryReader { geometry in
+                if let day = selectedCalendarDay,
+                   let anchor = proxy.plotFrame,
+                   let position = proxy.position(forX: day) {
+                    let plot = geometry[anchor]
+                    let width = min(224, max(1, plot.width - 12))
+                    // 放在选中竖线旁边，靠近左右边缘时自动换边并收在绘图区内。
+                    let x = plot.minX + position
+                    let preferredX = x + 8 + width <= plot.maxX ? x + 8 : x - width - 8
+                    let labelX = min(max(preferredX, plot.minX + 6), plot.maxX - width - 6)
+                    let date = DateText.day(day)
+                    DailyChartReadout(date: date, amounts: series.dailyFlow[date] ?? DailyFlow())
+                        .frame(width: width)
+                        .offset(x: labelX, y: plot.minY + 6)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+        .accessibilityIdentifier("home.chart.flow")
         .accessibilityLabel("累计收支图")
         .accessibilityValue("投入 \(MoneyText.format(series.costTotal))，奖金 \(MoneyText.format(series.prizeTotal))，公益金 \(MoneyText.format(series.welfareTotal))")
     }
@@ -273,5 +294,47 @@ struct ProfitFlowChart: View {
             .foregroundStyle(color)
             .cornerRadius(4)
             .opacity(selectedMonth == nil || selectedMonth == month.month ? 1 : 0.35)
+    }
+}
+
+
+private struct DailyChartReadout: View {
+    let date: String
+    let amounts: DailyFlow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(date)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+            Grid(alignment: .leading, horizontalSpacing: 9, verticalSpacing: 6) {
+                GridRow {
+                    metric("投入", amounts.cost, tint: Palette.chartSpending)
+                    metric("奖金", amounts.prize, tint: Palette.profit)
+                }
+                GridRow {
+                    metric("公益金", amounts.welfare, tint: Palette.warning)
+                    metric("净收支", amounts.net, tint: Palette.profitColor(amounts.net))
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassChartReadout()
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("home.chart.daily")
+    }
+
+    private func metric(_ title: String, _ amount: Double, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).foregroundStyle(.secondary)
+            Text(MoneyText.format(amount))
+                .monospacedDigit()
+                .foregroundStyle(tint)
+        }
+        .font(.caption2)
+        .lineLimit(1)
+        .minimumScaleFactor(0.72)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

@@ -182,11 +182,7 @@ struct HomeView: View {
 
     // MARK: - 累计收支
 
-    /// 从上到下一条线：标签、范围和图表模式 → 大数字 → 两个小指标 → 一行读数 → 图。
-    ///
-    /// 返奖率和公益金紧跟在大数字下面：它们是对这个数字的**解读**
-    /// （花出去的钱回来多少、捐出去多少）。投入、奖金这些流水数不再单独占方块，
-    /// 并进图上面那一行读数里，见 `ProfitFlowChart`。
+    /// 账本概览、共用金额行和当前选中的图表。
     private var profitCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
@@ -224,14 +220,12 @@ struct HomeView: View {
                     // 返奖率：花出去的钱回来了多少。比「中奖率」诚实 —— 中 5 元也算中奖，
                     // 中奖率很好看的时候钱照样是净出去的。
                     inlineStat("返奖率", returnRateText, tint: series.prizeTotal > 0 ? Palette.profit : .secondary)
-                    Rectangle()
-                        .fill(Palette.separator)
-                        .frame(width: 1, height: 11)
-                    // 公益金逐条按彩种计提，比例见 `GameKey.welfareRate` ——
-                    // 八个彩种不是同一个比例，不能拿总额乘一个数。
-                    inlineStat("公益金", "\(MoneyText.grouped(series.welfareTotal)) 元", tint: Palette.warning)
+                    if chartStyle == HomeChartStyle.jar.rawValue {
+                        Rectangle().fill(Palette.separator).frame(width: 1, height: 11)
+                        inlineStat("公益金", "\(MoneyText.grouped(series.welfareTotal)) 元", tint: Palette.warning)
+                    }
                     Spacer(minLength: 0)
-                    // 曲线看总数怎么涨，方格看每一天，球罐看买过的号码。三选一。
+                    // 三种图表共享时间范围。
                     Picker("图表样式", selection: $chartStyle) {
                         Image(systemName: "chart.xyaxis.line")
                             .accessibilityLabel("曲线")
@@ -249,27 +243,21 @@ struct HomeView: View {
                 }
             }
 
-            // 原来这里是逐日方格图加四个数字方块。方块里的数现在都在图上面那一行，
-            // 而且按住图表拖动时会跟着变成那一天的数。
+            if chartStyle != HomeChartStyle.jar.rawValue {
+                chartTotals
+            }
+
             Group {
                 if chartStyle == HomeChartStyle.jar.rawValue {
                     BallJarView(jar: jar, range: range)
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else if chartStyle == HomeChartStyle.grid.rawValue {
                     VStack(alignment: .leading, spacing: 8) {
-                        // 方格图自己读不出金额，上面放和曲线图同样的两个数
-                        HStack(alignment: .top, spacing: 8) {
-                            gridTotal("投入", series.costTotal, Color.accentColor)
-                            gridTotal("奖金", series.prizeTotal, Palette.profit)
-                        }
                         ProfitHeatmap(days: series.days, range: range, width: screenWidth - 64)
                             .id(range)
                         HStack(spacing: 12) {
-                            heatLegend(Palette.profit, "当天有中奖")
-                            heatLegend(Palette.loss, "当天没中")
-                            Text("颜色越深金额越大")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                            heatLegend(Palette.profit, "有中奖")
+                            heatLegend(Palette.loss, "未中奖")
                         }
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
@@ -286,21 +274,32 @@ struct HomeView: View {
         .contentCard()
     }
 
-    private func gridTotal(_ title: String, _ value: Double, _ tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            HStack(spacing: 4) {
-                Circle().fill(tint).frame(width: 7, height: 7)
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    private var chartTotals: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                spendingTotal.fixedSize()
+                prizeTotal.fixedSize()
+                welfareTotal.fixedSize()
             }
-            Text(MoneyText.grouped(value))
-                .font(.system(.callout, design: .rounded, weight: .semibold))
-                .monospacedDigit()
-                .contentTransition(.numericText())
+            VStack(alignment: .leading, spacing: 4) {
+                spendingTotal
+                prizeTotal
+                welfareTotal
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("home.chart.totals")
+    }
+
+    private var spendingTotal: some View {
+        inlineStat("投入", "\(MoneyText.grouped(series.costTotal)) 元", tint: Palette.chartSpending)
+    }
+
+    private var prizeTotal: some View {
+        inlineStat("奖金", "\(MoneyText.grouped(series.prizeTotal)) 元", tint: Palette.profit)
+    }
+
+    private var welfareTotal: some View {
+        inlineStat("公益金", "\(MoneyText.grouped(series.welfareTotal)) 元", tint: Palette.warning)
     }
 
     /// 概览卡上那三个快捷范围选中了哪个；都不是（比如选了去年某个月）返回 -1。
@@ -361,6 +360,7 @@ struct HomeView: View {
                 .foregroundStyle(.secondary)
             Text(value)
                 .monospacedDigit()
+                .contentTransition(.numericText())
                 .foregroundStyle(tint)
         }
         .font(.footnote)
