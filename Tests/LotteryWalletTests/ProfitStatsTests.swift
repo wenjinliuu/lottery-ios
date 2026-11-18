@@ -140,6 +140,9 @@ final class ProfitStatsTests: XCTestCase {
         XCTAssertLessThanOrEqual(series.days.count, ProfitStats.maxChartPoints)
         // 抽稀不能影响总额
         XCTAssertEqual(series.costTotal, Double(entries.count) * 2)
+        let grid = ProfitStats.series(entries: entries, range: .all, sampleDays: false)
+        XCTAssertEqual(grid.days.filter { $0.count > 0 }.count, entries.count)
+        XCTAssertEqual(grid.costTotal, series.costTotal)
     }
 
     func testEmptyInput() {
@@ -185,8 +188,11 @@ final class ProfitStatsTests: XCTestCase {
     /// 这个断言是给下次改动兜底的 —— 上次删 `.week` 时忘了改测试，CI 才发现。
     func testRangeOptions() {
         XCTAssertEqual(ProfitRange.allCases, [.month, .half, .year, .all])
-        XCTAssertEqual(ProfitRange.half.gridSpan, 183)
-        XCTAssertEqual(ProfitRange.year.gridSpan, 365)
+        let now = DateText.parse("2024-02-29")!
+        let first = "2023-10-01", last = "2024-02-29"
+        XCTAssertEqual(ProfitRange.month.startDay(firstDay: first, lastDay: last, now: now), "2024-02-01")
+        XCTAssertEqual(ProfitRange.year.startDay(firstDay: first, lastDay: last, now: now), "2024-01-01")
+        XCTAssertEqual(ProfitRange.all.startDay(firstDay: first, lastDay: last, now: now), first)
         XCTAssertEqual(ProfitRange.month.label, "本月")
     }
 
