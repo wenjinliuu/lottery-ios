@@ -59,7 +59,8 @@ final class AppStoreScreenshotTests: XCTestCase {
         settle(1)
         recognize.tap()
 
-        XCTAssertTrue(app.navigationBars["核对识别结果"].waitForExistence(timeout: 60), "识别没有完成")
+        // 云端 Intel 模拟器上的整张票识别可能超过一分钟。
+        XCTAssertTrue(app.navigationBars["核对识别结果"].waitForExistence(timeout: 180), "识别没有完成")
         settle()
 
         // 预览图不要，往下滑到号码和票面合计完整露出来。
