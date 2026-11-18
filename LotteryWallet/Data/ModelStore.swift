@@ -41,7 +41,9 @@ enum ModelStore {
 
     /// 建库。**永远不会静默给出一个空的持久库。**
     static func makeContainer(health: StoreHealth) -> ModelContainer {
-        let configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .none)
+        // The notification extension shares a separate snapshot. Keep existing wallet files
+        // in this app's sandbox when the App Group entitlement is added.
+        let configuration = ModelConfiguration(schema: schema, groupContainer: .none, cloudKitDatabase: .none)
         health.storeURL = configuration.url
         do {
             let container = try ModelContainer(for: schema, configurations: [configuration])

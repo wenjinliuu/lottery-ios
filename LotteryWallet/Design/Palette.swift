@@ -131,7 +131,7 @@ extension GameKey {
 /// 这里刻意选鲜亮的取值而不是压暗到 WCAG 4.5:1：这几个色只出现在
 /// semibold 及以上的数字和图标上（大号粗体的阈值是 3:1）。
 enum Palette {
-    static let chartSpending = Color(light: 0x0065CC, dark: 0x7CBCFF)
+    static let chartSpending = Color.accentColor
     /// 盈利 —— 红。
     static let profit = Color(light: 0xF5333F, dark: 0xFF6B76)
     /// 亏损 —— 绿。
@@ -172,26 +172,6 @@ enum Palette {
     static let card = Color(light: 0xFFFFFF, dark: 0x1C1C1E)
     /// 分隔线。
     static let separator = Color(.separator)
-}
-
-extension RecordStatus {
-    var tint: Color {
-        switch self {
-        case .pending: Palette.warning
-        case .won: Palette.profit
-        case .lost: Color.secondary
-        case .prizeFloat: Palette.warning
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .pending: "clock"
-        case .won: "checkmark.seal.fill"
-        case .lost: "xmark.circle"
-        case .prizeFloat: "hourglass"
-        }
-    }
 }
 
 // MARK: - 跟随 Dynamic Type 的小字号

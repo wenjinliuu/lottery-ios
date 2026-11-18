@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 /// 开奖通知里带下来的东西，以及「拿它核对完之后怎么说」。
 ///
@@ -6,9 +7,25 @@ import Foundation
 /// 中没中是 App 被通知唤醒后在本机算出来的。
 enum DrawPushPayload {
 
+    static func personalizedContent(_ original: UNNotificationContent, draw: Draw,
+                                    summary: DrawNotificationStore.Summary) -> UNMutableNotificationContent? {
+        guard let content = original.mutableCopy() as? UNMutableNotificationContent else { return nil }
+        content.interruptionLevel = .active
+        content.sound = .default
+        content.threadIdentifier = "draw-\(draw.gameKey.apiKey)"
+        content.subtitle = original.body
+        content.body = summary.body
+        return content
+    }
+
     /// 每个彩种、期号的本机去重键。
     static func identifier(game: GameKey, issue: String) -> String {
         "draw-\(game.apiKey)-\(issue)"
+    }
+
+    static func usesServiceExtension(_ userInfo: [AnyHashable: Any]) -> Bool {
+        userInfo["lottery_type"] != nil &&
+            (userInfo["aps"] as? [String: Any])?["mutable-content"] as? Int == 1
     }
 
     /// 解析通知里的 `lottery_type` 和 `draw`。
@@ -42,11 +59,11 @@ enum DrawPushPayload {
             var count: Int
         }
 
-        mutating func add(status: RecordStatus, prizeName: String, amount: Double) {
+        mutating func add(winning: Bool, isFloating: Bool, prizeName: String, amount: Double) {
             tickets += 1
-            guard status == .won || status == .prizeFloat else { return }
+            guard winning else { return }
             won += 1
-            if status == .prizeFloat { floating += 1 }
+            if isFloating { floating += 1 }
             self.amount += amount
             if let index = prizes.firstIndex(where: { $0.name == prizeName }) {
                 prizes[index].count += 1

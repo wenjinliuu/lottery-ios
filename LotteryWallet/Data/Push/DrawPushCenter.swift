@@ -14,7 +14,8 @@ final class DrawPushCenter {
 
     /// 建库之后由 `LotteryWalletApp` 填进来。后台被通知唤醒时没有任何视图，
     /// 只能从这里拿数据库。
-    var container: ModelContainer?
+    private var container: ModelContainer?
+    private var walletSaveObserver: (any NSObjectProtocol)?
 
     private(set) var isEnabled: Bool
     private(set) var status: Status = .off
@@ -61,6 +62,65 @@ final class DrawPushCenter {
         isEnabled = !DemoData.isEnabled && defaults.bool(forKey: Keys.enabled)
     }
 
+    func connectWallet(_ container: ModelContainer) {
+        self.container = container
+        if let walletSaveObserver { NotificationCenter.default.removeObserver(walletSaveObserver) }
+        walletSaveObserver = NotificationCenter.default.addObserver(
+            forName: ModelContext.didSave, object: nil, queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let self, let container = self.container,
+                      let context = notification.object as? ModelContext,
+                      context.container === container else { return }
+                self.publishPendingTickets()
+            }
+        }
+    }
+
+    private func publishPendingTickets() {
+        guard let store = DrawNotificationStore.shared else { return }
+        let records = isEnabled ? container.flatMap { try? Self.pendingTickets(in: ModelContext($0)) } : []
+        // An empty snapshot prevents deleted or no longer readable tickets from causing alerts.
+        try? store.replacePendingTickets(records ?? [])
+    }
+
+    static func pendingTickets(in context: ModelContext) throws -> [DrawNotificationStore.PendingTicket] {
+        let pending = RecordStatus.pending.rawValue
+        let review = NextDrawStatus.review.rawValue
+        let descriptor = FetchDescriptor<TicketRecord>(predicate: #Predicate {
+            $0.statusRaw == pending && $0.targetStatusRaw != review && $0.targetExpect != ""
+        })
+        return try context.fetch(descriptor).compactMap { record in
+            guard let game = GameKey(rawValue: record.gameRaw) else { return nil }
+            return .init(game: game, issue: record.targetExpect, date: record.targetOpenDate,
+                         numbers: record.numbersData, multiple: record.multiple, cost: record.cost)
+        }
+    }
+
+    @discardableResult
+    func applyNotificationResults() -> Bool {
+        guard isEnabled, let container, let store = DrawNotificationStore.shared,
+              let files = try? store.receiptFiles(), !files.isEmpty else { return false }
+        let context = ModelContext(container)
+        var updated = false
+        for file in files {
+            do {
+                let draw = try JSONDecoder().decode(Draw.self, from: Data(contentsOf: file))
+                guard DrawNotificationStore.isComplete(draw) else {
+                    try FileManager.default.removeItem(at: file)
+                    continue
+                }
+                let result = try settle(with: draw, in: context, requireMatchingDate: true)
+                updated = result.tickets > 0 || updated
+                try FileManager.default.removeItem(at: file)
+            } catch {
+                context.rollback()
+                // Leave the receipt available for the next launch if the wallet cannot save yet.
+            }
+        }
+        return updated
+    }
+
     // MARK: - 开关
 
     /// 用户打开开关：弹系统授权，同意后向苹果要令牌。
@@ -74,6 +134,7 @@ final class DrawPushCenter {
         }
         isEnabled = true
         defaults.set(true, forKey: Keys.enabled)
+        publishPendingTickets()
         defaults.removeObject(forKey: Keys.pendingUnsubscribe)
         lastRegistration = nil
         status = .registering
@@ -83,6 +144,7 @@ final class DrawPushCenter {
     func disable() async {
         isEnabled = false
         defaults.set(false, forKey: Keys.enabled)
+        publishPendingTickets()
         defaults.set(true, forKey: Keys.pendingUnsubscribe)
         lastRegistration = nil
         status = .off
@@ -93,6 +155,8 @@ final class DrawPushCenter {
     /// 冷启动刷新登记。回到前台也会重试未完成的操作。
     func refreshOnLaunch() async {
         guard !DemoData.isEnabled else { return }
+        applyNotificationResults()
+        publishPendingTickets()
         guard isEnabled else {
             if defaults.bool(forKey: Keys.pendingUnsubscribe) { await syncRegistration() }
             return
@@ -178,7 +242,8 @@ final class DrawPushCenter {
         request.httpBody = try JSONSerialization.data(withJSONObject: Self.registrationBody(
             token: token,
             enabled: enabled,
-            bundleID: Bundle.main.bundleIdentifier ?? ""))
+            bundleID: Bundle.main.bundleIdentifier ?? "",
+            passiveDraws: DrawNotificationStore.shared != nil))
         let (data, response) = try await URLSession.shared.data(for: request, delegate: LotteryReadRedirectGuard())
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200,
@@ -189,11 +254,12 @@ final class DrawPushCenter {
 
     private struct RegistrationResponse: Decodable { let ok: Bool }
 
-    static func registrationBody(token: String, enabled: Bool, bundleID: String) -> [String: Any] {
+    static func registrationBody(token: String, enabled: Bool, bundleID: String, passiveDraws: Bool) -> [String: Any] {
         ["token": token,
          "environment": usesSandboxPush ? "sandbox" : "production",
          "bundle_id": bundleID,
-         "enabled": enabled]
+         "enabled": enabled,
+         "passive_draws": passiveDraws]
     }
 
     /// Xcode 直接装的调试包走苹果的沙盒推送环境；TestFlight 和正式包走生产环境。
@@ -211,11 +277,16 @@ final class DrawPushCenter {
     ///
     /// 写库走的是 `RecordService.write`，和打开 App 时的自动核对是同一个函数 ——
     /// 之后 App 拿到正式开奖数据再核对一遍，结论一样就不会重写。
-    func settle(with draw: Draw, in context: ModelContext) throws -> DrawPushPayload.Outcome {
+    func settle(with draw: Draw, in context: ModelContext,
+                requireMatchingDate: Bool = false) throws -> DrawPushPayload.Outcome {
         let issue = draw.expect
         let records = try context.fetch(FetchDescriptor<TicketRecord>(
             predicate: #Predicate { $0.targetExpect == issue }
-        )).filter { $0.game == draw.gameKey }
+        )).filter {
+            $0.gameRaw == draw.gameKey.rawValue &&
+            (!requireMatchingDate || ($0.targetStatus != .review &&
+                ($0.targetOpenDate.isEmpty || $0.targetOpenDate == draw.openDate)))
+        }
         var outcome = DrawPushPayload.Outcome()
         for record in records {
             // 还没结论的、和奖金待公布的才重算；已经定了的直接用。
@@ -276,5 +347,12 @@ final class DrawPushCenter {
         } catch {
             return .settled
         }
+    }
+}
+
+extension DrawPushPayload.Outcome {
+    mutating func add(status: RecordStatus, prizeName: String, amount: Double) {
+        add(winning: status == .won || status == .prizeFloat, isFloating: status == .prizeFloat,
+            prizeName: prizeName, amount: amount)
     }
 }

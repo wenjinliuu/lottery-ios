@@ -31,7 +31,7 @@ struct LotteryWalletApp: App {
         }
         // 开奖通知在后台把 App 叫起来时没有任何视图，数据库只能从这里拿。
         // 示例模式的内存库不交出去：那里面是假票据。
-        if !DemoData.isEnabled { DrawPushCenter.shared.container = container }
+        if !DemoData.isEnabled && health.isHealthy { DrawPushCenter.shared.connectWallet(container) }
         _storeHealth = State(initialValue: health)
         _settings = State(initialValue: AppSettings())
     }
