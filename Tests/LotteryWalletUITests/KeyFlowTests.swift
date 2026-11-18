@@ -74,6 +74,12 @@ final class KeyFlowTests: XCTestCase {
         shake.tap()
         RunLoop.current.run(until: Date().addingTimeInterval(0.9))
         capture("home-jar-shaking")
+
+        style.buttons.element(boundBy: 1).tap()
+        let heatmap = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "逐日收支方格图")).firstMatch
+        XCTAssertTrue(heatmap.waitForExistence(timeout: 10))
+        capture("home-heatmap")
     }
 
     private func capture(_ name: String, file: StaticString = #filePath) {

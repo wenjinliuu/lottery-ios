@@ -27,6 +27,7 @@ struct JarPhysics {
     private var previousPositions: [(x: Double, y: Double)] = []
     private var heads: [Int] = []
     private var next: [Int] = []
+    private var largestRadius = 0.0
     private var seed: UInt64 = 0x9E3779B97F4A7C15
 
     /// 都停稳了，不用再算。
@@ -44,6 +45,7 @@ struct JarPhysics {
         seed = 0x9E3779B97F4A7C15
         blowing = 0
         quietSteps = 0
+        largestRadius = radii.max() ?? 0
         balls = radii.map { radius in
             Ball(x: radius + random() * max(width - radius * 2, 1),
                  y: radius + random() * max(height - radius * 2, 1),
@@ -68,6 +70,7 @@ struct JarPhysics {
         seed = 0x9E3779B97F4A7C15
         blowing = 0
         quietSteps = 30
+        largestRadius = radius
         balls.removeAll(keepingCapacity: true)
         guard count > 0, radius > 0 else { return }
 
@@ -114,6 +117,7 @@ struct JarPhysics {
         guard !balls.isEmpty, width > 0, height > 0 else { return }
         let substeps = 2
         let h = dt / Double(substeps)
+        let jetCentre = blowing > 0 ? width * (0.5 + 0.18 * sin(blowing * 9)) : 0
         var moving = 0
         if previousPositions.count != balls.count {
             previousPositions = Array(repeating: (0, 0), count: balls.count)
@@ -126,21 +130,21 @@ struct JarPhysics {
                 if blowing > 0 {
                     // 摇号机：中间一股气流往上喷，球被顶到上面再从两边落下来，整罐翻滚。
                     // 气流的位置左右晃，不然会喷成一根不动的柱子。
-                    let centre = width * (0.5 + 0.18 * sin(blowing * 9))
-                    let offset = (ball.x - centre) / (width * 0.2)
+                    let offset = (ball.x - jetCentre) / (width * 0.2)
                     let jet = exp(-offset * offset)
                     let depth = 0.35 + 0.65 * ball.y / height
                     ay -= 9000 * jet * depth * (0.7 + random() * 0.6)
                     // 喷上去的球往两边散
-                    ax += (ball.x < centre ? -1 : 1) * 1500 * jet * (1 - ball.y / height)
+                    ax += (ball.x < jetCentre ? -1 : 1) * 1500 * jet * (1 - ball.y / height)
                     ax += (random() - 0.5) * 2400
                 }
                 ball.vx += ax * h
                 ball.vy += ay * h
                 // 一步最多挪大半个半径，免得穿过别的球
                 let limit = ball.radius * 0.8 / h
-                let speed = (ball.vx * ball.vx + ball.vy * ball.vy).squareRoot()
-                if speed > limit {
+                let speedSquared = ball.vx * ball.vx + ball.vy * ball.vy
+                if speedSquared > limit * limit {
+                    let speed = speedSquared.squareRoot()
                     ball.vx *= limit / speed
                     ball.vy *= limit / speed
                 }
@@ -165,8 +169,7 @@ struct JarPhysics {
     private mutating func separate() {
         let count = balls.count
         guard count > 0 else { return }
-        let largest = balls.reduce(0.0) { max($0, $1.radius) }
-        let cell = max(largest * 2, 1)
+        let cell = max(largestRadius * 2, 1)
         let columns = Int(width / cell) + 1, rows = Int(height / cell) + 1
         let cellCount = columns * rows
         if heads.count != cellCount { heads = Array(repeating: -1, count: cellCount) }

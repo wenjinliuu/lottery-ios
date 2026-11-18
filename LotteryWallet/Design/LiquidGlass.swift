@@ -36,9 +36,9 @@ extension View {
         listRowBackground(Palette.card)
     }
 
-    /// 球罐用系统透明玻璃，球在前景单独绘制。
-    func glassJar(in shape: RoundedRectangle) -> some View {
-        glassEffect(.clear, in: shape)
+    /// 罐口的一圈透明玻璃。
+    func glassJarRim() -> some View {
+        glassEffect(.clear, in: Ellipse())
     }
 
     /// 拖动图表时浮在曲线上的当日金额。
