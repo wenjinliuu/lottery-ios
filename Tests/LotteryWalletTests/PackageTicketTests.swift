@@ -91,6 +91,52 @@ final class PackageTicketTests: XCTestCase {
         XCTAssertEqual(singleTicket.count, 2)
     }
 
+    func testPackageAdvertisingOnTwoTicketPhoto() throws {
+        let result = TicketTextParser.parse("""
+        体彩 超级大乐透
+        第 26132期 2026年11月18日开奖
+        单式票 追加投注1倍 合计9元
+        ① 03 11 19 27 35 + 03 07
+        ② 03 14 22 24 33 + 03 09
+        ③ 01 04 10 17 19 + 09 11
+        购彩买套餐，幸运又简单
+        选号不费脑，套餐刚刚好
+        体彩大乐透套餐票，好礼等你拿
+        感谢您为公益事业贡献 3.24元
+        体彩 排列5
+        第 26308期 2026年11月18日开奖
+        直选单式票 1倍 合计4元
+        ① 6 2 0 2 4
+        ② 5 9 4 5 3
+        """)
+        XCTAssertEqual(result.tickets.count, 2)
+        let dlt = try XCTUnwrap(result.tickets.first)
+        XCTAssertEqual(dlt.game, .dlt)
+        XCTAssertFalse(dlt.isPackage)
+        XCTAssertTrue(dlt.addOn)
+        XCTAssertEqual(dlt.count, 3)
+        XCTAssertEqual(dlt.totalCost, 9)
+        let pl5 = try XCTUnwrap(result.tickets.last)
+        XCTAssertEqual(pl5.game, .pl5)
+        XCTAssertEqual(pl5.lines.map { $0[.nums5] }, [[6, 2, 0, 2, 4], [5, 9, 4, 5, 3]])
+        XCTAssertEqual(pl5.count, 2)
+        XCTAssertEqual(pl5.totalCost, 4)
+    }
+
+    func testCorrectingPackageKeepsSinglesAndProtectsSystemNumbers() throws {
+        var ticket = try XCTUnwrap(TicketTextParser.parse(printed).tickets.first)
+        let original = ticket
+        XCTAssertFalse(ticket.correctPackageToSingle())
+        XCTAssertEqual(ticket, original)
+        ticket.selections = [:]
+        ModelFusion.refreshWarnings(&ticket)
+        XCTAssertTrue(ticket.correctPackageToSingle())
+        XCTAssertFalse(ticket.isPackage)
+        XCTAssertEqual(ticket.expandedLines, original.lines)
+        XCTAssertEqual(ticket.issue, original.issue)
+        XCTAssertFalse(ticket.warnings.contains { $0.contains("那一块没读全") })
+    }
+
     // MARK: - 票夹
 
     private func packageRecords() throws -> [TicketRecord] {
