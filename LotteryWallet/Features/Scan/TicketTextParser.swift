@@ -122,6 +122,15 @@ struct ScannedTicket: Identifiable, Hashable {
     /// 票面类型的显示名。套餐票不是 `ScanPlay` 的一种，单独给名字。
     var shapeLabel: String { isPackage ? TicketShape.packageLabel : play.label }
 
+    /// 没读到复式区时，用户可以直接保留已识别的单式号码。
+    mutating func correctPackageToSingle() -> Bool {
+        guard isPackage, selections.values.allSatisfy({ $0.selected.isEmpty && $0.dan.isEmpty }) else { return false }
+        isPackage = false
+        play = .single
+        ModelFusion.refreshWarnings(&self)
+        return true
+    }
+
     /// 套餐票里单式那几注的个数。`expandedLines` 的前这么多条是单式，后面是复式展开的。
     var packageSingleCount: Int { isPackage ? lines.filter { !$0.isEmpty }.count : 0 }
 
@@ -807,11 +816,18 @@ enum TicketTextParser {
         var orphans: [Int] = []
         /// 看着像一注、但号码个数多到救不回来的行数。
         var overfull = 0
+        var packageHeader = false
         /// 上一行的标签，用来接住没有标签的续行。
         var openLabel: (key: SectionKey, isDan: Bool)?
 
         for line in lines {
             guard !line.isEmpty else { openLabel = nil; continue }
+
+            if game == .dlt, singleLines.isEmpty, selections.isEmpty,
+               line.filter({ !$0.isWhitespace }).range(of: #"^(?:(?:体彩)?(?:超级)?大乐透)?套餐票?(?=$|追加|[0-9]|合计|倍数)"#,
+                          options: .regularExpression) != nil {
+                packageHeader = true
+            }
 
             // 标签的第一个字认坏了的时候，这一行算哪个区：第一个区还空着就是它，否则第二个
             let vacant: SectionKey? = game.sections.count == 2
@@ -881,7 +897,7 @@ enum TicketTextParser {
         // 缺的那半边在复核页上是「没认出来，点这里补上」，补齐之前不让导入
         // （见 `packageBlockMissing`）。当成普通单式票的话合计对不上，
         // 上一版还因此把它错判成了追加票。
-        if block.contains("套餐"), !singleLines.isEmpty, game == .dlt {
+        if packageHeader, !singleLines.isEmpty, game == .dlt {
             ticket.isPackage = true
             ticket.play = .single
         } else
@@ -1007,7 +1023,7 @@ enum TicketTextParser {
         if let game = namedGame(body) { return game }
 
         // 3. 标签和版式
-        if body.range(of: "前区|后区|套餐|追加", options: .regularExpression) != nil { return .dlt }
+        if body.range(of: "前区|后区|追加", options: .regularExpression) != nil { return .dlt }
         if body.range(of: "红[单复胆拖]|蓝[单复胆拖]", options: .regularExpression) != nil { return .ssq }
         if let game = gameByLayout(lines) { return game }
 
@@ -1029,7 +1045,7 @@ enum TicketTextParser {
 
     /// 票面下半截的广告语、赠票提示：里面会出现**别的彩种**的名字。
     static func isSlogan(_ line: String) -> Bool {
-        line.range(of: "添彩|诉说|获赠|赠票|好礼|乐趣|公益|感谢", options: .regularExpression) != nil
+        line.range(of: "添彩|诉说|获赠|赠票|好礼|乐趣|公益|感谢|购彩买套餐|套餐刚刚好", options: .regularExpression) != nil
     }
 
     private static func namedGame(_ text: String) -> GameKey? {
