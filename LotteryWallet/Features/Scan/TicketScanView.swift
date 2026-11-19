@@ -1015,7 +1015,7 @@ struct TicketScanView: View {
     private func shapeMenu(_ value: ScannedTicket) -> some View {
         let capsule = HStack(spacing: 3) {
             Text(headLabel(value))
-            if EntryMode.modes(for: value.game).count > 1, !value.isPackage {
+            if EntryMode.modes(for: value.game).count > 1 {
                 Image(systemName: "chevron.down").scaledFont(8, weight: .bold)
             }
         }
@@ -1025,15 +1025,16 @@ struct TicketScanView: View {
         .padding(.vertical, 3)
         .background(value.game.tint, in: Capsule())
 
-        // 套餐票不给改票面类型：改成单式或复式都会丢掉另一半号码。
-        if EntryMode.modes(for: value.game).count > 1, !value.isPackage {
+        if EntryMode.modes(for: value.game).count > 1 {
             Menu {
                 ForEach(TicketShape.allCases) { shape in
                     Button {
-                        guard shape != value.play.shape else { return }
+                        guard value.isPackage || shape != value.play.shape else { return }
+                        if shape == .single, let index = tickets.firstIndex(where: { $0.id == value.id }),
+                           tickets[index].correctPackageToSingle() { return }
                         shapeChange = ShapeChangeRequest(ticketID: value.id, shape: shape)
                     } label: {
-                        if shape == value.play.shape {
+                        if !value.isPackage && shape == value.play.shape {
                             Label(shape.label, systemImage: "checkmark")
                         } else {
                             Text(shape.label)
@@ -1043,7 +1044,7 @@ struct TicketScanView: View {
             } label: {
                 capsule
             }
-            .accessibilityLabel("票面类型 \(value.play.shape.label)，点按可以改")
+            .accessibilityLabel("票面类型 \(value.shapeLabel)，点按可以改")
         } else {
             capsule
         }
