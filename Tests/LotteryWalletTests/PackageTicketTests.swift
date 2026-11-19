@@ -101,7 +101,7 @@ final class PackageTicketTests: XCTestCase {
         ③ 01 04 10 17 19 + 09 11
         购彩买套餐，幸运又简单
         选号不费脑，套餐刚刚好
-        大乐透套餐票
+        体彩大乐透套餐票，好礼等你拿
         感谢您为公益事业贡献 3.24元
         体彩 排列5
         第 26308期 2026年11月18日开奖
@@ -118,6 +118,7 @@ final class PackageTicketTests: XCTestCase {
         XCTAssertEqual(dlt.totalCost, 9)
         let pl5 = try XCTUnwrap(result.tickets.last)
         XCTAssertEqual(pl5.game, .pl5)
+        XCTAssertEqual(pl5.lines.map { $0[.nums5] }, [[6, 2, 0, 2, 4], [5, 9, 4, 5, 3]])
         XCTAssertEqual(pl5.count, 2)
         XCTAssertEqual(pl5.totalCost, 4)
     }

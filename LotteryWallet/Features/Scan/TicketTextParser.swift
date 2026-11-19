@@ -806,8 +806,9 @@ enum TicketTextParser {
             .map { $0.trimmingCharacters(in: .whitespaces) }
         guard let game = forced ?? detectGame(block) else { return nil }
 
+        let playText = lines.filter { !isSlogan($0) }.joined(separator: "\n")
         var ticket = ScannedTicket(game: game)
-        ticket.play = detectPlay(block)
+        ticket.play = detectPlay(playText)
 
         var selections: [SectionKey: SectionSelection] = [:]
         var singleLines: [NumberSet] = []
@@ -939,7 +940,7 @@ enum TicketTextParser {
         if game == .k8, let want = Int(ticket.playMode) {
             ticket.lines = ticket.lines.filter { $0[.nums].count == want }
         }
-        ticket.addOn = detectAddOn(block)
+        ticket.addOn = detectAddOn(playText)
         ticket.periods = extractPeriods(block)
         if ticket.unknownCount > 0 {
             ticket.warnings.append("有 \(ticket.unknownCount) 位号码没认出来，点那颗问号球补一下")
@@ -1255,7 +1256,7 @@ enum TicketTextParser {
         let lines = normalize(text).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var blocks: [[String]] = []
         for line in lines {
-            let isHeader = line.range(of: "玩法\\s*[:：]|中国福利彩票|超级大乐透|CHINA WELFARE|体彩",
+            let isHeader = !isSlogan(line) && line.range(of: "玩法\\s*[:：]|中国福利彩票|超级大乐透|CHINA WELFARE|体彩",
                                       options: [.regularExpression, .caseInsensitive]) != nil
             // 票头只有在当前这块**已经有号码内容**时才另起一块。
             //
