@@ -42,7 +42,7 @@ enum TicketVisionScanner {
     ///
     /// - Parameter game: 用户在预识别页上自己指定的彩种（票头糊了、机器没认出来的时候）。
     ///   给了就按它来认，不再从票面文字里猜。
-    static func scan(_ image: UIImage, game forced: GameKey? = nil) async throws -> ScannedPage {
+    static func scan(_ image: UIImage, game forced: GameKey? = nil, calendars: [Int: DrawCalendarYear] = [:]) async throws -> ScannedPage {
         var page = ScannedPage()
         let fragments = try await recognizeFragments(in: image)
         // **配准跑在识别前面。**
@@ -50,7 +50,8 @@ enum TicketVisionScanner {
         // 阶段 2 起，号码是摆到配准后的格子上去认的，所以基准得先定下来。
         // 阶段 1 时它跑在最后、只画给人看；现在它是号码那条路的入口。
         let text = LayoutSegmenter.lines(fragments)
-        var selected = forced ?? TicketTextParser.detectGame(text, guess: false)
+        let calendarGame = forced == nil ? TicketTextParser.calendarGame(text, calendars: calendars) : nil
+        var selected = forced ?? calendarGame ?? TicketTextParser.detectGame(text, guess: false)
         var sevenStarsReading: ModelRowReader.Reading?
         if selected == nil, let classifier = DigitClassifier.shared,
            let reading = ModelRowReader.read(image: image, fragments: fragments, game: .qxc, classifier: classifier),
@@ -59,7 +60,7 @@ enum TicketVisionScanner {
             sevenStarsReading = reading
         }
         let detected = selected ?? TicketTextParser.detectGame(text)
-        let parseGame = sevenStarsReading == nil ? forced : GameKey.qxc
+        let parseGame = sevenStarsReading == nil ? (forced ?? calendarGame) : GameKey.qxc
         var registration = await TicketRegistration.run(image: image,
                                                         fragments: fragments,
                                                         game: detected)
@@ -129,7 +130,7 @@ enum TicketVisionScanner {
         // 复核页要能把原文摆出来，否则用户只能干瞪眼。
         if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
         if needsModelRecovery {
-            if forced == nil {
+            if forced == nil && calendarGame == nil {
                 result.tickets.removeAll { !$0.isUsable }
             }
             result.warnings = TicketTextParser.summary(for: result.tickets)

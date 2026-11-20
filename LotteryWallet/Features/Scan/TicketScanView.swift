@@ -1309,7 +1309,7 @@ struct TicketScanView: View {
                     if let index = marks.firstIndex(where: { $0.id == mark.id }) { marks[index].isResolving = false }
                 }
                 let corrected = await TicketImagePreprocessor.prepare(image, quad: mark.quad)
-                guard var page = try? await TicketVisionScanner.scan(corrected), !Task.isCancelled else { continue }
+                guard var page = try? await TicketVisionScanner.scan(corrected, calendars: drawStore.yearCalendars), !Task.isCancelled else { continue }
                 polish(&page)
                 // 认的这会儿用户可能已经把这个框拖走、删了，或者自己指定了彩种
                 guard let index = marks.firstIndex(where: { $0.id == mark.id }), marks[index].quad == mark.quad,
@@ -1344,13 +1344,14 @@ struct TicketScanView: View {
             } else {
                 corrected = await TicketImagePreprocessor.prepare(image, quad: mark.quad)
                 croppedPreview = corrected
-                guard var scanned = try? await TicketVisionScanner.scan(corrected, game: mark.forcedGame) else {
+                guard var scanned = try? await TicketVisionScanner.scan(corrected, game: mark.forcedGame, calendars: drawStore.yearCalendars) else {
                     missed.append(index + 1)
                     continue
                 }
                 polish(&scanned)
                 page = scanned
             }
+            texts.append(marks.count > 1 ? "第 \(index + 1) 张\n\(page.result.rawText)" : page.result.rawText)
             guard !page.result.tickets.isEmpty else {
                 missed.append(index + 1)
                 continue
@@ -1358,7 +1359,6 @@ struct TicketScanView: View {
             found += page.result.tickets
             images.merge(page.images) { current, _ in current }
             warnings += page.result.warnings
-            texts.append(page.result.rawText)
             last = (page.registration, corrected)
             notes += page.registration.debug.notes.map { marks.count > 1 ? "第 \(index + 1) 张：\($0)" : $0 }
         }
@@ -1407,7 +1407,7 @@ struct TicketScanView: View {
         let corrected = await TicketImagePreprocessor.prepare(image, quad: quad)
         croppedPreview = corrected
         do {
-            var page = try await TicketVisionScanner.scan(corrected)
+            var page = try await TicketVisionScanner.scan(corrected, calendars: drawStore.yearCalendars)
             polish(&page)
             rawText = page.result.rawText
             tickets = page.result.tickets
