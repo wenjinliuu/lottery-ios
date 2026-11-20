@@ -7,6 +7,25 @@ import XCTest
 /// 号码少读或多读一个，注数就对不上，这是最硬的一道校验。
 final class TicketTextParserGamesTests: XCTestCase {
 
+    func testUnreadableSportsTitleUsesUniquePrintedIssueAndDrawDate() {
+        let date = "2026-11-20"
+        func entry(_ issue: String, on day: String) -> GameYearCalendar {
+            let item = CalendarIssue(issue: issue, drawDate: day, weekday: 0, drawTime: "", saleCloseTime: "")
+            return GameYearCalendar(name: "", drawWeekdays: [], drawTime: "", saleCloseTime: "", issues: [item])
+        }
+        let calendar = DrawCalendarYear(year: 2026, lotteries: [
+            GameKey.qxc.apiKey: entry("26133", on: date),
+            GameKey.pl3.apiKey: entry("26310", on: date),
+            GameKey.pl5.apiKey: entry("26310", on: date),
+            GameKey.dlt.apiKey: entry("26133", on: "2026-11-21")
+        ])
+        let title = "体彩\n第 26133期 2026年11月20日开奖"
+        XCTAssertEqual(TicketTextParser.calendarGame(title, calendars: [2026: calendar]), .qxc)
+        XCTAssertNil(TicketTextParser.calendarGame(title.replacingOccurrences(of: "26133", with: "26310"), calendars: [2026: calendar]))
+        XCTAssertNil(TicketTextParser.calendarGame(title.replacingOccurrences(of: "开奖", with: "售出"), calendars: [2026: calendar]))
+        XCTAssertNil(TicketTextParser.calendarGame(title, calendars: [:]))
+    }
+
     // MARK: - 七乐彩
 
     /// 福彩七乐彩单式，3 注 × 2 元 = 6 元。

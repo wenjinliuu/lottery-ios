@@ -1036,6 +1036,25 @@ enum TicketTextParser {
         return nil
     }
 
+    /// 票名不清时，只用明印的开奖日和体彩期号查完整日历。排列3与排列5常常同日同号。
+    static func calendarGame(_ text: String, calendars: [Int: DrawCalendarYear]) -> GameKey? {
+        guard !calendars.isEmpty else { return nil }
+        let lines = normalize(text).components(separatedBy: .newlines)
+        let header = lines.prefix { !isSerialLine($0) }.filter { !isSlogan($0) }.joined(separator: "\n")
+        guard namedGame(header) == nil else { return nil }
+        let issue = extractIssue(header, game: .qxc)
+        guard !issue.isEmpty, let printed = firstMatch(in: header,
+            pattern: #"(20\d{2}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日\s*开奖)"#)?.groups.first else { return nil }
+        let date = extractDrawDate(printed)
+        guard let year = Int(date.prefix(4)), let calendar = calendars[year] else { return nil }
+        let games: [GameKey] = [.qxc, .pl3, .pl5, .dlt]
+        guard games.allSatisfy({ calendar.entry(for: $0)?.issues.isEmpty == false }) else { return nil }
+        let matches = games.filter { game in
+            calendar.entry(for: game)?.issues.contains { $0.issue == issue && $0.drawDate == date } == true
+        }
+        return matches.count == 1 ? matches.first : nil
+    }
+
     /// 体彩的流水号行、福彩的哈希行。它上面是票头，下面是号码和票底。
     static func isSerialLine(_ line: String) -> Bool {
         let compact = line.replacingOccurrences(of: " ", with: "").uppercased()
