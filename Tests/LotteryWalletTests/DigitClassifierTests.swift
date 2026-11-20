@@ -91,6 +91,17 @@ final class DigitClassifierTests: XCTestCase {
 
     // MARK: - 两个读数怎么合
 
+    func testIsolatedReadsOfMissingPermutationDigitsRequireAgreement() {
+        for digit in [3, 8] {
+            let model = DigitClassifier.Verdict(digit: digit, confidence: 0.99)
+            XCTAssertEqual(DigitCrossCheck.confirmedDigit([digit], model: model), digit)
+            XCTAssertNil(DigitCrossCheck.confirmedDigit([], model: model))
+            XCTAssertNil(DigitCrossCheck.confirmedDigit([digit, digit], model: model))
+            XCTAssertNil(DigitCrossCheck.confirmedDigit([0], model: model))
+            XCTAssertNil(DigitCrossCheck.confirmedDigit([digit], model: .init(digit: digit, confidence: 0.7)))
+        }
+    }
+
     func testCrossCheckOnlyOverrulesWhenTheModelIsSureAndDisagrees() {
         typealias Verdict = DigitClassifier.Verdict
         // 一致：保持

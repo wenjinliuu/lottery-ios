@@ -110,6 +110,7 @@ targets:
     info:
       path: DrawNotificationService/Info.plist
       properties:
+        CFBundleDisplayName: 开奖通知
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:

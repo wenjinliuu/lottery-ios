@@ -256,6 +256,26 @@ enum ModelFusion {
         return out.lines.isEmpty ? nil : out
     }
 
+    /// 票头读不到时，只采信符合「等距六位 + 隔开的特别号」且金额吻合的体彩号码区。
+    static func matchesSevenStars(rows: [[GlyphRows.Token]], text: String) -> Bool {
+        guard let total = TicketTextParser.extractTotal(text),
+              let layout = skeleton(game: .qxc, rows: rows), layout.lines.count >= 2,
+              layout.lines.allSatisfy({ $0.allSatisfy { $0.confidence >= threshold } }) else { return false }
+        let multiple = TicketTextParser.extractMultiple(text) ?? 1
+        guard total == Double(layout.lines.count * 2 * multiple) else { return false }
+        return layout.rows.allSatisfy { index in
+            let row = rows[index]
+            guard let digits = GlyphRows.readLine(row, count: 7) ?? GlyphRows.readLine(row, count: 8) else { return false }
+            let centers = digits.map { Double($0.segment.x0 + $0.segment.x1) / 2 }
+            let steps = (1...5).map { centers[$0] - centers[$0 - 1] }
+            let pitch = steps.sorted()[2]
+            let tailCenter = (centers[6] + centers[centers.count - 1]) / 2
+            let gap = tailCenter - centers[5]
+            return pitch > 0 && steps.allSatisfy { (0.75 * pitch...1.25 * pitch).contains($0) }
+                && (1.3 * pitch...2.1 * pitch).contains(gap)
+        }
+    }
+
     /// 福彩一注的最后印着「(2)」：括号多半切不成数字，中间那个倍数切得成。
     /// 一行最右边那一段是「不是数字」、它左边紧挨着一个有把握的数字，那个数字就是倍数。
     static func trailingMultiple(_ tokens: [GlyphRows.Token]) -> Int? {

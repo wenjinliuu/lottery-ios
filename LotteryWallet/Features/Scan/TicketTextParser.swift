@@ -1059,7 +1059,7 @@ enum TicketTextParser {
         if text.range(of: "快乐8|快乐八|快乐\\s*8", options: .regularExpression) != nil { return .k8 }
         if text.range(of: "排列\\s*5|排列五|排5", options: .regularExpression) != nil { return .pl5 }
         if text.range(of: "排列\\s*3|排列三|排3", options: .regularExpression) != nil { return .pl3 }
-        if text.range(of: "七星彩|7星彩|Seven\\s*Stars", options: [.regularExpression, .caseInsensitive]) != nil { return .qxc }
+        if text.range(of: "[七7７]\\s*星\\s*彩|Seven\\s*Stars", options: [.regularExpression, .caseInsensitive]) != nil { return .qxc }
         if text.contains("双色球") { return .ssq }
         // 「乐透」两个字常被认坏（真机上读成过「大乐语」），认出一半也算。
         if text.range(of: "大乐|乐透", options: .regularExpression) != nil { return .dlt }

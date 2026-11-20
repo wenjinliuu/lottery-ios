@@ -138,6 +138,8 @@ enum RegisteredDigitReader {
         // 只对一位数的格子做（0–9）；两位数的格子模型一次只认一个字，不在这里管。
         // 对不上的格子标问号 —— 见 `DigitCrossCheck.resolve`。模型或号码区的像素
         // 拿不到时整段跳过，结果和没有这道校验时一样。
+        var isolatedReads = 0
+        var recovered = 0
         var checked = 0
         var overruled = 0
         if let classifier = DigitClassifier.shared,
@@ -145,10 +147,26 @@ enum RegisteredDigitReader {
             for row in values.indices {
                 for column in values[row].indices {
                     guard maximums.indices.contains(column), maximums[column] <= 9,
-                          let vision = values[row][column],
                           let rect = grid.cell(row: row, column: column),
                           let glyph = ZoneRaster.glyph(in: rect, mask: mask, red: red) else { continue }
                     let verdict = classifier.classify(pixels: glyph.pixels, width: glyph.width, height: glyph.height)
+                    let vision = values[row][column]
+                    if vision != verdict.digit, isolatedReads < budget, verdict.confidence >= DigitCrossCheck.threshold,
+                       verdict.digit != DigitClassifier.reject {
+                        isolatedReads += 1
+                        let pixels = CGRect(x: rect.minX * CGFloat(zoneImage.width), y: rect.minY * CGFloat(zoneImage.height),
+                                            width: rect.width * CGFloat(zoneImage.width), height: rect.height * CGFloat(zoneImage.height))
+                        if let crop = zoneImage.cropping(to: pixels.integral),
+                           let enlarged = TicketVisionScanner.upscaled(UIImage(cgImage: crop), factor: 4) {
+                            let digits = await TicketVisionScanner.recognizeDigits(in: enlarged, fast: false)
+                            if let confirmed = DigitCrossCheck.confirmedDigit(digits.map(\.value), model: verdict) {
+                                values[row][column] = confirmed
+                                recovered += 1
+                                continue
+                            }
+                        }
+                    }
+                    guard vision != nil else { continue }
                     let outcome = DigitCrossCheck.resolve(vision: vision, model: verdict)
                     checked += 1
                     if outcome.disagreed { overruled += 1 }
@@ -213,6 +231,7 @@ enum RegisteredDigitReader {
         // 两遍识别在同一位置给出不同答案的次数。**这一版只数不改** ——
         // 先看真机上到底多久打一次架，再决定要不要把打架的格子标成问号。
         if conflicts > 0 { note += "；两遍识别有 \(conflicts) 处不一致（这一版只统计，不改结果）" }
+        if isolatedReads > 0 { note += "；单格复读与模型一致，补上 \(recovered) 格" }
         if checked > 0 {
             note += "；数字模型复核了 \(checked) 格"
             note += overruled > 0 ? "，\(overruled) 格和 Vision 读的不一样，已标成问号" : "，都和 Vision 一致"

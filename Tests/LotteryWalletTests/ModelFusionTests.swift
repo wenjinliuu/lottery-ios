@@ -30,6 +30,24 @@ final class ModelFusionTests: XCTestCase {
 
     private let rows = ["x 05 12 23 30 35 02 11", "x 01 08 17 26 34 06 09", "x 03 04 16 20 26 04 11"]
 
+    func testAutomaticSevenStarsWithoutTitleRequiresLayoutAndAmount() {
+        let text = "单式票 1倍 合计4元"
+        let rows = ["204372 7", "705920 7"].map(row)
+        XCTAssertTrue(ModelFusion.matchesSevenStars(rows: rows, text: text))
+        XCTAssertFalse(ModelFusion.matchesSevenStars(rows: rows, text: "单式票 1倍 合计6元"))
+        XCTAssertFalse(ModelFusion.matchesSevenStars(rows: ["58343", "63098"].map(row), text: text))
+        XCTAssertFalse(ModelFusion.matchesSevenStars(rows: ["2043727", "7059207"].map(row), text: text))
+    }
+
+    func testSelectedSevenStarsCanRebuildBothBetsWithoutVisionRows() {
+        XCTAssertEqual(TicketTextParser.detectGame("体彩 ７ 星 彩", guess: false), .qxc)
+        var ticket = ScannedTicket(game: .qxc)
+        ticket.totalAmount = 4
+        ModelFusion.fuse(&ticket, rows: ["2043727", "7059207"].map(row))
+        XCTAssertEqual(ticket.lines.map { $0[.nums6] }, [[2, 0, 4, 3, 7, 2], [7, 0, 5, 9, 2, 0]])
+        XCTAssertEqual(ticket.lines.map { $0[.tail] }, [[7], [7]])
+    }
+
     func testAgreementLeavesTheTicketAlone() {
         var ticket = dlt([([5, 12, 23, 30, 35], [2, 11]), ([1, 8, 17, 26, 34], [6, 9]), ([3, 4, 16, 20, 26], [4, 11])])
         let before = ticket
