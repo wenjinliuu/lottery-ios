@@ -89,10 +89,12 @@ enum TicketVisionScanner {
         // 一致的留下、不一致的标问号、Vision 没认出来而模型有把握的补上 —— 见 `ModelFusion`。
         // 号码区夹不出来、模型没加载、照片里不止一张票时整段跳过，结果和没有这一步时一样。
         // 手选的数字票即使文字层没读出一行，也保留在复核页，让模型有机会重建。
-        if result.tickets.isEmpty, let forced, [.qxc, .pl5].contains(forced) {
-            var ticket = ScannedTicket(game: forced)
-            let text = LayoutSegmenter.lines(fragments)
-            ticket.issue = TicketTextParser.extractIssue(text, game: forced)
+        let needsModelRecovery = result.tickets.isEmpty
+        let text = LayoutSegmenter.lines(fragments)
+        if needsModelRecovery, let game = forced ?? TicketTextParser.detectGame(text, guess: false),
+           [.qxc, .pl5].contains(game) {
+            var ticket = ScannedTicket(game: game)
+            ticket.issue = TicketTextParser.extractIssue(text, game: game)
             ticket.totalAmount = TicketTextParser.extractTotal(text)
             ticket.drawDate = TicketTextParser.extractDrawDate(text)
             ticket.multiple = TicketTextParser.extractMultiple(text) ?? 1
@@ -117,6 +119,12 @@ enum TicketVisionScanner {
         // 一个字都没认出来和「认出字但拼不成票」是两回事，
         // 复核页要能把原文摆出来，否则用户只能干瞪眼。
         if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
+        if needsModelRecovery {
+            if forced == nil {
+                result.tickets.removeAll { !$0.isUsable }
+            }
+            result.warnings = TicketTextParser.summary(for: result.tickets)
+        }
         page.result = result
         // 复核页每张票下面贴的那张图，裁到**有字的那一块**再给出去。
         //
