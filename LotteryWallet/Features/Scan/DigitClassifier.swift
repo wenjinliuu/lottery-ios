@@ -179,6 +179,13 @@ enum DigitCrossCheck {
     /// 定低了会把 Vision 读对的格子冤枉成问号；定高了等于没有这道校验。
     static let threshold: Float = 0.9
 
+    /// 独立裁格复读时，两个读数必须唯一且相同，才允许补上缺位或解决冲突。
+    static func confirmedDigit(_ isolated: [Int], model: DigitClassifier.Verdict) -> Int? {
+        guard model.confidence >= threshold, (0...9).contains(model.digit),
+              isolated == [model.digit] else { return nil }
+        return model.digit
+    }
+
     /// - Returns: 这一格最后的值，以及是不是因为两边打架才变成问号的。
     ///
     /// 只有一种情况会改结果：**Vision 读出了一个数，模型很有把握地说是另一个数**。

@@ -159,8 +159,8 @@ enum RegisteredDigitReader {
                         if let crop = zoneImage.cropping(to: pixels.integral),
                            let enlarged = TicketVisionScanner.upscaled(UIImage(cgImage: crop), factor: 4) {
                             let digits = await TicketVisionScanner.recognizeDigits(in: enlarged, fast: false)
-                            if digits.map(\.value) == [verdict.digit] {
-                                values[row][column] = verdict.digit
+                            if let confirmed = DigitCrossCheck.confirmedDigit(digits.map(\.value), model: verdict) {
+                                values[row][column] = confirmed
                                 recovered += 1
                                 continue
                             }
