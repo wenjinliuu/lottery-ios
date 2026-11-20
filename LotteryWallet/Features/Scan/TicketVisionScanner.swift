@@ -49,7 +49,17 @@ enum TicketVisionScanner {
         //
         // 阶段 2 起，号码是摆到配准后的格子上去认的，所以基准得先定下来。
         // 阶段 1 时它跑在最后、只画给人看；现在它是号码那条路的入口。
-        let detected = forced ?? TicketTextParser.detectGame(LayoutSegmenter.lines(fragments))
+        let text = LayoutSegmenter.lines(fragments)
+        var selected = forced ?? TicketTextParser.detectGame(text, guess: false)
+        var sevenStarsReading: ModelRowReader.Reading?
+        if selected == nil, let classifier = DigitClassifier.shared,
+           let reading = ModelRowReader.read(image: image, fragments: fragments, game: .qxc, classifier: classifier),
+           ModelFusion.matchesSevenStars(rows: reading.rows, text: text) {
+            selected = .qxc
+            sevenStarsReading = reading
+        }
+        let detected = selected ?? TicketTextParser.detectGame(text)
+        let parseGame = sevenStarsReading == nil ? forced : GameKey.qxc
         var registration = await TicketRegistration.run(image: image,
                                                         fragments: fragments,
                                                         game: detected)
@@ -76,12 +86,12 @@ enum TicketVisionScanner {
         // 「退回老路」和「新路读错」在识别结果上长得一模一样，没有这一句
         // 就只能对着号码猜 —— 上一轮我就猜错了两次。
         if let note = merged.note { registration.debug.notes.append(note) }
-        var result = TicketTextParser.parse(merged.text, game: forced)
+        var result = TicketTextParser.parse(merged.text, game: parseGame)
         if result.tickets.isEmpty {
             // 再放大一遍重试。裁切之后还认不出，多半是原图本身就糊。
             if let bigger = upscaled(image, factor: 1.6),
                let retry = try? await recognizeFragments(in: bigger) {
-                let second = TicketTextParser.parse(LayoutSegmenter.lines(retry), game: forced)
+                let second = TicketTextParser.parse(LayoutSegmenter.lines(retry), game: parseGame)
                 if !second.tickets.isEmpty { result = second }
             }
         }
@@ -90,8 +100,7 @@ enum TicketVisionScanner {
         // 号码区夹不出来、模型没加载、照片里不止一张票时整段跳过，结果和没有这一步时一样。
         // 手选的数字票即使文字层没读出一行，也保留在复核页，让模型有机会重建。
         let needsModelRecovery = result.tickets.isEmpty
-        let text = LayoutSegmenter.lines(fragments)
-        if needsModelRecovery, let game = forced ?? TicketTextParser.detectGame(text, guess: false),
+        if needsModelRecovery, let game = selected,
            [.qxc, .pl5].contains(game) {
             var ticket = ScannedTicket(game: game)
             ticket.issue = TicketTextParser.extractIssue(text, game: game)
@@ -102,7 +111,7 @@ enum TicketVisionScanner {
             result.warnings = []
         }
         if result.tickets.count == 1, let classifier = DigitClassifier.shared {
-            if let reading = ModelRowReader.read(image: image, fragments: fragments,
+            if let reading = sevenStarsReading ?? ModelRowReader.read(image: image, fragments: fragments,
                                                  game: result.tickets[0].game, classifier: classifier) {
                 let report = ModelFusion.fuse(&result.tickets[0], rows: reading.rows)
                 registration.debug.notes.append(report.note)
