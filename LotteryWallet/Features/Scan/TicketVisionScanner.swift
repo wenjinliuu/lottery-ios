@@ -55,22 +55,24 @@ enum TicketVisionScanner {
             .prefix { !TicketTextParser.isSerialLine($0) && !$0.contains("期") }
             .filter { !TicketTextParser.isSlogan($0) }
             .joined(separator: "\n")
-        var headerGame = TicketTextParser.namedGame(title)
-        if forced == nil, headerGame == nil, let cgImage = image.cgImage,
-           SevenStarsHeader.shared?.matches(cgImage) == true {
-            headerGame = .qxc
+        var welfare = TicketTextParser.hasWelfareIssuer(text)
+        var headerGame = welfare ? TicketTextParser.printedWelfareGame(text) : TicketTextParser.namedGame(title)
+        if forced == nil, !welfare, headerGame == nil, let cgImage = image.cgImage,
+           let label = TicketHeaderModel.shared?.classify(cgImage) {
+            welfare = label == .welfare
+            headerGame = label.identifiesGame(in: text)
         }
         page.headerGame = headerGame
-        let calendarGame = forced == nil && headerGame == nil ? TicketTextParser.calendarGame(text, calendars: calendars) : nil
-        var selected = forced ?? headerGame ?? calendarGame ?? TicketTextParser.detectGame(text, guess: false)
+        let calendarGame = forced == nil && !welfare && headerGame == nil ? TicketTextParser.calendarGame(text, calendars: calendars) : nil
+        var selected = forced ?? headerGame ?? calendarGame ?? (welfare ? nil : TicketTextParser.detectGame(text, guess: false))
         var sevenStarsReading: ModelRowReader.Reading?
-        if selected == nil, let classifier = DigitClassifier.shared,
+        if !welfare, selected == nil, let classifier = DigitClassifier.shared,
            let reading = ModelRowReader.read(image: image, fragments: fragments, game: .qxc, classifier: classifier),
            ModelFusion.matchesSevenStars(rows: reading.rows, text: text) {
             selected = .qxc
             sevenStarsReading = reading
         }
-        let detected = selected ?? TicketTextParser.detectGame(text)
+        let detected = selected ?? (welfare ? nil : TicketTextParser.detectGame(text))
         let parseGame = sevenStarsReading == nil ? (forced ?? headerGame ?? calendarGame) : GameKey.qxc
         var registration = await TicketRegistration.run(image: image,
                                                         fragments: fragments,
@@ -98,12 +100,21 @@ enum TicketVisionScanner {
         // 「退回老路」和「新路读错」在识别结果上长得一模一样，没有这一句
         // 就只能对着号码猜 —— 上一轮我就猜错了两次。
         if let note = merged.note { registration.debug.notes.append(note) }
-        var result = TicketTextParser.parse(merged.text, game: parseGame)
+        func parseReading(_ reading: String) -> ScanResult {
+            if welfare && parseGame == nil {
+                guard let game = TicketTextParser.printedWelfareGame(reading) else {
+                    return ScanResult(rawText: reading, warnings: TicketTextParser.summary(for: []))
+                }
+                return TicketTextParser.parse(reading, game: game)
+            }
+            return TicketTextParser.parse(reading, game: parseGame)
+        }
+        var result = parseReading(merged.text)
         if result.tickets.isEmpty {
             // 再放大一遍重试。裁切之后还认不出，多半是原图本身就糊。
             if let bigger = upscaled(image, factor: 1.6),
                let retry = try? await recognizeFragments(in: bigger) {
-                let second = TicketTextParser.parse(LayoutSegmenter.lines(retry), game: parseGame)
+                let second = parseReading(LayoutSegmenter.lines(retry))
                 if !second.tickets.isEmpty { result = second }
             }
         }
