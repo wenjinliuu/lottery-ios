@@ -1024,7 +1024,8 @@ enum TicketTextParser {
             guard !isSlogan(line) else { return false }
             let compact = line.filter { !$0.isWhitespace }
             return compact == "福彩" || compact.contains("福利彩票") || compact.hasPrefix("福彩3")
-                || compact.localizedCaseInsensitiveContains("WELFARE") || (line.contains("/") && isSerialLine(line))
+                || compact.localizedCaseInsensitiveContains("WELFARE")
+                || compact.range(of: #"(?i)(?<![A-Z0-9])[A-Z0-9]{3,5}(?:-[A-Z0-9]{3,5}){2,4}/[A-Z0-9]+"#, options: .regularExpression) != nil
         }
     }
 
