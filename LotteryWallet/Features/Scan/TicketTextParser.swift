@@ -932,8 +932,20 @@ enum TicketTextParser {
 
         ticket.issue = extractIssue(block, game: game)
         ticket.drawDate = extractDrawDate(block)
-        ticket.totalAmount = extractTotal(block)
-        ticket.multiple = extractMultiple(block) ?? lineMultiples.first ?? 1
+        // 体彩的交易字段在机号和第一注之间；福彩的倍数和金额常跟在“玩法”同行。
+        let transactionLines: [String]
+        if sevenDigitIssueGames.contains(game) {
+            transactionLines = lines.filter { $0.contains("玩法") && !isSlogan($0) }
+        } else if let serial = lines.firstIndex(where: isSerialLine) {
+            transactionLines = Array(lines.dropFirst(serial + 1).prefix {
+                !isSlogan($0) && betBody($0) == nil
+            }.prefix(4))
+        } else {
+            transactionLines = []
+        }
+        let transaction = transactionLines.joined(separator: "\n")
+        ticket.totalAmount = extractTotal(transaction) ?? extractTotal(playText)
+        ticket.multiple = extractMultiple(transaction) ?? extractMultiple(playText) ?? lineMultiples.first ?? 1
         ticket.playMode = detectPlayMode(game: game, text: block)
         // 快乐8：玩法说选几，每一注就必须正好几个号。读出来对不上的那几注
         // 多半是把机号或金额当成号码了，宁可丢掉也不要留一注错的。

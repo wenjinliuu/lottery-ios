@@ -57,8 +57,8 @@ enum TicketVisionScanner {
             .joined(separator: "\n")
         var headerGame = TicketTextParser.namedGame(title)
         if forced == nil, headerGame == nil, let cgImage = image.cgImage,
-           SevenStarsHeader.shared?.matches(cgImage) == true {
-            headerGame = .qxc
+           let label = TicketHeaderModel.shared?.classify(cgImage) {
+            headerGame = label.identifiesGame(in: text)
         }
         page.headerGame = headerGame
         let calendarGame = forced == nil && headerGame == nil ? TicketTextParser.calendarGame(text, calendars: calendars) : nil
