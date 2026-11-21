@@ -1019,15 +1019,42 @@ enum TicketTextParser {
 
     /// 这张票是哪个彩种。
     ///
+    static func hasWelfareIssuer(_ text: String) -> Bool {
+        text.components(separatedBy: .newlines).contains { line in
+            guard !isSlogan(line) else { return false }
+            let compact = line.filter { !$0.isWhitespace }
+            return compact == "福彩" || compact.contains("福利彩票") || compact.hasPrefix("福彩3")
+                || compact.localizedCaseInsensitiveContains("WELFARE") || (line.contains("/") && isSerialLine(line))
+        }
+    }
+
+    /// 福彩共用标识。彩种来自交易区的印字，可以单列、换行或跟在「玩法」后。
+    static func printedWelfareGame(_ text: String) -> GameKey? {
+        var games = Set<GameKey>()
+        let names = #"^(?:中国福利彩票|福利彩票|福彩)?(?:玩法|彩种|游戏名称|游戏)?[:：]?(双色球|七乐[彩釆]|快乐[八8８]|3[DdＤ])"#
+        for line in text.components(separatedBy: .newlines) where !isSlogan(line) && !isSerialLine(line) {
+            let compact = line.filter { !$0.isWhitespace }
+            guard let match = firstMatch(in: compact, pattern: names),
+                  let name = match.groups.first else { continue }
+            let rest = compact.dropFirst(match.length)
+            guard rest.isEmpty || rest.range(of: #"^[-—:：()（）]|^(?:单式|复式|胆拖|选|机号|第|玩法|倍数|合计)"#, options: .regularExpression) != nil else { continue }
+            if let game = namedGame(name.replacingOccurrences(of: "８", with: "8")) {
+                games.insert(game)
+            }
+        }
+        return games.count == 1 ? games.first : nil
+    }
+
     /// **先看票头，再看全文，最后看版式。** 第一版是整段文字里见到哪个名字算哪个，
     /// 真机上排列5 的票被认成七星彩 —— 票面下半截印着一句广告「体彩7星彩，为生活添彩！」，
     /// 而七星彩排在排列5 前面查。认错彩种之后号码按七位去读，整张票就读不出来了。
     ///
-    /// - Parameter guess: 名字和版式都对不上时，要不要按发行方猜一个（福彩猜双色球、体彩猜大乐透）。
+    /// - Parameter guess: 名字和版式都对不上时，要不要按发行方猜一个（体彩旧版式的兜底）。
     ///   预识别页给框上色时不猜，宁可标「没认出彩种」。
     static func detectGame(_ text: String, guess: Bool = true) -> GameKey? {
         let lines = text.split(whereSeparator: \.isNewline).map(String.init)
-        // 1. 票头：流水号（体彩）或哈希行（福彩）以上的部分。彩种名只印在这里。
+        if hasWelfareIssuer(text) { return printedWelfareGame(text) }
+        // 体彩优先读流水号上方的票名。
         if let anchor = lines.firstIndex(where: isSerialLine) {
             if let game = namedGame(lines[...anchor].joined(separator: "\n")) { return game }
         }
@@ -1040,10 +1067,7 @@ enum TicketTextParser {
         if body.range(of: "红[单复胆拖]|蓝[单复胆拖]", options: .regularExpression) != nil { return .ssq }
         if let game = gameByLayout(lines) { return game }
 
-        // 都没认出来才退回发行方 —— 这一步只能区分福彩和体彩，
-        // 而两家各自的主力彩种是双色球和大乐透，作为兜底是合理的猜测。
         guard guess else { return nil }
-        if text.range(of: "福利彩|WELFARE", options: [.regularExpression, .caseInsensitive]) != nil { return .ssq }
         if text.range(of: "体育彩票|体彩|LOTTO|SPORT", options: [.regularExpression, .caseInsensitive]) != nil { return .dlt }
         return nil
     }
@@ -1296,7 +1320,12 @@ enum TicketTextParser {
             // 而带彩种名的那块因为没有数字被过滤掉，剩下的一块认不出彩种，
             // 整张票就白扫了。
             let currentHasNumbers = blocks.last?.contains { $0.contains(where: \.isNumber) } ?? false
-            if blocks.isEmpty || (isHeader && currentHasNumbers) {
+            let firstPlayField = line.contains("玩法") && blocks.last.map { previous in
+                hasWelfareIssuer(previous.joined(separator: "\n"))
+                    && !previous.contains { $0.contains("玩法") }
+                    && !previous.contains { $0.range(of: lineIndexPrefix, options: .regularExpression) != nil }
+            } == true
+            if blocks.isEmpty || (isHeader && currentHasNumbers && !firstPlayField) {
                 blocks.append([line])
             } else {
                 blocks[blocks.count - 1].append(line)

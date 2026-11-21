@@ -265,9 +265,11 @@ enum TicketLocator {
             func unit(_ point: CGPoint) -> CGPoint {
                 CGPoint(x: min(max(point.x / size.width, 0), 1), y: min(max(point.y / size.height, 0), 1))
             }
+            let text = ticket.texts.joined(separator: "\n")
+            let game = ticket.kind == .welfare ? TicketTextParser.printedWelfareGame(text) : TicketTextParser.detectGame(text, guess: false)
             return Located(quad: TicketQuad(topLeft: unit(ticket.corners[0]), topRight: unit(ticket.corners[1]),
                                             bottomRight: unit(ticket.corners[2]), bottomLeft: unit(ticket.corners[3])),
-                           game: TicketTextParser.detectGame(ticket.texts.joined(separator: "\n"), guess: false))
+                           game: game)
         }
     }
 }

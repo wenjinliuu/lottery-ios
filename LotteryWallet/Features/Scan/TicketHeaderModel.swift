@@ -8,17 +8,11 @@ struct TicketHeaderModel {
         case qxc, dlt, pl5, welfare
 
         func identifiesGame(in text: String) -> GameKey? {
-            let lines = text.components(separatedBy: .newlines)
-            let welfare = text.contains("福利彩票") || lines.contains { $0.contains("/") && TicketTextParser.isSerialLine($0) }
+            let welfare = TicketTextParser.hasWelfareIssuer(text)
             let sports = text.contains("体彩") || text.contains("体育彩票")
             switch self {
             case .welfare:
-                // “玩法” on welfare tickets often follows a line containing “期”.
-                // Exclude the footer and require an actual game name.
-                for line in lines.prefix(while: { !TicketTextParser.isSerialLine($0) }) where line.contains("玩法") {
-                    if let game = TicketTextParser.namedGame(line), [.fc3d, .ssq, .qlc, .k8].contains(game) { return game }
-                }
-                return nil
+                return TicketTextParser.printedWelfareGame(text)
             case .qxc:
                 return welfare ? nil : .qxc
             case .pl5:
