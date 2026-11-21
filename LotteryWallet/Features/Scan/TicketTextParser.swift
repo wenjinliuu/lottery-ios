@@ -1068,7 +1068,7 @@ enum TicketTextParser {
         line.range(of: "添彩|诉说|获赠|赠票|好礼|乐趣|公益|感谢|购彩买套餐|套餐刚刚好", options: .regularExpression) != nil
     }
 
-    private static func namedGame(_ text: String) -> GameKey? {
+    static func namedGame(_ text: String) -> GameKey? {
         // **具体彩种名必须排在发行方前面。**
         //
         // 七乐彩、快乐8、3D 的票头上印的同样是「中国福利彩票」，

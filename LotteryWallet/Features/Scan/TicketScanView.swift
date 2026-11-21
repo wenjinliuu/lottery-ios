@@ -1315,7 +1315,7 @@ struct TicketScanView: View {
                 guard let index = marks.firstIndex(where: { $0.id == mark.id }), marks[index].quad == mark.quad,
                       marks[index].forcedGame == nil else { continue }
                 prescans[mark.id] = Prescan(quad: mark.quad, forced: nil, page: page, image: corrected)
-                if let game = page.result.tickets.first?.game { marks[index].game = game }
+                if let game = page.headerGame ?? page.result.tickets.first?.game { marks[index].game = game }
             }
         }
     }

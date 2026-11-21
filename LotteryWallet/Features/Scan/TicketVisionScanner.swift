@@ -23,6 +23,7 @@ enum TicketVisionScanner {
     /// 一次扫描的产物：识别结果 + 那张票裁切矫正后的正片。
     struct ScannedPage {
         var result = ScanResult()
+        var headerGame: GameKey?
         /// 按票的 id 存正片，复核和改号的时候贴出来。
         /// 一次只扫一张票，所以这些指向的是同一张图。
         var images: [ScannedTicket.ID: UIImage] = [:]
@@ -50,8 +51,18 @@ enum TicketVisionScanner {
         // 阶段 2 起，号码是摆到配准后的格子上去认的，所以基准得先定下来。
         // 阶段 1 时它跑在最后、只画给人看；现在它是号码那条路的入口。
         let text = LayoutSegmenter.lines(fragments)
-        let calendarGame = forced == nil ? TicketTextParser.calendarGame(text, calendars: calendars) : nil
-        var selected = forced ?? calendarGame ?? TicketTextParser.detectGame(text, guess: false)
+        let title = text.components(separatedBy: .newlines)
+            .prefix { !TicketTextParser.isSerialLine($0) && !$0.contains("期") }
+            .filter { !TicketTextParser.isSlogan($0) }
+            .joined(separator: "\n")
+        var headerGame = TicketTextParser.namedGame(title)
+        if forced == nil, headerGame == nil, let cgImage = image.cgImage,
+           SevenStarsHeader.shared?.matches(cgImage) == true {
+            headerGame = .qxc
+        }
+        page.headerGame = headerGame
+        let calendarGame = forced == nil && headerGame == nil ? TicketTextParser.calendarGame(text, calendars: calendars) : nil
+        var selected = forced ?? headerGame ?? calendarGame ?? TicketTextParser.detectGame(text, guess: false)
         var sevenStarsReading: ModelRowReader.Reading?
         if selected == nil, let classifier = DigitClassifier.shared,
            let reading = ModelRowReader.read(image: image, fragments: fragments, game: .qxc, classifier: classifier),
@@ -60,7 +71,7 @@ enum TicketVisionScanner {
             sevenStarsReading = reading
         }
         let detected = selected ?? TicketTextParser.detectGame(text)
-        let parseGame = sevenStarsReading == nil ? (forced ?? calendarGame) : GameKey.qxc
+        let parseGame = sevenStarsReading == nil ? (forced ?? headerGame ?? calendarGame) : GameKey.qxc
         var registration = await TicketRegistration.run(image: image,
                                                         fragments: fragments,
                                                         game: detected)
@@ -130,7 +141,7 @@ enum TicketVisionScanner {
         // 复核页要能把原文摆出来，否则用户只能干瞪眼。
         if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
         if needsModelRecovery {
-            if forced == nil && calendarGame == nil {
+            if forced == nil && headerGame != .qxc && calendarGame == nil {
                 result.tickets.removeAll { !$0.isUsable }
             }
             result.warnings = TicketTextParser.summary(for: result.tickets)
