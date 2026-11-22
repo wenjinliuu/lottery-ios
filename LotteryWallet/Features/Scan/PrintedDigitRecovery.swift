@@ -9,7 +9,8 @@ enum PrintedDigitRecovery {
         let ink: [Float]   // unit length, for comparing type on the same ticket
     }
 
-    static func fill(_ ticket: inout ScannedTicket, image: CGImage, zone: CGRect) -> Int {
+    static func fill(_ ticket: inout ScannedTicket, image: CGImage, zone: CGRect,
+                     diagnostics: ((String) -> Void)? = nil) -> Int {
         guard ticket.play == .single, [.pl5, .qxc].contains(ticket.game),
               let classifier = DigitClassifier.shared else { return 0 }
         let key: SectionKey = ticket.game == .pl5 ? .nums5 : .nums6
@@ -24,7 +25,10 @@ enum PrintedDigitRecovery {
         guard height > 0, height <= 2 * width,
               let red = ZoneRaster.red(crop, width: width, height: height) else { return 0 }
         let boxes = components(red, width: width, height: height)
-        guard boxes.count >= count, boxes.count <= 120 else { return 0 }
+        guard boxes.count >= count, boxes.count <= 120 else {
+            diagnostics?("墨迹块 \(boxes.count)，未能划行")
+            return 0
+        }
         let windows = alignedWindows(boxes, count: count)
         var glyphs: [Int: Glyph] = [:]
         for index in Set(windows.flatMap { $0 }) {
@@ -87,6 +91,7 @@ enum PrintedDigitRecovery {
                 filled += 1
             }
         }
+        diagnostics?("候选行 \(windows.count)，定位 \(usable.count)/\(lines.count) 注，补 \(filled) 位")
         if filled > 0 { ModelFusion.refreshWarnings(&ticket) }
         return filled
     }

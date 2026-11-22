@@ -136,6 +136,8 @@ enum TicketVisionScanner {
         if result.tickets.count == 1, let classifier = DigitClassifier.shared {
             let beforeRecovery = result.tickets[0].unknownCount
             var recoveredCells = 0
+            var searchStrip: CGRect?
+            var recoveryNotes: [String] = []
             if let reading = sevenStarsReading ?? ModelRowReader.read(image: image, fragments: fragments,
                                                  game: result.tickets[0].game, classifier: classifier) {
                 let report = ModelFusion.fuse(&result.tickets[0], rows: reading.rows)
@@ -145,7 +147,10 @@ enum TicketVisionScanner {
                 result.rawText += "\n\n［模型读行］\(report.note.replacingOccurrences(of: "模型读行：", with: ""))\n"
                     + ModelFusion.describe(reading.rows)
                 if let source = image.cgImage {
-                    recoveredCells = PrintedDigitRecovery.fill(&result.tickets[0], image: source, zone: reading.zone)
+                    searchStrip = reading.zone
+                    recoveredCells = PrintedDigitRecovery.fill(&result.tickets[0], image: source, zone: reading.zone) {
+                        recoveryNotes.append("文字区 " + $0)
+                    }
                 }
             } else {
                 registration.debug.notes.append("模型读行：号码区没夹出来，这次没有复核")
@@ -156,12 +161,27 @@ enum TicketVisionScanner {
             // Registration uses the printed geometry and supplies a second, rectified crop.
             let remaining = result.tickets[0]
             if remaining.play == .single, [.qxc, .pl5].contains(remaining.game),
-               remaining.unknownCount > 0, let zone = registration.rectified?.cgImage {
-                recoveredCells += PrintedDigitRecovery.fill(&result.tickets[0], image: zone,
-                                                           zone: CGRect(x: 0, y: 0, width: 1, height: 1))
+               remaining.unknownCount > 0 {
+                if let zone = registration.rectified?.cgImage {
+                    recoveredCells += PrintedDigitRecovery.fill(&result.tickets[0], image: zone,
+                                                                zone: CGRect(x: 0, y: 0, width: 1, height: 1)) {
+                        recoveryNotes.append("矫正区 " + $0)
+                    }
+                }
+                if result.tickets[0].unknownCount > 0, let strip = searchStrip, let source = image.cgImage {
+                    // Keep the printed header/footer anchors while including columns lost
+                    // when the serial above the bets was split into separate OCR boxes.
+                    let margin = strip.height * 0.20
+                    let wide = CGRect(x: 0.035, y: strip.minY - margin, width: 0.93, height: strip.height + margin * 2)
+                        .intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+                    recoveredCells += PrintedDigitRecovery.fill(&result.tickets[0], image: source, zone: wide) {
+                        recoveryNotes.append("扩展区 " + $0)
+                    }
+                }
             }
-            if [.qxc, .pl5].contains(remaining.game), beforeRecovery > 0 || recoveredCells > 0 {
+            if [.qxc, .pl5].contains(remaining.game), beforeRecovery > 0 || remaining.unknownCount > 0 || recoveredCells > 0 {
                 result.rawText += "\n［逐格复核］补上 \(recoveredCells) 位，剩余 \(result.tickets[0].unknownCount) 位"
+                if !recoveryNotes.isEmpty { result.rawText += "\n" + recoveryNotes.joined(separator: "；") }
             }
         }
         // 一个字都没认出来和「认出字但拼不成票」是两回事，
