@@ -15,33 +15,23 @@ struct BallJarView: View {
 
     static let height: CGFloat = 230
     private static let corner: CGFloat = 28
-    private static let wallWidth: CGFloat = 6
-    private static let rimInset: CGFloat = 11
-    private static let baseInset: CGFloat = 7
-    private static let innerCorner = corner - wallWidth
+    private static let frameWidth: CGFloat = 6
+    // At rest a ball's outside edge sits 2 points underneath the glass.
+    private static let ballInset: CGFloat = 4
     private var isActive: Bool { isVisible && scenePhase == .active && !jar.colors.isEmpty }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Self.corner)
         VStack(alignment: .leading, spacing: 8) {
             JarBallLayer(scene: scene)
-                .frame(height: Self.height - Self.rimInset - Self.baseInset)
-                .clipShape(RoundedRectangle(cornerRadius: Self.innerCorner))
+                .frame(height: Self.height - 2 * Self.ballInset)
                 .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
-                .padding(.horizontal, Self.wallWidth)
-                .padding(.top, Self.rimInset)
-                .padding(.bottom, Self.baseInset)
+                .padding(Self.ballInset)
+                .background(Palette.card, in: shape)
                 .clipShape(shape)
-                .background {
-                    shape.fill(LinearGradient(
-                        stops: [.init(color: Color(light: 0xDDE9F1, dark: 0x273744), location: 0),
-                                .init(color: Color(light: 0xF8FAFB, dark: 0x172129), location: 0.56),
-                                .init(color: Color(light: 0xCBDCE8, dark: 0x344652), location: 1)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ))
-                }
                 .overlay {
-                    JarGlassWall(shape: shape)
+                    Color.clear
+                        .ballGlassFrame(cornerRadius: Self.corner, width: Self.frameWidth)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
@@ -102,7 +92,7 @@ struct BallJarView: View {
     private var summary: String { "命中 \(jar.hits.formatted()) 个号码" }
 
     private func load() {
-        scene.load(jar.colors, size: size, corner: Self.innerCorner)
+        scene.load(jar.colors, size: size, corner: Self.corner - Self.ballInset)
     }
 }
 
@@ -113,51 +103,6 @@ private struct JarBallLayer: View {
         let frame = scene.frame
         return Canvas { context, _ in
             scene.draw(in: &context, frame: frame)
-        }
-    }
-}
-
-/// 罐口、前壁和厚底都在号码球前面。
-private struct JarGlassWall: View {
-    let shape: RoundedRectangle
-
-    var body: some View {
-        ZStack {
-            shape.strokeBorder(Color(light: 0x8CA3B5, dark: 0x647F93).opacity(0.62), lineWidth: 1)
-            shape.inset(by: 2).strokeBorder(LinearGradient(
-                stops: [.init(color: .white.opacity(0.9), location: 0),
-                        .init(color: .white.opacity(0.5), location: 0.28),
-                        .init(color: .clear, location: 0.52),
-                        .init(color: .white.opacity(0.65), location: 1)],
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            ), lineWidth: 4)
-            shape.inset(by: 5).strokeBorder(Color(light: 0x7892A6, dark: 0x9DB7CA).opacity(0.22), lineWidth: 2)
-
-            VStack(spacing: 0) {
-                Color.clear
-                    .frame(height: 13)
-                    .glassJarRim()
-                    .overlay {
-                        Ellipse().strokeBorder(LinearGradient(
-                            colors: [.white.opacity(0.94), Color(light: 0x7F98AC, dark: 0x9FB6C8).opacity(0.7)],
-                            startPoint: .top, endPoint: .bottom
-                        ), lineWidth: 1)
-                    }
-                    .padding(.horizontal, 15)
-                    .padding(.top, 3)
-                Spacer(minLength: 0)
-                Capsule()
-                    .fill(LinearGradient(
-                        stops: [.init(color: .clear, location: 0),
-                                .init(color: Color(light: 0xA9C1D2, dark: 0x648296).opacity(0.42), location: 0.47),
-                                .init(color: .white.opacity(0.72), location: 0.72),
-                                .init(color: Color(light: 0x7494AC, dark: 0x486379).opacity(0.55), location: 1)],
-                        startPoint: .top, endPoint: .bottom
-                    ))
-                    .frame(height: 16)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 2)
-            }
         }
     }
 }
