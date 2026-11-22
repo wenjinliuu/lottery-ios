@@ -142,6 +142,10 @@ enum TicketVisionScanner {
                 if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
                 result.rawText += "\n\n［模型读行］\(report.note.replacingOccurrences(of: "模型读行：", with: ""))\n"
                     + ModelFusion.describe(reading.rows)
+                if let source = image.cgImage {
+                    let filled = PrintedDigitRecovery.fill(&result.tickets[0], image: source, zone: reading.zone)
+                    if filled > 0 { result.rawText += "\n［逐格复核］同票字形和模型一致，补上 \(filled) 位" }
+                }
             } else {
                 registration.debug.notes.append("模型读行：号码区没夹出来，这次没有复核")
                 if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
