@@ -27,7 +27,7 @@ struct BallJarView: View {
                 .frame(height: Self.height - 2 * Self.ballInset)
                 .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
                 .padding(Self.ballInset)
-                .background(Palette.card, in: shape)
+                .background(Color.white, in: shape)
                 .clipShape(shape)
                 .overlay {
                     Color.clear
@@ -46,6 +46,7 @@ struct BallJarView: View {
                             .allowsHitTesting(false)
                     }
                 }
+                .environment(\.colorScheme, .light)
 
             HStack(spacing: 8) {
                 Text(visibleCount > 0 && visibleCount < jar.hits ? "\(summary) · 示意展示 \(visibleCount.formatted()) 颗" : summary)

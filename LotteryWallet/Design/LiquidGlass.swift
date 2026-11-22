@@ -40,7 +40,7 @@ extension View {
     func ballGlassFrame(cornerRadius: CGFloat, width: CGFloat) -> some View {
         let outline = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         let ring = outline.inset(by: width / 2).stroke(style: StrokeStyle(lineWidth: width))
-        return glassEffect(.clear, in: ring)
+        return glassEffect(.clear.tint(.white.opacity(0.12)), in: ring)
             .mask(outline.strokeBorder(lineWidth: width))
     }
 
