@@ -52,8 +52,8 @@ final class JarModelTests: XCTestCase {
     func testSparseAndDenseMonthsShareTheSamePhysicalLimits() {
         XCTAssertEqual(JarBuilder.radius(count: 1, width: 335, height: 222) * 2, DrawCardMetrics.maxBall)
         let capacity = JarBuilder.capacity(width: 335, height: 222)
-        XCTAssertEqual(capacity, 309)
-        XCTAssertGreaterThanOrEqual(JarBuilder.radius(count: capacity, width: 335, height: 222) * 2, 14)
+        XCTAssertEqual(capacity, 1_000)
+        XCTAssertGreaterThanOrEqual(JarBuilder.radius(count: capacity, width: 335, height: 222) * 2, JarBuilder.minimumDiameter)
         XCTAssertLessThan(JarBuilder.capacity(width: 275, height: 222), capacity)
     }
 

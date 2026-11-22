@@ -15,9 +15,9 @@ struct BallJarView: View {
 
     static let height: CGFloat = 230
     private static let corner: CGFloat = 28
-    private static let frameWidth: CGFloat = 6
+    private static let frameWidth: CGFloat = 3
     // At rest a ball's outside edge sits 2 points underneath the glass.
-    private static let ballInset: CGFloat = 4
+    private static let ballInset: CGFloat = 1
     private var isActive: Bool { isVisible && scenePhase == .active && jar.hits > 0 }
 
     var body: some View {
@@ -37,6 +37,7 @@ struct BallJarView: View {
                 }
                 .accessibilityElement()
                 .accessibilityLabel("号码球罐")
+                .accessibilityIdentifier("home.jar.frame")
                 .accessibilityValue("\(range.label)\(summary)")
                 .overlay {
                     if jar.hits == 0 {

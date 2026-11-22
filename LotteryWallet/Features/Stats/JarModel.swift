@@ -10,7 +10,7 @@ struct JarEntry {
 
 enum JarBuilder {
     /// 首版的碰撞预算，真机测量后可调整。真实命中数不受此限制。
-    static let displayLimit = 1_200
+    static let displayLimit = 1_000
 
     struct Jar: Equatable {
         var counts: [BallColor: Int] = [:]
@@ -59,7 +59,7 @@ enum JarBuilder {
 
     /// Occupied disk area; a settled hexagonal pile also contains gaps between disks.
     private static let areaFraction = 0.64
-    static let minimumDiameter = 14.0
+    static let minimumDiameter = 7.5
 
     static func capacity(width: Double, height: Double) -> Int {
         guard width >= minimumDiameter, height >= minimumDiameter else { return 0 }

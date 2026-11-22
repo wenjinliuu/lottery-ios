@@ -82,6 +82,29 @@ final class KeyFlowTests: XCTestCase {
         capture("home-heatmap")
     }
 
+    func testBallCountPreviews() {
+        for (hits, shown) in [(309, 309), (2000, 1000)] {
+            app.terminate()
+            app.launchEnvironment["JAR_PREVIEW_HITS"] = String(hits)
+            app.launch()
+            let style = app.segmentedControls["home.chart.style"]
+            XCTAssertTrue(style.waitForExistence(timeout: 10))
+            style.buttons.element(boundBy: 2).tap()
+            let total = app.staticTexts["home.jar.total"]
+            XCTAssertTrue(total.waitForExistence(timeout: 10))
+            let shake = app.buttons["home.jar.shake"]
+            RunLoop.current.run(until: Date().addingTimeInterval(1))
+            let digits = total.label.filter(\.isNumber)
+            XCTAssertEqual(digits, hits == shown ? String(hits) : "\(hits)\(shown)")
+            let frame = app.descendants(matching: .any)["home.jar.frame"].firstMatch.frame
+            print("JAR_PREVIEW_COUNT=\(shown) FRAME=\(frame)")
+            capture("balls-\(shown)-rest")
+            shake.tap()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+            capture("balls-\(shown)-shake")
+        }
+    }
+
     private func capture(_ name: String, file: StaticString = #filePath) {
         let screenshot = XCUIScreen.main.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)
