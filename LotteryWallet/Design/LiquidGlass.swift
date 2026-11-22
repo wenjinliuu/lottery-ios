@@ -36,9 +36,12 @@ extension View {
         listRowBackground(Palette.card)
     }
 
-    /// 罐口的一圈透明玻璃。
-    func glassJarRim() -> some View {
-        glassEffect(.clear, in: Ellipse())
+    /// A single clear glass ring samples the moving canvas below its edge.
+    func ballGlassFrame(cornerRadius: CGFloat, width: CGFloat) -> some View {
+        let outline = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let ring = outline.inset(by: width / 2).stroke(style: StrokeStyle(lineWidth: width))
+        return glassEffect(.clear, in: ring)
+            .mask(outline.strokeBorder(lineWidth: width))
     }
 
     /// 拖动图表时浮在曲线上的当日金额。
