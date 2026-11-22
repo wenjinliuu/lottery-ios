@@ -9,7 +9,7 @@ enum PrintedDigitRecovery {
         let ink: [Float]   // unit length, for comparing type on the same ticket
     }
 
-    static func fill(_ ticket: inout ScannedTicket, image: CGImage, zone: CGRect,
+    static func fill(_ ticket: inout ScannedTicket, image: CGImage, zone: CGRect, maximumWidth: Int = 480,
                      diagnostics: ((String) -> Void)? = nil) -> Int {
         guard ticket.play == .single, [.pl5, .qxc].contains(ticket.game),
               let classifier = DigitClassifier.shared else { return 0 }
@@ -20,7 +20,7 @@ enum PrintedDigitRecovery {
               lines.allSatisfy({ $0.count == count }) else { return 0 }
         let area = zone.applying(CGAffineTransform(scaleX: CGFloat(image.width), y: CGFloat(image.height)))
         guard let crop = image.cropping(to: area.integral) else { return 0 }
-        let width = min(480, crop.width)
+        let width = min(maximumWidth, crop.width)
         let height = Int((Double(width) * Double(crop.height) / Double(crop.width)).rounded())
         guard height > 0, height <= 2 * width,
               let red = ZoneRaster.red(crop, width: width, height: height) else { return 0 }
@@ -91,7 +91,7 @@ enum PrintedDigitRecovery {
                 filled += 1
             }
         }
-        diagnostics?("候选行 \(windows.count)，定位 \(usable.count)/\(lines.count) 注，补 \(filled) 位")
+        diagnostics?("\(width)px，候选行 \(windows.count)，定位 \(usable.count)/\(lines.count) 注，补 \(filled) 位")
         if filled > 0 { ModelFusion.refreshWarnings(&ticket) }
         return filled
     }

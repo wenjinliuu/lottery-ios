@@ -164,7 +164,7 @@ enum TicketVisionScanner {
                remaining.unknownCount > 0 {
                 if let zone = registration.rectified?.cgImage {
                     recoveredCells += PrintedDigitRecovery.fill(&result.tickets[0], image: zone,
-                                                                zone: CGRect(x: 0, y: 0, width: 1, height: 1)) {
+                                                                zone: CGRect(x: 0, y: 0, width: 1, height: 1), maximumWidth: 576) {
                         recoveryNotes.append("矫正区 " + $0)
                     }
                 }
@@ -174,7 +174,7 @@ enum TicketVisionScanner {
                     let margin = strip.height * 0.20
                     let wide = CGRect(x: 0.035, y: strip.minY - margin, width: 0.93, height: strip.height + margin * 2)
                         .intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
-                    recoveredCells += PrintedDigitRecovery.fill(&result.tickets[0], image: source, zone: wide) {
+                    recoveredCells += PrintedDigitRecovery.fill(&result.tickets[0], image: source, zone: wide, maximumWidth: 672) {
                         recoveryNotes.append("扩展区 " + $0)
                     }
                 }
