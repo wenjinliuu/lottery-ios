@@ -29,7 +29,8 @@ struct DrawNotificationStore {
     struct Summary: Equatable {
         var purchased = 0
         var winners = 0
-        var floating = 0
+        var floatingNames: [String] = []
+        var estimated = false
         var cost = 0.0
         var prize = 0.0
 
@@ -37,9 +38,30 @@ struct DrawNotificationStore {
             let purchase = "\(purchased) 注 · 投入 \(MoneyText.format(cost))"
             guard winners > 0 else { return "\(purchase) · 未中奖" }
             let win = "中 \(winners) 注"
-            let amount = floating == 0 ? "奖金 \(MoneyText.format(prize))" :
-                (prize > 0 ? "已确定 \(MoneyText.format(prize))，其余待公布" : "奖金待公布")
-            return "\(purchase) · \(win) · \(amount)"
+            var parts = [purchase, win]
+            if prize > 0 {
+                let label = estimated ? "预计奖金" : (floatingNames.isEmpty ? "奖金" : "固定奖")
+                parts.append("\(label) \(MoneyText.format(prize))")
+            }
+            parts += floatingNames
+            return parts.joined(separator: " · ")
+        }
+
+        mutating func add(_ result: PrizeResult, draw: Draw, ticket: Ticket, multiple: Int, cost: Double) {
+            purchased += 1
+            self.cost += cost
+            guard result.isWin else { return }
+            winners += 1
+            guard let unit = PrizeRules.ordinaryUnitPrize(game: draw.gameKey, result: result, ticket: ticket) else {
+                if !floatingNames.contains(result.prizeName) { floatingNames.append(result.prizeName) }
+                return
+            }
+            let official = draw.prizeList.first {
+                PrizeRules.canonicalPrizeName($0.prizeName.isEmpty ? $0.require : $0.prizeName)
+                    == PrizeRules.canonicalPrizeName(result.prizeName) && $0.amount > 0
+            }?.amount
+            estimated = estimated || official == nil
+            prize += (official ?? Double(unit)) * Double(min(max(multiple, 1), 99))
         }
     }
 
@@ -58,13 +80,7 @@ struct DrawNotificationStore {
         for entry in tickets {
             let ticket = try JSONDecoder().decode(Ticket.self, from: entry.numbers)
             let result = PrizeRules.evaluate(gameKey: entry.game, ticket: ticket, draw: draw, multiple: entry.multiple)
-            summary.purchased += 1
-            summary.cost += entry.cost
-            if result.isWin {
-                summary.winners += 1
-                summary.prize += result.amount
-                if result.isFloating { summary.floating += 1 }
-            }
+            summary.add(result, draw: draw, ticket: ticket, multiple: entry.multiple, cost: entry.cost)
         }
         return summary
     }

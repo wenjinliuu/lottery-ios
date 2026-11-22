@@ -59,14 +59,12 @@ struct WalletTicketCard: View {
                     wholeTicket
                 } else if card.whole.isEmpty {
                     lines
-                } else if isExpanded {
-                    // 展开时两样都给：上面是票面的样子，下面是展开的每一注，
-                    // 想逐注核对的人还是找得到。
-                    wholeTicket
-                    TicketDivider(tint: game.tint)
-                    lines
                 } else {
                     wholeTicket
+                    if isExpanded {
+                        TicketDivider(tint: game.tint)
+                        lines
+                    }
                 }
                 TicketDivider(tint: game.tint)
                 footer
@@ -76,7 +74,7 @@ struct WalletTicketCard: View {
         // 中奖的票自己一直在放小烟花，不用等用户去点。
         // 中奖是几个月才遇上一次的事，它值得一直亮着。
         .overlay {
-            if card.status == .won {
+            if card.status == .won && !isExpanded {
                 // 负 padding 把画布撑得比卡片大一圈，火星才能越出边缘一点点。
                 // 幅度只有十几点，不会糊到隔壁卡片上（卡片间距 12）。
                 TicketSparkleOverlay()
@@ -267,7 +265,7 @@ struct WalletTicketCard: View {
     }
 
     private var lines: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        LazyVStack(alignment: .leading, spacing: 7) {
             ForEach(Array(visibleLines.enumerated()), id: \.element.id) { index, line in
                 lineRow(index: index, line: line)
             }

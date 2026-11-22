@@ -171,7 +171,6 @@ struct WalletView: View {
                 // 等记录变化引发的那次正常重建顺带做掉。
                 needsRefreeze = true
                 commitSeen()
-                await drawStore.refresh()
                 // 下拉就是「再核对一遍」，和右上角那颗按钮同一件事，
                 // 所以也给同样的结果提示，别让人以为什么都没发生。
                 await recheck()
@@ -407,15 +406,33 @@ struct WalletView: View {
     }
 
     private func recheck(silent: Bool = false) async {
+        guard !isChecking else { return }
         isChecking = true
-        defer { isChecking = false }
+        drawStore.checkingWallet = true
+        defer { isChecking = false; drawStore.checkingWallet = false }
         let service = RecordService(context: context, drawStore: drawStore)
-        // 只补还核对不了的那几个彩种，不是八个都拉一遍。
-        await drawStore.ensureRecentDraws(for: service.gamesAwaitingDraws())
-        guard let outcome = try? service.checkAll(records) else {
+        await drawStore.refresh(force: true)
+        _ = try? service.reconcileInferredTargets()
+        let since = RecordService.recheckSince(Date())
+        let today = DateText.day(Date())
+        let targets = service.allRecords().filter {
+            $0.targetOpenDate <= today && ($0.status == .pending || $0.status == .prizeFloat ||
+                ($0.status == .won && $0.targetOpenDate >= since))
+        }
+        for (game, tickets) in Dictionary(grouping: targets, by: \.game) {
+            await drawStore.loadRecent(for: game, force: true)
+            let years = Set(tickets.compactMap { record -> Int? in
+                let day = record.targetOpenDate.isEmpty ? DateText.day(record.createdAt) : record.targetOpenDate
+                guard day < since || drawStore.draw(matching: record) == nil && day < today else { return nil }
+                return Int(day.prefix(4))
+            })
+            for year in years { await drawStore.loadYear(for: game, year: year, force: true) }
+        }
+        guard let outcome = try? service.checkAll() else {
             if !silent { showToast("核对失败", symbol: "exclamationmark.triangle", feedback: .error) }
             return
         }
+        rebuild()
         // 中奖是这个 App 里最值得庆祝的一刻，静默刷新也要放烟花
         if outcome.won > 0 { celebrate() }
         guard !silent else { return }

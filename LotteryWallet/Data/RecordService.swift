@@ -116,11 +116,12 @@ struct RecordService {
                                          ticket: record.ticket,
                                          draw: draw,
                                          multiple: record.multiple)
+        if record.status == .won, result.isFloating, record.prizeName == result.prizeName { return false }
         // 结论没变就不写库，避免无谓的脏数据和界面刷新
         guard record.status != Self.status(of: result)
                 || record.prizeAmount != result.amount
                 || record.prizeName != result.prizeName
-                || !record.hasMatches else { return false }
+                || record.matched != result.matched else { return false }
 
         Self.write(result, from: draw, into: record)
         return true
@@ -252,6 +253,7 @@ struct RecordService {
                                          multiple: record.multiple)
         guard !result.matched.isEmpty else { return false }
         record.matched = result.matched
+        record.updatedAt = Date()
         return true
     }
 

@@ -97,6 +97,7 @@ final class DrawPushTests: XCTestCase {
         try saveSSQ([(red: [1, 2, 3, 4, 7, 8], blue: 11)])
         let draw = try XCTUnwrap(DrawPushPayload.parse(ssqPush(prizes: nil)))
         let outcome = try DrawPushCenter.shared.settle(with: draw, in: container.mainContext)
+        XCTAssertEqual(outcome.notification.body, "1 注 · 投入 2元 · 中 1 注 · 预计奖金 5元")
         XCTAssertEqual(outcome.floating, 1)
         XCTAssertEqual(outcome.text, "1 注中 1 注：六等奖 1 注，奖金待公布")
         XCTAssertEqual(service.allRecords().first?.status, .prizeFloat)
@@ -170,10 +171,40 @@ final class DrawPushTests: XCTestCase {
 
         try saveSSQ([([5, 6, 10, 25, 27, 30], 11)])
         try local.replacePendingTickets(DrawPushCenter.pendingTickets(in: container.mainContext))
-        XCTAssertEqual(try local.summary(for: draw)?.body, "2 注 · 投入 4元 · 中 1 注 · 奖金待公布")
+        XCTAssertEqual(try local.summary(for: draw)?.body, "2 注 · 投入 4元 · 中 1 注 · 一等奖")
 
         draw.drawValues[.blue] = []
         XCTAssertNil(try local.summary(for: draw))
+    }
+
+    func testMixedPreviewUsesOrdinaryAmountAndNamesFloatingPrizeEvenWhenPublished() throws {
+        let draw = try XCTUnwrap(DrawPushPayload.parse(ssqPush(prizes: [["name": "一等奖", "amount": "5000000"]])))
+        let reds = draw.drawValues[.red]
+        var summary = DrawNotificationStore.Summary()
+        for numbers in [reds, [1, 2, 3, 4, 7, 8]] {
+            let ticket = Ticket(numbers: NumberSet([.red: numbers, .blue: [11]]))
+            summary.add(PrizeRules.evaluate(gameKey: .ssq, ticket: ticket, draw: draw),
+                        draw: draw, ticket: ticket, multiple: 2, cost: 4)
+        }
+        XCTAssertEqual(summary.body, "2 注 · 投入 8元 · 中 2 注 · 预计奖金 10元 · 一等奖")
+    }
+
+    func testLaterPrizeUpdatesWalletAndNumbersOnlyRefreshPreservesAmount() throws {
+        let store = DrawStore()
+        let records = RecordService(context: container.mainContext, drawStore: store)
+        try saveSSQ([([1, 2, 3, 4, 7, 8], 11)])
+        let first = try XCTUnwrap(DrawPushPayload.parse(ssqPush(prizes: nil)))
+        store.merge([first])
+        try records.checkAll()
+        XCTAssertEqual(records.allRecords().first?.status, .prizeFloat)
+        XCTAssertEqual(records.allRecords().first?.matched[.blue], [true])
+        let revision = store.resultsRevision
+        store.merge([try XCTUnwrap(DrawPushPayload.parse(ssqPush()))])
+        XCTAssertGreaterThan(store.resultsRevision, revision)
+        try records.checkAll()
+        XCTAssertEqual(records.allRecords().first?.prizeAmount, 5)
+        store.merge([first])
+        XCTAssertEqual(store.draw(for: .ssq, expect: first.expect)?.prizeList.last?.amount, 5)
     }
 
     // MARK: - 文案

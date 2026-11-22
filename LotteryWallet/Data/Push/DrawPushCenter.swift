@@ -290,11 +290,12 @@ final class DrawPushCenter {
         var outcome = DrawPushPayload.Outcome()
         for record in records {
             // 还没结论的、和奖金待公布的才重算；已经定了的直接用。
-            if record.status == .pending || record.status == .prizeFloat {
-                let result = PrizeRules.evaluate(gameKey: record.game,
+            let result = PrizeRules.evaluate(gameKey: record.game,
                                                  ticket: record.ticket,
                                                  draw: draw,
                                                  multiple: record.multiple)
+            outcome.notification.add(result, draw: draw, ticket: record.ticket, multiple: record.multiple, cost: record.cost)
+            if record.status == .pending || record.status == .prizeFloat {
                 RecordService.write(result, from: draw, into: record)
             }
             outcome.add(status: record.status, prizeName: record.prizeName, amount: record.prizeAmount)
@@ -320,13 +321,13 @@ final class DrawPushCenter {
         // 独立上下文避免通知写入失败时影响正在录入的票据。
         let context = ModelContext(container)
         guard let outcome = try? settle(with: draw, in: context), outcome.tickets > 0 else { return .unchanged }
-        guard let text = outcome.winAlert else { return .settled }
+        guard outcome.notification.winners > 0 else { return .settled }
 
         let content = UNMutableNotificationContent()
         let alert = (userInfo["aps"] as? [String: Any])?["alert"] as? [String: Any]
         content.title = alert?["title"] as? String ?? "\(draw.gameName) \(draw.expect) 期开奖"
         content.subtitle = alert?["body"] as? String ?? ""
-        content.body = text
+        content.body = outcome.notification.body
         content.sound = .default
         content.threadIdentifier = "draw-\(draw.gameKey.apiKey)"
 

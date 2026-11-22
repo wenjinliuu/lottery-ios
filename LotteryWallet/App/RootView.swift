@@ -25,6 +25,7 @@ struct RootView: View {
     @State private var selection: MainTab = .home
     /// 当前开着的抽屉，以及关掉它之后要接着开的那张。
     @State private var activeSheet: RootSheet?
+    @State private var startupChecksComplete = false
     @State private var queuedSheet: RootSheet?
     /// 从扫描页转到手动录入时带过去的票面照片。
     ///
@@ -213,6 +214,11 @@ struct RootView: View {
         // 原来一律 `.success`：点号码球被拒时，选号盘那边已经震过一次，
         // 提示又补一记重的，慢半拍到手上，像是点了两下。
         .sensoryFeedback(trigger: toastCenter.current?.id) { _, _ in toastCenter.current?.feedback }
+        .onChange(of: drawStore.resultsRevision) { _, _ in
+            guard startupChecksComplete, settings.autoCheck, !drawStore.checkingWallet else { return }
+            let service = RecordService(context: context, drawStore: drawStore)
+            if let outcome = try? service.checkAll(), outcome.won > 0 { celebration() }
+        }
         .task {
             // 弹抽屉时不要把背后染灰 —— 那套行为在这里恢复得不跟手，
             // 设置页「外观」那一行的图标甚至根本恢复不回来。见 TintDimming。
@@ -220,6 +226,7 @@ struct RootView: View {
             async let pushRegistration: Void = DrawPushCenter.shared.refreshOnLaunch()
             await drawStore.bootstrap()
             await runStartupChecks()
+            startupChecksComplete = true
             await pushRegistration
         }
     }

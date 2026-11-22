@@ -125,21 +125,39 @@ enum PrizeRules {
         let hits = countMatches(ticket[.nums], draw.drawValues[.nums])
         let matched: [SectionKey: [Bool]] = [.nums: markMatches(ticket[.nums], draw.drawValues[.nums])]
         let playCount = ticket.playCount ?? Int(ticket.playMode) ?? ticket[.nums].count
-        guard let entry = findK8PrizeEntry(draw.prizeList, playCount: playCount, hits: hits) else {
-            return none(matched)
+        guard (1...10).contains(playCount), ticket[.nums].count == playCount else { return none(matched) }
+        let name = "选\(ChineseNumber.text(playCount))中\(hits)"
+        let chinese = "选\(ChineseNumber.text(playCount))中\(ChineseNumber.text(hits))"
+        let aliases = [name, chinese, "选\(playCount)中\(hits)", "选\(playCount)中\(ChineseNumber.text(hits))"]
+        if let row = draw.prizeList.first(where: { aliases.contains($0.prizeName.isEmpty ? $0.require : $0.prizeName) }) {
+            return floating(row.prizeName.isEmpty ? row.require : row.prizeName, matched)
         }
-        return floating(entry.prizeName, matched)
+        guard (playCount == 10 && hits == 10) || k8Fixed[playCount]?[hits] != nil else { return none(matched) }
+        return floating(name, matched)
     }
 
-    /// 快乐8 的奖级名形如"选七中五"，中英文数字都要认。
-    static func findK8PrizeEntry(_ prizeList: [PrizeEntry], playCount: Int, hits: Int) -> PrizeEntry? {
-        let playChinese = ChineseNumber.text(playCount)
-        let hitsChinese = ChineseNumber.text(hits)
-        return prizeList.first { entry in
-            let name = entry.prizeName.isEmpty ? entry.require : entry.prizeName
-            let matchesPlay = name.contains("选\(playCount)") || name.contains("选\(playChinese)")
-            let matchesHits = name.contains("中\(hits)") || name.contains("中\(hitsChinese)")
-            return matchesPlay && matchesHits
+    private static let k8Fixed: [Int: [Int: Int]] = [
+        1: [1: 5], 2: [2: 19], 3: [2: 3, 3: 52], 4: [2: 3, 3: 5, 4: 93],
+        5: [3: 3, 4: 20, 5: 1000], 6: [3: 3, 4: 10, 5: 30, 6: 2880],
+        7: [0: 2, 4: 4, 5: 30, 6: 300, 7: 8500],
+        8: [0: 2, 4: 3, 5: 10, 6: 80, 7: 800, 8: 50000],
+        9: [0: 2, 4: 3, 5: 5, 6: 22, 7: 225, 8: 2000, 9: 250000],
+        10: [0: 2, 5: 3, 6: 5, 7: 80, 8: 720, 9: 8000]
+    ]
+
+    /// Ordinary payout for the first notification only. Pool prizes have no estimate.
+    static func ordinaryUnitPrize(game: GameKey, result: PrizeResult, ticket: Ticket) -> Int? {
+        let name = result.prizeName
+        switch game {
+        case .ssq: return ["三等奖": 3000, "四等奖": 200, "五等奖": 10, "六等奖": 5, "福运奖": 5][name]
+        case .dlt: return ["三等奖": 5000, "四等奖": 300, "五等奖": 150, "六等奖": 15, "七等奖": 5][name]
+        case .qlc: return ["四等奖": 200, "五等奖": 50, "六等奖": 10, "七等奖": 5][name]
+        case .qxc: return ["三等奖": 3000, "四等奖": 500, "五等奖": 30, "六等奖": 5][name]
+        case .pl3, .fc3d: return ["直选": 1040, "组三": 346, "组六": 173][name]
+        case .pl5: return name == "一等奖" ? 100000 : nil
+        case .k8:
+            let play = ticket.playCount ?? Int(ticket.playMode) ?? ticket[.nums].count
+            return k8Fixed[play]?[result.matched[.nums, default: []].filter { $0 }.count]
         }
     }
 

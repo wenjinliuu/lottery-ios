@@ -46,6 +46,7 @@ enum DrawPushPayload {
 
     /// 一期开奖对我手里这些票的结论。
     struct Outcome: Equatable {
+        var notification = DrawNotificationStore.Summary()
         var tickets = 0
         var won = 0
         /// 中了但单注奖金还没公布的注数。
