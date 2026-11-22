@@ -39,9 +39,10 @@ extension View {
     /// A single clear glass ring samples the moving canvas below its edge.
     func ballGlassFrame(cornerRadius: CGFloat, width: CGFloat) -> some View {
         let outline = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        let ring = outline.inset(by: width / 2).stroke(style: StrokeStyle(lineWidth: width))
-        return glassEffect(.clear, in: ring)
-            .mask(outline.strokeBorder(lineWidth: width))
+        // A solid glass shape has only one reflective edge. Reveal its perimeter
+        // so the balls show through the softer rim and stay crisp in the center.
+        return glassEffect(.clear, in: outline)
+            .mask(outline.strokeBorder(lineWidth: width).opacity(0.48))
     }
 
     /// 拖动图表时浮在曲线上的当日金额。
