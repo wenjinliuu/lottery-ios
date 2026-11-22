@@ -28,17 +28,28 @@ final class PrintedDigitRecoveryTests: XCTestCase {
     }
 
     func testScanPhotographedTicketsAfterFraming() async throws {
-        let quad = TicketQuad(topLeft: .zero, topRight: CGPoint(x: 1, y: 0),
-                              bottomRight: CGPoint(x: 1, y: 1), bottomLeft: CGPoint(x: 0, y: 1))
-        for (name, game, rows) in [
-            ("SevenStarsScan", GameKey.qxc, [[2,0,4,3,7,2,7], [7,0,5,9,2,0,7]]),
-            ("PickFiveScan", GameKey.pl5, [[5,8,3,4,3], [6,3,0,9,8]])
+        func calendarEntry(_ issue: String, _ day: String) -> GameYearCalendar {
+            let item = CalendarIssue(issue: issue, drawDate: day, weekday: 0, drawTime: "", saleCloseTime: "")
+            return GameYearCalendar(name: "", drawWeekdays: [], drawTime: "", saleCloseTime: "", issues: [item])
+        }
+        let date = "2026-11-20"
+        let calendar = DrawCalendarYear(year: 2026, lotteries: [
+            GameKey.qxc.apiKey: calendarEntry("26133", date), GameKey.pl5.apiKey: calendarEntry("26310", date),
+            GameKey.pl3.apiKey: calendarEntry("26310", date), GameKey.dlt.apiKey: calendarEntry("26133", "2026-11-21")
+        ])
+        for (name, game, rows, corners) in [
+            ("SevenStarsScan", GameKey.qxc, [[2,0,4,3,7,2,7], [7,0,5,9,2,0,7]],
+             [CGPoint(x:34,y:1), CGPoint(x:414,y:7), CGPoint(x:422,y:425), CGPoint(x:11,y:419)]),
+            ("PickFiveScan", GameKey.pl5, [[5,8,3,4,3], [6,3,0,9,8]],
+             [CGPoint(x:33,y:8), CGPoint(x:440,y:0), CGPoint(x:466,y:490), CGPoint(x:23,y:499)])
         ] {
             let image = UIImage(cgImage: try load(name))
+            let points = corners.map { CGPoint(x: $0.x / image.size.width, y: $0.y / image.size.height) }
+            let quad = TicketQuad(topLeft: points[0], topRight: points[1], bottomRight: points[2], bottomLeft: points[3])
             let corrected = await TicketImagePreprocessor.prepare(image, quad: quad)
-            let page = try await TicketVisionScanner.scan(corrected)
+            let page = try await TicketVisionScanner.scan(corrected, calendars: [2026: calendar])
             XCTAssertEqual(page.result.tickets.count, 1, page.result.rawText)
-            let ticket = try XCTUnwrap(page.result.tickets.first)
+            guard let ticket = page.result.tickets.first else { continue }
             XCTAssertEqual(ticket.game, game)
             let numbers = ticket.lines.map { line in game.sections.flatMap { line[$0.key] } }
             XCTAssertEqual(numbers, rows, page.result.rawText)
