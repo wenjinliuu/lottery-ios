@@ -26,8 +26,7 @@ final class AppStoreScreenshotTests: XCTestCase {
     func testCaptureStoreScreenshots() {
         app.launch()
         XCTAssertTrue(app.staticTexts["累计收支"].waitForExistence(timeout: 15), "首页没有加载出来")
-        // 等开奖轮播从网络拿到数据；拿不到也照样截，只是少了开奖号码
-        _ = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "期")).firstMatch.waitForExistence(timeout: 15)
+        // Screen readiness is established above; live network draw text is optional for demo screenshots.
         settle()
         capture("01-home")
 

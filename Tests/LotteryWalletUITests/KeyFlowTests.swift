@@ -13,6 +13,27 @@ final class KeyFlowTests: XCTestCase {
         app.launch()
     }
 
+    func testWalletTopEdgeAfterScrolling() throws {
+        app.tabBars.buttons["票夹"].tap()
+        let title = app.navigationBars["票夹"]
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.71))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.43))
+        start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
+        XCTAssertTrue(title.exists)
+        let screenshot = XCUIScreen.main.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = "wallet-soft-top"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        if ProcessInfo.processInfo.environment["SNAPSHOT_TESTING_RECORD"] != nil {
+            let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+                .appendingPathComponent("__Snapshots__/KeyFlowTests", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try screenshot.pngRepresentation.write(to: directory.appendingPathComponent("wallet-soft-top.png"))
+        }
+    }
+
     /// 三个主页面都能打开。
     func testEveryMainTabOpens() {
         for tab in ["票夹", "设置", "首页"] {
