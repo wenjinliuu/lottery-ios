@@ -1,5 +1,4 @@
-import SwiftUI
-import UIKit
+import Foundation
 import UserNotifications
 
 final class NotificationService: UNNotificationServiceExtension {
@@ -8,7 +7,7 @@ final class NotificationService: UNNotificationServiceExtension {
 
     private struct Delivery {
         let handler: (UNNotificationContent) -> Void
-        var fallback: UNNotificationContent
+        let fallback: UNNotificationContent
     }
 
     override func didReceive(_ request: UNNotificationRequest,
@@ -29,11 +28,7 @@ final class NotificationService: UNNotificationServiceExtension {
 
         // The app can reconcile the wallet on its next wake, even if iOS suspends this extension.
         try? store.record(draw)
-        lock.withLock { delivery?.fallback = content }
-
-        Task { @MainActor in
-            self.finish(with: Self.attachNumbers(for: draw, to: content))
-        }
+        finish(with: content)
     }
 
     override func serviceExtensionTimeWillExpire() {
@@ -47,31 +42,5 @@ final class NotificationService: UNNotificationServiceExtension {
             return pending
         }
         if let ready { ready.handler(content ?? ready.fallback) }
-    }
-
-    @MainActor
-    private static func attachNumbers(for draw: Draw, to textContent: UNNotificationContent) -> UNNotificationContent {
-        guard let content = textContent.mutableCopy() as? UNMutableNotificationContent else { return textContent }
-        let renderer = ImageRenderer(content:
-            DrawNumbersView(draw: draw, size: 30)
-                .frame(width: 280, alignment: .leading)
-                .padding(12)
-                .background(Color(hex: 0xF2F4F8))
-        )
-        renderer.scale = 2
-        guard let png = renderer.uiImage?.pngData() else { return textContent }
-
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let file = directory.appendingPathComponent("draw-numbers.png")
-            try png.write(to: file)
-            content.attachments = [try UNNotificationAttachment(identifier: "draw-numbers", url: file)]
-            content.subtitle = ""
-            return content
-        } catch {
-            try? FileManager.default.removeItem(at: directory)
-            return textContent
-        }
     }
 }

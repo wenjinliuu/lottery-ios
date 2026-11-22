@@ -89,9 +89,6 @@ targets:
       - path: LotteryWallet/Data/Push/DrawNotificationStore.swift
       - path: LotteryWallet/Data/V2/LotteryV2DTO.swift
       - path: LotteryWallet/Data/V2/LotteryV2DrawMapper.swift
-      - path: LotteryWallet/Design/BallView.swift
-      - path: LotteryWallet/Design/LiquidGlass.swift
-      - path: LotteryWallet/Design/Palette.swift
       - path: LotteryWallet/Models/Draw.swift
       - path: LotteryWallet/Models/Game.swift
       - path: LotteryWallet/Models/NumberSet.swift
