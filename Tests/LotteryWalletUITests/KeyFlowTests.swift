@@ -13,6 +13,17 @@ final class KeyFlowTests: XCTestCase {
         app.launch()
     }
 
+    func testWalletTopEdgeAfterScrolling() throws {
+        app.tabBars.buttons["票夹"].tap()
+        let title = app.navigationBars["票夹"]
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.71))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.43))
+        start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
+        XCTAssertTrue(title.exists)
+        capture("wallet-soft-top")
+    }
+
     /// 三个主页面都能打开。
     func testEveryMainTabOpens() {
         for tab in ["票夹", "设置", "首页"] {

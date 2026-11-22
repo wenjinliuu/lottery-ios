@@ -138,6 +138,7 @@ struct WalletView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 120)
             }
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .background(Palette.canvas)
             // 导航栏不要自己糊底色，交给系统的 scroll edge effect。
             // 理由见 `HomeView` 里同一处那段注释。
@@ -522,6 +523,7 @@ struct WalletAllTicketsView: View {
             .padding(.top, 4)
             .padding(.bottom, 40)
         }
+        .scrollEdgeEffectStyle(.soft, for: .top)
         .background(Palette.canvas)
         .sheet(item: $editTarget) { draft in
             EntryFlowView(draft: draft)

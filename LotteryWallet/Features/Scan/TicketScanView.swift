@@ -136,9 +136,6 @@ struct TicketScanView: View {
             // 抽屉之后，透明就会露出 NavigationStack 默认的 systemBackground（白），
             // 而面板铺的是 canvas（浅灰）—— 上下各拼出一条灰带，就是"背景不统一"。
             .background(Palette.canvas)
-            // 导航栏也别自己糊一层材质，否则顶部又是一条色差
-            .toolbarBackground(Palette.canvas, for: .navigationBar)
-            .toolbarBackgroundVisibility(.visible, for: .navigationBar)
             .navigationTitle(stage == .review ? "核对识别结果" : "扫描票据")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarVisibility(stage == .crop || stage == .locate ? .hidden : .automatic, for: .navigationBar)
@@ -253,6 +250,7 @@ struct TicketScanView: View {
             introContent
                 .frame(minHeight: 420)
         }
+        .scrollEdgeEffectStyle(.soft, for: .top)
         .scrollBounceBehavior(.basedOnSize)
     }
 
@@ -418,6 +416,7 @@ struct TicketScanView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 24)
             }
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 10) {
                     HStack(spacing: 12) {
@@ -483,6 +482,7 @@ struct TicketScanView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 20)
             }
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .safeAreaInset(edge: .bottom) { importBar }
         }
     }

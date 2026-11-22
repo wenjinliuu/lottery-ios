@@ -234,9 +234,8 @@ struct EntryFlowView: View {
                 // 这里再垫 130 就是一大片滚不完的空白。
                 .padding(.bottom, 20)
             }
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .background(Palette.canvas)
-            .toolbarBackground(Palette.canvas, for: .navigationBar)
-            .toolbarBackgroundVisibility(.visible, for: .navigationBar)
             .navigationTitle(draft == nil ? "添加一张票" : "修改这张票")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

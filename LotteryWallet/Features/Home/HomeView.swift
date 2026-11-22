@@ -86,6 +86,7 @@ struct HomeView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 120)
             }
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .background(Palette.canvas)
             // 量宽度放在 `background` 里：背景不参与布局，量它不会把
             // `GeometryReader` 的贪心尺寸带进内容，也动不到导航栏那套
