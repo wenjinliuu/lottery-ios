@@ -18,7 +18,7 @@ struct BallJarView: View {
     private static let frameWidth: CGFloat = 6
     // At rest a ball's outside edge sits 2 points underneath the glass.
     private static let ballInset: CGFloat = 4
-    private var isActive: Bool { isVisible && scenePhase == .active && !jar.colors.isEmpty }
+    private var isActive: Bool { isVisible && scenePhase == .active && jar.hits > 0 }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Self.corner)
@@ -27,7 +27,7 @@ struct BallJarView: View {
                 .frame(height: Self.height - 2 * Self.ballInset)
                 .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
                 .padding(Self.ballInset)
-                .background(Palette.card, in: shape)
+                .background(Color.white, in: shape)
                 .clipShape(shape)
                 .overlay {
                     Color.clear
@@ -39,16 +39,17 @@ struct BallJarView: View {
                 .accessibilityLabel("号码球罐")
                 .accessibilityValue("\(range.label)\(summary)")
                 .overlay {
-                    if jar.colors.isEmpty {
+                    if jar.hits == 0 {
                         Text("这段时间没有命中的号码")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .allowsHitTesting(false)
                     }
                 }
+                .environment(\.colorScheme, .light)
 
             HStack(spacing: 8) {
-                Text(jar.isSampled ? "\(summary) · 示意展示 \(jar.colors.count.formatted()) 颗" : summary)
+                Text(visibleCount > 0 && visibleCount < jar.hits ? "\(summary) · 示意展示 \(visibleCount.formatted()) 颗" : summary)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -64,7 +65,7 @@ struct BallJarView: View {
                         .glassPill()
                 }
                 .buttonStyle(.plain)
-                .disabled(jar.colors.isEmpty)
+                .disabled(jar.hits == 0)
                 .accessibilityIdentifier("home.jar.shake")
             }
         }
@@ -91,8 +92,10 @@ struct BallJarView: View {
 
     private var summary: String { "命中 \(jar.hits.formatted()) 个号码" }
 
+    private var visibleCount: Int { min(jar.hits, JarBuilder.capacity(width: size.width, height: size.height)) }
+
     private func load() {
-        scene.load(jar.colors, size: size, corner: Self.corner - Self.ballInset)
+        scene.load(jar.colors(limit: visibleCount), size: size, corner: Self.corner - Self.ballInset)
     }
 }
 
