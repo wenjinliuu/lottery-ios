@@ -21,4 +21,4 @@ concurrency:
 
 jobs:
   icon:
-    uses: wenjinliuu/ios-ci-workflows/.github/workflows/app-icon.yml@0c7501dd52ac0c252678ce5a4a7ed61fb6633cfb # v1.0.0
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/app-icon.yml@be908de95dad15a236d4de633576d0fda596edc4
