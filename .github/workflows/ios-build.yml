@@ -20,6 +20,6 @@ concurrency:
 
 jobs:
   test:
-    uses: wenjinliuu/ios-ci-workflows/.github/workflows/build-test.yml@0c7501dd52ac0c252678ce5a4a7ed61fb6633cfb # v1.0.0
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/build-test.yml@a25455e2343131b2803011477f5c5c324f21bc77
     with:
       record_snapshots: ${{ inputs.record_snapshots || false }}

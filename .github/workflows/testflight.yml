@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   release:
-    uses: wenjinliuu/ios-ci-workflows/.github/workflows/testflight-release.yml@521a06b79b650380da50c28534f782e49cc68065 # v1.0.0 + optional App read key
+    uses: wenjinliuu/ios-ci-workflows/.github/workflows/testflight-release.yml@a25455e2343131b2803011477f5c5c324f21bc77
     with:
       lookup_only: ${{ inputs.lookup_only || false }}
       dry_run: ${{ inputs.dry_run || false }}
