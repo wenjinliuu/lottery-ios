@@ -4,7 +4,7 @@ import SwiftUI
 
 struct BallJarView: View {
     let jar: JarBuilder.Jar
-    let range: ProfitRange
+    let periodLabel: String
 
     @State private var scene = JarScene()
     @State private var size = CGSize.zero
@@ -24,7 +24,7 @@ struct BallJarView: View {
             JarBallLayer(scene: scene)
                 .frame(height: Self.height)
                 .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
-                .background(Color.white, in: shape)
+                .background(Palette.card, in: shape)
                 .clipShape(shape)
                 .overlay {
                     Color.clear
@@ -35,7 +35,7 @@ struct BallJarView: View {
                 .accessibilityElement()
                 .accessibilityLabel("号码球罐")
                 .accessibilityIdentifier("home.jar.frame")
-                .accessibilityValue("\(range.label)\(summary)")
+                .accessibilityValue("\(periodLabel)\(summary)")
                 .overlay {
                     if jar.hits == 0 {
                         Text("这段时间没有命中的号码")
@@ -44,7 +44,6 @@ struct BallJarView: View {
                             .allowsHitTesting(false)
                     }
                 }
-                .environment(\.colorScheme, .light)
 
             HStack(spacing: 8) {
                 Text(visibleCount > 0 && visibleCount < jar.hits ? "\(summary) · 示意展示 \(visibleCount.formatted()) 颗" : summary)

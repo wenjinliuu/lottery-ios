@@ -35,6 +35,12 @@ final class JarModelTests: XCTestCase {
         XCTAssertEqual(jar.colors(limit: 100).filter { $0 == .blue }.count, 25)
     }
 
+    func testLargestFractionGetsLastVisibleBall() {
+        let jar = JarBuilder.Jar(counts: [.red: 668, .blue: 667, .yellow: 666])
+        let groups = Dictionary(grouping: jar.colors(limit: 1000), by: { $0 })
+        XCTAssertEqual(groups.mapValues { $0.count }, [.red: 334, .blue: 333, .yellow: 333])
+    }
+
     func testDenseJarLeavesRoomForMotionAndUsesSmallerBalls() {
         let width = 335.0, height = 230.0
         let count = JarBuilder.capacity(width: width, height: height)

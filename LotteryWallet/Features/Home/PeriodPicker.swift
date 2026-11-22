@@ -8,6 +8,7 @@ struct PeriodPicker: View {
     /// 「全部」：不限年份。选了它，年和月都不起作用。
     @Binding var isAll: Bool
     let years: [Int]
+    var latest: Date? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -25,13 +26,19 @@ struct PeriodPicker: View {
                         .monospacedDigit()
                         .contentTransition(.numericText())
                     Spacer()
-                    stepButton("chevron.right", enabled: year < maxYear) { year += 1 }
+                    stepButton("chevron.right", enabled: year < maxYear) { year += 1
+                        if let latest, year == Calendar.chinaCalendar.component(.year, from: latest), let selected = month {
+                            month = min(selected, Calendar.chinaCalendar.component(.month, from: latest))
+                        }
+                    }
                 }
                 .padding(.horizontal, 4)
 
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
                     ForEach(1...12, id: \.self) { item in
                         monthCell("\(item) 月", isOn: !isAll && month == item) { month = item; isAll = false }
+                            .disabled(latest.map { year == Calendar.chinaCalendar.component(.year, from: $0)
+                                && item > Calendar.chinaCalendar.component(.month, from: $0) } ?? false)
                     }
                 }
 

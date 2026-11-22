@@ -25,6 +25,18 @@ struct HomeView: View {
     @Query(sort: \TicketRecord.createdAt, order: .reverse) private var records: [TicketRecord]
 
     @State private var range: ProfitRange = .year
+    @State private var historicalEnd: Date?
+    @State private var pickerYear = 0
+    @State private var pickerMonth: Int?
+    @State private var pickerAll = false
+    @State private var showsProfitPicker = false
+
+    private var periodEnd: Date { historicalEnd ?? AppClock.now }
+    private var periodLabel: String {
+        guard let historicalEnd else { return range.label }
+        let day = DateText.day(historicalEnd)
+        return range == .month ? String(day.prefix(7)) : String(day.prefix(4)) + " 年"
+    }
     /// 曲线、方格和球罐共用同一个时间范围。
     @AppStorage("home.chartStyle", store: HomeChartStyle.store) private var chartStyle = HomeChartStyle.line.rawValue
     @State private var series = ProfitSeries()
@@ -111,7 +123,7 @@ struct HomeView: View {
                 await drawStore.loadCalendar(year: ChinaClock.year())
             }
             // 换范围时曲线和数字一起过渡，不是啪地一下换掉
-            .onChange(of: range) { _, _ in
+            .onChange(of: periodLabel) { _, _ in
                 withAnimation(.snappy(duration: 0.35)) {
                     recomputeSeries()
                     recomputeJar()
@@ -126,6 +138,11 @@ struct HomeView: View {
             .onChange(of: isOverviewAll) { _, _ in recompute() }
             .sheet(isPresented: $isOverviewPickerPresented) {
                 PeriodPicker(year: $overviewYear, month: $overviewMonth, isAll: $isOverviewAll, years: overviewYears)
+            }
+            .sheet(isPresented: $showsProfitPicker, onDismiss: applyProfitPeriod) {
+                PeriodPicker(year: $pickerYear, month: $pickerMonth, isAll: $pickerAll,
+                             years: overviewYears + [Calendar.chinaCalendar.component(.year, from: AppClock.now) - 2],
+                             latest: AppClock.now)
             }
             .environment(\.screenWidth, screenWidth)
         }
@@ -145,6 +162,28 @@ struct HomeView: View {
         monthStats = ProfitStats.period(entries: all, year: isOverviewAll ? nil : overviewYear, month: overviewMonth)
     }
 
+    private func openProfitPicker() {
+        let calendar = Calendar.chinaCalendar
+        pickerYear = calendar.component(.year, from: periodEnd)
+        pickerMonth = range == .month ? calendar.component(.month, from: periodEnd) : nil
+        pickerAll = range == .all
+        showsProfitPicker = true
+    }
+
+    private func applyProfitPeriod() {
+        let calendar = Calendar.chinaCalendar
+        guard !pickerAll else {
+            historicalEnd = nil
+            range = .all
+            return
+        }
+        guard let first = calendar.date(from: DateComponents(year: pickerYear, month: pickerMonth ?? 1, day: 1)),
+              let interval = calendar.dateInterval(of: pickerMonth == nil ? .year : .month, for: first),
+              first <= AppClock.now else { return }
+        historicalEnd = interval.contains(AppClock.now) ? nil : interval.end.addingTimeInterval(-1)
+        range = pickerMonth == nil ? .year : .month
+    }
+
     private func recomputeJar() {
         guard chartStyle == HomeChartStyle.jar.rawValue else { return }
         if DemoData.isEnabled, let value = ProcessInfo.processInfo.environment["JAR_PREVIEW_HITS"],
@@ -160,12 +199,12 @@ struct HomeView: View {
                                 matched: record.matched)
             }
         }
-        jar = JarBuilder.build(jarEntries ?? [], range: range, now: AppClock.now)
+        jar = JarBuilder.build(jarEntries ?? [], range: range, now: periodEnd)
     }
 
     private func recomputeSeries() {
         series = ProfitStats.series(
-            entries: entries, range: range, now: AppClock.now,
+            entries: entries, range: range, now: periodEnd,
             sampleDays: chartStyle != HomeChartStyle.grid.rawValue
         )
     }
@@ -197,40 +236,37 @@ struct HomeView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
-                    // 看哪一段：本月、本年、从头累计。三档就够，原来的下拉菜单和「累计 / 每月」切换都并到这里。
-                    Picker("范围", selection: $range) {
-                        Text("本月").tag(ProfitRange.month)
-                        Text("本年").tag(ProfitRange.year)
+                    Button(action: openProfitPicker) {
+                        Image(systemName: "calendar")
+                            .frame(minWidth: 32, minHeight: 32)
+                    }
+                    .accessibilityLabel("选择统计区间")
+                    .accessibilityIdentifier("home.profit.period")
+                    Picker("范围", selection: Binding(get: { range }, set: { historicalEnd = nil; range = $0 })) {
+                        Text(range == .month ? periodLabel : "本月").tag(ProfitRange.month)
+                        Text(range == .year ? periodLabel : "本年").tag(ProfitRange.year)
                         Text("全部").tag(ProfitRange.all)
                     }
                     .pickerStyle(.segmented)
                     .fixedSize()
                     .accessibilityIdentifier("home.range")
                 }
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(MoneyText.grouped(series.netTotal))
-                        // 大号字要收紧字距 —— 字号越大，字母间那点默认间隙看着越松。
-                        .font(.system(size: 44, weight: .bold, design: .rounded))
-                        .tracking(-1)
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                    Text("元")
-                        .font(.system(.title3, design: .rounded, weight: .semibold))
-                }
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .foregroundStyle(Palette.profitColor(series.netTotal))
-                .accessibilityElement(children: .combine)
-
-                HStack(spacing: 8) {
-                    // 返奖率：花出去的钱回来了多少。比「中奖率」诚实 —— 中 5 元也算中奖，
-                    // 中奖率很好看的时候钱照样是净出去的。
-                    inlineStat("返奖率", returnRateText, tint: series.prizeTotal > 0 ? Palette.profit : .secondary)
-                    if chartStyle == HomeChartStyle.jar.rawValue {
-                        Rectangle().fill(Palette.separator).frame(width: 1, height: 11)
-                        inlineStat("公益金", "\(MoneyText.grouped(series.welfareTotal)) 元", tint: Palette.warning)
+                HStack {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(MoneyText.grouped(series.netTotal))
+                            // 大号字要收紧字距 —— 字号越大，字母间那点默认间隙看着越松。
+                            .font(.system(size: 44, weight: .bold, design: .rounded))
+                            .tracking(-1)
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                        Text("元")
+                            .font(.system(.title3, design: .rounded, weight: .semibold))
                     }
-                    Spacer(minLength: 0)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .foregroundStyle(Palette.profitColor(series.netTotal))
+                    .accessibilityElement(children: .combine)
+                    Spacer(minLength: 4)
                     // 三种图表共享时间范围。
                     Picker("图表样式", selection: $chartStyle) {
                         Image(systemName: "chart.xyaxis.line")
@@ -249,18 +285,16 @@ struct HomeView: View {
                 }
             }
 
-            if chartStyle != HomeChartStyle.jar.rawValue {
-                chartTotals
-            }
+            chartTotals
 
             Group {
                 if chartStyle == HomeChartStyle.jar.rawValue {
-                    BallJarView(jar: jar, range: range)
+                    BallJarView(jar: jar, periodLabel: periodLabel)
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else if chartStyle == HomeChartStyle.grid.rawValue {
                     VStack(alignment: .leading, spacing: 8) {
-                        ProfitHeatmap(days: series.days, range: range, width: screenWidth - 64)
-                            .id(range)
+                        ProfitHeatmap(days: series.days, range: range, end: periodEnd, width: screenWidth - 64)
+                            .id(periodLabel)
                         HStack(spacing: 12) {
                             heatLegend(Palette.profit, "有中奖")
                             heatLegend(Palette.loss, "未中奖")
@@ -281,15 +315,13 @@ struct HomeView: View {
     }
 
     private var chartTotals: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                spendingTotal.fixedSize()
-                prizeTotal.fixedSize()
-                welfareTotal.fixedSize()
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                spendingTotal
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
+            GridRow {
+                inlineStat("返奖率", returnRateText, tint: series.prizeTotal > 0 ? Palette.profit : .secondary)
                 prizeTotal
+            }
+            GridRow {
+                spendingTotal
                 welfareTotal
             }
         }
@@ -743,10 +775,10 @@ struct ProfitHeatmap: View {
     private let grid: Grid
 
     /// - Parameter width: 方格图能用的宽度。
-    init(days: [ProfitDay], range: ProfitRange, width: CGFloat) {
+    init(days: [ProfitDay], range: ProfitRange, end: Date, width: CGFloat) {
         self.days = days
         self.range = range
-        let grid = Self.buildGrid(days: days, range: range)
+        let grid = Self.buildGrid(days: days, range: range, end: end)
         self.grid = grid
         let columns = CGFloat(Swift.max(grid.weeks.count, 1))
         let fitted = (width - Self.gapSize * (columns - 1)) / columns
@@ -783,13 +815,13 @@ struct ProfitHeatmap: View {
 
     @State private var selectedWeek: Int?
 
-    private static func buildGrid(days: [ProfitDay], range: ProfitRange) -> Grid {
+    private static func buildGrid(days: [ProfitDay], range: ProfitRange, end periodEnd: Date) -> Grid {
         var byDay: [String: ProfitDay] = [:]
         byDay.reserveCapacity(days.count)
         for day in days where day.count > 0 { byDay[day.date] = day }
 
         let calendar = Calendar.chinaCalendar
-        let today = calendar.startOfDay(for: AppClock.now)
+        let today = calendar.startOfDay(for: periodEnd)
         let daysWithRecords = days.filter { $0.count > 0 }
         let firstDay = daysWithRecords.first?.date ?? DateText.day(today)
         let lastDay = daysWithRecords.last?.date ?? firstDay

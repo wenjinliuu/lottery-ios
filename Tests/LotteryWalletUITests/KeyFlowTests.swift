@@ -82,6 +82,25 @@ final class KeyFlowTests: XCTestCase {
         capture("home-heatmap")
     }
 
+    func testHistoricalMonthPersistsAcrossChartsAndDarkJar() {
+        app.terminate()
+        app.launchArguments += ["-lottery.appearance", "dark"]
+        app.launch()
+        let picker = app.buttons["home.profit.period"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        picker.tap()
+        app.buttons["7 月"].tap()
+        app.buttons["完成"].tap()
+        let range = app.segmentedControls["home.range"]
+        let style = app.segmentedControls["home.chart.style"]
+        for index in [0, 1, 2] {
+            style.buttons.element(boundBy: index).tap()
+            XCTAssertTrue(range.buttons["2026-07"].isSelected)
+        }
+        XCTAssertTrue(app.staticTexts["home.jar.total"].waitForExistence(timeout: 10))
+        capture("home-dark-july")
+    }
+
     func testBallCountPreviews() {
         for (hits, shown) in [(309, 309), (2000, 1000)] {
             app.terminate()

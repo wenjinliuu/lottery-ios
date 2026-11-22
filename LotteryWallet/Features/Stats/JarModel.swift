@@ -20,14 +20,20 @@ enum JarBuilder {
             let total = hits
             let visible = min(limit, total)
             guard visible > 0 else { return [] }
-            // 按真实比例分配有限的展示球，累计取整保证展示总数精确。
+            // 各色先取整，小数余数最大的颜色依次补一颗。相同余数按颜色名固定排序。
+            let shares = counts.map { color, count in
+                let scaled = count * visible
+                return (color: color, whole: scaled / total, remainder: scaled % total)
+            }.sorted { lhs, rhs in
+                if lhs.remainder == rhs.remainder { return lhs.color.rawValue < rhs.color.rawValue }
+                return lhs.remainder > rhs.remainder
+            }
+            let extras = visible - shares.reduce(0) { $0 + $1.whole }
             var colors: [BallColor] = []
             colors.reserveCapacity(visible)
-            var cumulative = 0
-            for color in counts.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
-                cumulative += counts[color, default: 0]
-                let end = Int((Double(cumulative) / Double(total) * Double(visible)).rounded())
-                colors.append(contentsOf: repeatElement(color, count: end - colors.count))
+            for (index, share) in shares.enumerated() {
+                let count = share.whole + (index < extras ? 1 : 0)
+                colors.append(contentsOf: repeatElement(share.color, count: count))
             }
             // 稳定地打散颜色，切回同一个范围时保持相同顺序。
             var seed: UInt64 = 1
