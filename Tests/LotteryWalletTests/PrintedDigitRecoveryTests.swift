@@ -27,6 +27,15 @@ final class PrintedDigitRecoveryTests: XCTestCase {
         XCTAssertEqual(ticket.lines.map { $0[.nums5] }, [[5,8,3,4,3], [6,3,0,9,8]])
     }
 
+    func testSlantedConvergingRowsRecoverWithoutMixingAdjacentBets() throws {
+        for name in ["PickFiveTiltLeft", "PickFiveTiltRight"] {
+            var ticket = ScannedTicket(game: .pl5)
+            ticket.lines = [NumberSet([.nums5: [5,8,-1,4,3]]), NumberSet([.nums5: [6,3,0,9,-1]])]
+            XCTAssertEqual(PrintedDigitRecovery.fill(&ticket, image: try load(name), zone: whole), 2, name)
+            XCTAssertEqual(ticket.lines.map { $0[.nums5] }, [[5,8,3,4,3], [6,3,0,9,8]], name)
+        }
+    }
+
     func testScanPhotographedTicketsAfterFraming() async throws {
         func calendarEntry(_ issue: String, _ day: String) -> GameYearCalendar {
             let item = CalendarIssue(issue: issue, drawDate: day, weekday: 0, drawTime: "", saleCloseTime: "")

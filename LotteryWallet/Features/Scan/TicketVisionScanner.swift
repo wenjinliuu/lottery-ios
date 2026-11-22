@@ -134,6 +134,8 @@ enum TicketVisionScanner {
             result.warnings = []
         }
         if result.tickets.count == 1, let classifier = DigitClassifier.shared {
+            let beforeRecovery = result.tickets[0].unknownCount
+            var recoveredCells = 0
             if let reading = sevenStarsReading ?? ModelRowReader.read(image: image, fragments: fragments,
                                                  game: result.tickets[0].game, classifier: classifier) {
                 let report = ModelFusion.fuse(&result.tickets[0], rows: reading.rows)
@@ -143,13 +145,23 @@ enum TicketVisionScanner {
                 result.rawText += "\n\n［模型读行］\(report.note.replacingOccurrences(of: "模型读行：", with: ""))\n"
                     + ModelFusion.describe(reading.rows)
                 if let source = image.cgImage {
-                    let filled = PrintedDigitRecovery.fill(&result.tickets[0], image: source, zone: reading.zone)
-                    if filled > 0 { result.rawText += "\n［逐格复核］同票字形和模型一致，补上 \(filled) 位" }
+                    recoveredCells = PrintedDigitRecovery.fill(&result.tickets[0], image: source, zone: reading.zone)
                 }
             } else {
                 registration.debug.notes.append("模型读行：号码区没夹出来，这次没有复核")
                 if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
                 result.rawText += "\n\n［模型读行］号码区没夹出来，这次没有复核"
+            }
+            // A split OCR serial or total line can clip the original search strip.
+            // Registration uses the printed geometry and supplies a second, rectified crop.
+            let remaining = result.tickets[0]
+            if remaining.play == .single, [.qxc, .pl5].contains(remaining.game),
+               remaining.unknownCount > 0, let zone = registration.rectified?.cgImage {
+                recoveredCells += PrintedDigitRecovery.fill(&result.tickets[0], image: zone,
+                                                           zone: CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            if [.qxc, .pl5].contains(remaining.game), beforeRecovery > 0 || recoveredCells > 0 {
+                result.rawText += "\n［逐格复核］补上 \(recoveredCells) 位，剩余 \(result.tickets[0].unknownCount) 位"
             }
         }
         // 一个字都没认出来和「认出字但拼不成票」是两回事，

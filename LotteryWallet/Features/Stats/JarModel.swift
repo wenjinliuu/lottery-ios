@@ -13,10 +13,30 @@ enum JarBuilder {
     static let displayLimit = 1_200
 
     struct Jar: Equatable {
-        var colors: [BallColor] = []
-        var hits = 0
+        var counts: [BallColor: Int] = [:]
+        var hits: Int { counts.values.reduce(0, +) }
 
-        var isSampled: Bool { colors.count < hits }
+        func colors(limit: Int) -> [BallColor] {
+            let total = hits
+            let visible = min(limit, total)
+            guard visible > 0 else { return [] }
+            // 按真实比例分配有限的展示球，累计取整保证展示总数精确。
+            var colors: [BallColor] = []
+            colors.reserveCapacity(visible)
+            var cumulative = 0
+            for color in counts.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+                cumulative += counts[color, default: 0]
+                let end = Int((Double(cumulative) / Double(total) * Double(visible)).rounded())
+                colors.append(contentsOf: repeatElement(color, count: end - colors.count))
+            }
+            // 稳定地打散颜色，切回同一个范围时保持相同顺序。
+            var seed: UInt64 = 1
+            for index in colors.indices.dropFirst().reversed() {
+                seed = 6364136223846793005 &* seed &+ 1
+                colors.swapAt(index, Int((seed >> 32) % UInt64(index + 1)))
+            }
+            return colors
+        }
     }
 
     static func build(_ entries: [JarEntry], range: ProfitRange, now: Date) -> Jar {
@@ -34,34 +54,22 @@ enum JarBuilder {
             }
         }
 
-        let hits = counts.values.reduce(0, +)
-        let visible = min(displayLimit, hits)
-        guard visible > 0 else { return Jar() }
-
-        // 按真实比例分配有限的展示球，累计取整保证展示总数精确。
-        var colors: [BallColor] = []
-        colors.reserveCapacity(visible)
-        var cumulative = 0
-        for color in counts.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
-            cumulative += counts[color, default: 0]
-            let end = Int((Double(cumulative) / Double(hits) * Double(visible)).rounded())
-            colors.append(contentsOf: repeatElement(color, count: end - colors.count))
-        }
-        // 稳定地打散颜色，切回同一个范围时保持相同顺序。
-        var seed: UInt64 = 1
-        for index in colors.indices.dropFirst().reversed() {
-            seed = 6364136223846793005 &* seed &+ 1
-            colors.swapAt(index, Int((seed >> 32) % UInt64(index + 1)))
-        }
-        return Jar(colors: colors, hits: hits)
+        return Jar(counts: counts)
     }
 
-    /// 球少时限制最大直径。数量增加时，逐步提高允许的占用面积并缩小球径。
-    /// 达到展示上限时，球面积约占罐子的 48%，堆积的空隙和上方空间留给滚动。
+    /// Occupied disk area; a settled hexagonal pile also contains gaps between disks.
+    private static let areaFraction = 0.64
+    static let minimumDiameter = 14.0
+
+    static func capacity(width: Double, height: Double) -> Int {
+        guard width >= minimumDiameter, height >= minimumDiameter else { return 0 }
+        let minArea = Double.pi * pow(minimumDiameter / 2, 2)
+        return min(displayLimit, max(1, Int(width * height * areaFraction / minArea)))
+    }
+
     static func radius(count: Int, width: Double, height: Double) -> Double {
         guard count > 0, width > 0, height > 0 else { return 0 }
-        let progress = min(Double(count) / Double(displayLimit), 1)
-        let area = width * height * (0.26 + 0.22 * progress)
-        return min(9, min(width, height) / 4, (area / (Double.pi * Double(count))).squareRoot())
+        let ideal = sqrt(width * height * areaFraction / (Double.pi * Double(count)))
+        return min(Double(DrawCardMetrics.maxBall) / 2, min(width, height) / 2, max(minimumDiameter / 2, ideal))
     }
 }

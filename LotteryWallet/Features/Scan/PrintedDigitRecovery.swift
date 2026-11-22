@@ -45,10 +45,16 @@ enum PrintedDigitRecovery {
             let known = line.indices.filter { line[$0] >= 0 }
             guard known.count >= 3 else { return nil }
             let hits = windows.filter { window in
-                known.allSatisfy { position in
-                    guard let glyph = glyphs[window[position]] else { return false }
-                    return glyph.digit == line[position] && glyph.confidence >= ModelFusion.threshold
+                // A faint anchor can abstain. A confident contradictory anchor vetoes the row.
+                var agreeing = 0
+                for position in known {
+                    guard let glyph = glyphs[window[position]],
+                          glyph.confidence >= ModelFusion.threshold,
+                          glyph.digit != DigitClassifier.reject else { continue }
+                    guard glyph.digit == line[position] else { return false }
+                    agreeing += 1
                 }
+                return agreeing >= 3
             }
             return hits.count == 1 ? hits.first : nil
         }
@@ -59,7 +65,9 @@ enum PrintedDigitRecovery {
         let references = usable.flatMap { row in
             lines[row].indices.compactMap { col -> Glyph? in
                 guard lines[row][col] >= 0, let window = matches[row] else { return nil }
-                return glyphs[window[col]]
+                guard let glyph = glyphs[window[col]], glyph.digit == lines[row][col],
+                      glyph.confidence >= ModelFusion.threshold else { return nil }
+                return glyph
             }
         }
         var filled = 0
@@ -85,19 +93,34 @@ enum PrintedDigitRecovery {
 
     private static func alignedWindows(_ boxes: [CGRect], count: Int) -> Set<[Int]> {
         var windows = Set<[Int]>()
-        for anchor in boxes {
-            let band = boxes.indices.filter {
-                let box = boxes[$0]
-                return abs(box.midY - anchor.midY) < anchor.height * 0.62
-                    && (0.65...1.5).contains(box.height / anchor.height)
-            }.sorted { boxes[$0].midX < boxes[$1].midX }
-            guard band.count >= count else { continue }
-            for offset in 0...(band.count - count) {
-                let row = Array(band[offset..<(offset + count)])
-                let gaps = zip(row, row.dropFirst()).map { boxes[$1].midX - boxes[$0].midX }
-                guard let low = gaps.min(), let high = gaps.max(), low >= anchor.height,
-                      high <= 1.25 * low, high <= 5 * anchor.height else { continue }
-                windows.insert(row)
+        // Each printed line has its own baseline after corner correction. Its two
+        // end glyphs predict the intermediate cells even when adjacent lines overlap in Y.
+        let order = boxes.indices.sorted { boxes[$0].midX < boxes[$1].midX }
+        for (offset, left) in order.enumerated() {
+            let start = boxes[left]
+            for right in order.dropFirst(offset + 1) {
+                let end = boxes[right]
+                let dx = end.midX - start.midX
+                let pitch = dx / CGFloat(count - 1)
+                if pitch > 5 * start.height { break }
+                guard pitch >= start.height, abs(end.midY - start.midY) <= dx * 0.30,
+                      (0.65...1.5).contains(end.height / start.height) else { continue }
+                var row = [left]
+                for column in 1..<(count - 1) {
+                    let t = CGFloat(column) / CGFloat(count - 1)
+                    let targetX = start.midX + t * dx
+                    let targetY = start.midY + t * (end.midY - start.midY)
+                    let h = start.height + t * (end.height - start.height)
+                    let candidates = order.filter {
+                        let b = boxes[$0]
+                        return abs(b.midX - targetX) <= pitch * 0.18
+                            && abs(b.midY - targetY) <= h * 0.40
+                            && (0.65...1.5).contains(b.height / h)
+                    }
+                    guard candidates.count == 1, let index = candidates.first else { break }
+                    row.append(index)
+                }
+                if row.count == count - 1 { windows.insert(row + [right]) }
             }
         }
         return windows
