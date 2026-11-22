@@ -15,18 +15,15 @@ struct BallJarView: View {
 
     static let height: CGFloat = 230
     private static let corner: CGFloat = 28
-    private static let frameWidth: CGFloat = 3
-    // At rest a ball's outside edge sits 2 points underneath the glass.
-    private static let ballInset: CGFloat = 1
+    private static let frameWidth: CGFloat = 6
     private var isActive: Bool { isVisible && scenePhase == .active && jar.hits > 0 }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Self.corner)
         VStack(alignment: .leading, spacing: 8) {
             JarBallLayer(scene: scene)
-                .frame(height: Self.height - 2 * Self.ballInset)
+                .frame(height: Self.height)
                 .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
-                .padding(Self.ballInset)
                 .background(Color.white, in: shape)
                 .clipShape(shape)
                 .overlay {
@@ -96,7 +93,7 @@ struct BallJarView: View {
     private var visibleCount: Int { min(jar.hits, JarBuilder.capacity(width: size.width, height: size.height)) }
 
     private func load() {
-        scene.load(jar.colors(limit: visibleCount), size: size, corner: Self.corner - Self.ballInset)
+        scene.load(jar.colors(limit: visibleCount), size: size, corner: Self.corner)
     }
 }
 
