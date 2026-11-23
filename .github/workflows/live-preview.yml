@@ -25,8 +25,9 @@ jobs:
                   if '07-notification' in a['suggestedHumanReadableName']:
                       shutil.copyfile(root/a['exportedFileName'],'evidence/verified-notification.png')
           PYTHON
-          test -s evidence/verified-notification.png
-          git add evidence/verified-notification.png
+          cp /tmp/evidence/report/attachments/manifest.json evidence/release-manifest.json
+          cp /tmp/evidence/report/report.md evidence/release-report.md
+          git add evidence
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'Collect simulator evidence for store notification validation'
