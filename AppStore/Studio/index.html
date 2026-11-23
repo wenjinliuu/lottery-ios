@@ -60,22 +60,13 @@
       .poster::before,.poster::after { content:""; position:absolute; z-index:-1; border-radius:9cqw; }
       .poster::before { top:43%; left:-19%; width:143%; height:74%; transform:rotate(-11deg); background:var(--pale); }
       .poster::after { top:53%; left:-24%; width:148%; height:72%; transform:rotate(-4deg); background:var(--mid); }
-      .detail { display:none; position:absolute; z-index:3; border:.65cqw solid white; background:white; border-radius:4cqw; overflow:hidden; box-shadow:0 1.3cqw 4cqw #172d4c35; }
-      .detail img { display:block; position:absolute; max-width:none; }
-      /* Enlargements are crops of the same original simulator frame. */
-      [data-slide="0"] .detail { display:block; left:2.6%; width:90%; top:63%; height:16.3%; }
-      [data-slide="0"] .detail img { width:144%; left:-7%; top:-268%; }
-      [data-slide="3"] .detail { display:block; left:2.8%; width:94.4%; top:61%; height:23%; }
-      [data-slide="3"] .detail img { width:114%; left:-7%; top:-156%; }
-      [data-slide="2"] .detail { display:block; left:3%; width:94%; top:70%; height:10.3%; }
-      [data-slide="2"] .detail img { width:108%; left:-4%; top:-804%; }
       .device {
         position: absolute;
-        top: 32.5%;
-        width: 87%;
-        left: 8.5%;
-        padding: 1.25%;
-        border-radius: 10.6cqw;
+        top: 31%;
+        width: 66%;
+        left: 17%;
+        padding: 0.95%;
+        border-radius: 8.1cqw;
         background: linear-gradient(
           100deg,
           #54575a,
@@ -91,14 +82,10 @@
           0 1.8cqw 3.6cqw #15233a27,
           inset 0 0 0 0.2cqw #676b70;
       }
-      [data-slide="1"] .device { width:94%; left:3%; top:32%; }
-      [data-slide="3"] .device { width:76%; left:17%; top:34%; }
-      [data-slide="2"] .device { top:37%; left:8%; width:86%; }
-      [data-slide="4"] .device { width:91%; left:5%; top:34%; }
       .device img {
         display: block;
         width: 100%;
-        border-radius: 9.4cqw;
+        border-radius: 7.2cqw;
         position: relative;
       }
       .device:before,
@@ -158,7 +145,6 @@
           <p contenteditable="true"></p>
         </div>
         <div class="device"><img alt="" /><i class="island"></i></div>
-        <div class="detail" aria-hidden="true"><img alt="" /></div>
       </section>
     </main>
     <script src="vendor/html2canvas.min.js"></script>
@@ -166,8 +152,8 @@
       const base = "../../Tests/LotteryWalletUITests/__Snapshots__/";
       const slides = [
         ["识别", "拍张彩票，\n号码不用抄", "专用识别模型逐注读号，存入票夹前可以对照票面修改。", "AppStoreScreenshotTests/04-scan.png"],
-        ["多票", "双色球、大乐透，\n一起拍", "一张照片里有几张票，就分开框选、逐张核对。", "AppStoreScreenshotTests/06-multiple.png"],
-        ["通知", "开了什么号，\n中了几注", "开奖后，一条通知就能看见开奖号码、命中注数和已知奖金。", "AppStoreScreenshotTests/07-notification.png"],
+        ["多票", "多张一起拍，\n自动框选识别", "双色球、大乐透等彩种可以同框拍摄，识别后逐张核对。", "art/multiple.png"],
+        ["通知", "开奖出号，\n及时提醒", "各彩种分别提醒，锁屏就能看到开奖号码、中奖注数和已知奖金。", "art/notifications.png"],
         ["球罐", "把命中的号码，\n攒成一罐", "每次命中都算数。按月或按年回看，还能摇动小球。", "KeyFlowTests/balls-309-rest.png"],
         ["票夹", "你的票夹，\n留在你的手机里", "票据默认保存在本机。需要备份时，可自行开启 iCloud 备份。", "AppStoreScreenshotTests/02-wallet.png"],
       ];
@@ -182,25 +168,24 @@
         const slide = slides[i];
         let copy;
         try {
-          copy = JSON.parse(localStorage.getItem("store-v2-slide-" + i));
+          copy = JSON.parse(localStorage.getItem("store-v3-slide-" + i));
         } catch {}
         title.textContent = copy?.[0] ?? slide[1];
         desc.textContent = copy?.[1] ?? slide[2];
         document.querySelector(".poster").dataset.slide = i;
-        img.src = base + slide[3];
-        document.querySelector(".detail img").src = img.src;
-        img.alt = slide[0] + "模拟器截图";
+        img.src = slide[3].startsWith("art/") ? slide[3] : base + slide[3];
+        img.alt = slide[0] + "宣传画面";
         select.value = i;
       }
       select.onchange = () => show(+select.value);
       for (const field of [title, desc])
         field.oninput = () =>
           localStorage.setItem(
-            "store-v2-slide-" + select.value,
+            "store-v3-slide-" + select.value,
             JSON.stringify([title.textContent, desc.textContent]),
           );
       document.querySelector("#reset").onclick = () => {
-        localStorage.removeItem("store-v2-slide-" + select.value);
+        localStorage.removeItem("store-v3-slide-" + select.value);
         show(+select.value);
       };
       document.querySelector("#download").onclick = async (e) => {
