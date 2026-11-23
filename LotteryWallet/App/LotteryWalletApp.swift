@@ -52,7 +52,7 @@ struct LotteryWalletApp: App {
                 .task {
                     guard DemoData.isEnabled, ProcessInfo.processInfo.arguments.contains("--store-notification") else { return }
                     let center = UNUserNotificationCenter.current()
-                    guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else { return }
+                    guard (try? await center.requestAuthorization(options: [.alert, .sound, .provisional])) == true else { return }
                     let raw = UNMutableNotificationContent()
                     raw.title = "双色球 2026134 期开奖"
                     raw.body = "04 05 10 17 21 32 + 08"

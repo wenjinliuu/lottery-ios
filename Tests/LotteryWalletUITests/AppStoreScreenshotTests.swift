@@ -99,14 +99,10 @@ final class AppStoreScreenshotTests: XCTestCase {
         app.launchArguments.append("--store-notification")
         app.launch()
         let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let allow = board.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
-        let scheduled = app.staticTexts["store.notification.scheduled"]
-        for _ in 0..<12 {
-            if scheduled.exists { break }
-            if allow.exists { allow.tap() }
-            if scheduled.waitForExistence(timeout: 1) { break }
-        }
-        guard scheduled.exists else {
+        // Provisional authorization sends this simulator-only sample straight
+        // to Notification Center without an alert that can block later OCR tests.
+        let scheduled = app.descendants(matching: .any)["store.notification.scheduled"].firstMatch
+        guard scheduled.waitForExistence(timeout: 30) else {
             XCTFail("系统未接受示例通知请求")
             return
         }
