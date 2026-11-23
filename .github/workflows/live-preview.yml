@@ -26,6 +26,11 @@ jobs:
                   import shutil
                   shutil.copyfile(f, pathlib.Path('evidence')/(f.name+'.png'))
           PY
+          find /tmp/evidence -maxdepth 2 -type f | head -80
+          for f in /tmp/evidence/*.log; do
+            if test -f "$f"; then grep -E '(error: |testCaptureNotificationBanner|Test Case.* failed)' "$f" | tail -80 >>evidence/failure.txt || true; fi
+          done
+          find /tmp/evidence -maxdepth 2 -iname '*report*' -type f -exec cp '{}' evidence/ ';'
           git add evidence
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
