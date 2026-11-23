@@ -38,7 +38,7 @@ struct TicketLocateView: View {
             GeometryReader { proxy in
                 let frame = displayFrame(in: proxy.size)
                 ZStack {
-                    Image(uiImage: image)
+                    Image(uiImage: DemoData.masked(image))
                         .resizable()
                         .scaledToFit()
                         .frame(width: frame.width, height: frame.height)

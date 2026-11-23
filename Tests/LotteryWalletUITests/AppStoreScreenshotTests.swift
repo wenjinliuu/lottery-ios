@@ -75,6 +75,19 @@ final class AppStoreScreenshotTests: XCTestCase {
         capture("04-scan")
     }
 
+    func testCaptureMultipleTickets() {
+        let pair = Self.scanTicket.deletingLastPathComponent().appendingPathComponent("review-pair.jpg")
+        app.launchEnvironment["DEMO_SCAN_IMAGE"] = pair.path
+        app.launchEnvironment["DEMO_SCAN_LOCATE"] = "1"
+        app.launch()
+        let scan = app.tabBars.buttons.matching(NSPredicate(format: "label CONTAINS %@", "扫描")).firstMatch
+        XCTAssertTrue(scan.waitForExistence(timeout: 15))
+        scan.tap()
+        XCTAssertTrue(app.staticTexts["找到 2 张票"].waitForExistence(timeout: 90))
+        settle()
+        capture("06-multiple")
+    }
+
     // MARK: - 工具
 
     private func open(tab: String) {

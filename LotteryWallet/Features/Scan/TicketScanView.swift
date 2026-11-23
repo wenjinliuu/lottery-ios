@@ -175,8 +175,12 @@ struct TicketScanView: View {
         // 示例模式：UI 测试给了一张票据照片，直接进裁切，省掉系统相册那一步。
         .task {
             guard stage == .intro, let image = DemoData.scanImage else { return }
-            preview = image
-            stage = .crop
+            if ProcessInfo.processInfo.environment["DEMO_SCAN_LOCATE"] == "1" {
+                await locateTickets(image)
+            } else {
+                preview = image
+                stage = .crop
+            }
         }
         .fullScreenCover(isPresented: $isCameraPresented) {
             CameraPicker { image in
