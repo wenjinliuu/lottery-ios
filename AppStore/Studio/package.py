@@ -16,10 +16,10 @@ def package(destination):
     studio = Path(__file__).resolve().parent
     snapshots = studio.parents[1] / "Tests/LotteryWalletUITests/__Snapshots__"
     template = (studio / "index.html").read_text()
-    pattern = r"(['\"])((?:KeyFlowTests|AppStoreScreenshotTests|art)/[^'\"]+\.png)\1"
+    pattern = r"(['\"])((?:KeyFlowTests|AppStoreScreenshotTests)/[^'\"]+\.png)\1"
 
     def embed_snapshot(match):
-        return '"' + embedded((studio if match[2].startswith("art/") else snapshots) / match[2]) + '"'
+        return '"' + embedded(snapshots / match[2]) + '"'
 
     page, count = re.subn(pattern, embed_snapshot, template)
     if count != 5:

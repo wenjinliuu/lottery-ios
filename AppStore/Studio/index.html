@@ -152,8 +152,8 @@
       const base = "../../Tests/LotteryWalletUITests/__Snapshots__/";
       const slides = [
         ["识别", "拍张彩票，\n号码不用抄", "专用识别模型逐注读号，存入票夹前可以对照票面修改。", "AppStoreScreenshotTests/04-scan.png"],
-        ["多票", "多张一起拍，\n自动框选识别", "双色球、大乐透等彩种可以同框拍摄，识别后逐张核对。", "art/multiple.png"],
-        ["通知", "开奖出号，\n及时提醒", "各彩种分别提醒，锁屏就能看到开奖号码、中奖注数和已知奖金。", "art/notifications.png"],
+        ["多票", "多张一起拍，\n自动框选识别", "双色球、大乐透等彩种可以同框拍摄，识别后逐张核对。", "AppStoreScreenshotTests/08-display-pair.png"],
+        ["通知", "开奖出号，\n及时提醒", "各彩种分别提醒，锁屏就能看到开奖号码、中奖注数和已知奖金。", "AppStoreScreenshotTests/07-notification.png"],
         ["球罐", "把命中的号码，\n攒成一罐", "每次命中都算数。按月或按年回看，还能摇动小球。", "KeyFlowTests/balls-309-rest.png"],
         ["票夹", "你的票夹，\n留在你的手机里", "票据默认保存在本机。需要备份时，可自行开启 iCloud 备份。", "AppStoreScreenshotTests/02-wallet.png"],
       ];
@@ -168,12 +168,12 @@
         const slide = slides[i];
         let copy;
         try {
-          copy = JSON.parse(localStorage.getItem("store-v3-slide-" + i));
+          copy = JSON.parse(localStorage.getItem("store-v4-slide-" + i));
         } catch {}
         title.textContent = copy?.[0] ?? slide[1];
         desc.textContent = copy?.[1] ?? slide[2];
         document.querySelector(".poster").dataset.slide = i;
-        img.src = slide[3].startsWith("art/") ? slide[3] : base + slide[3];
+        img.src = base + slide[3];
         img.alt = slide[0] + "宣传画面";
         select.value = i;
       }
@@ -181,11 +181,11 @@
       for (const field of [title, desc])
         field.oninput = () =>
           localStorage.setItem(
-            "store-v3-slide-" + select.value,
+            "store-v4-slide-" + select.value,
             JSON.stringify([title.textContent, desc.textContent]),
           );
       document.querySelector("#reset").onclick = () => {
-        localStorage.removeItem("store-v3-slide-" + select.value);
+        localStorage.removeItem("store-v4-slide-" + select.value);
         show(+select.value);
       };
       document.querySelector("#download").onclick = async (e) => {
