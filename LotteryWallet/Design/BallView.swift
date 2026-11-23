@@ -292,11 +292,14 @@ struct BallFlow: Layout {
     var spacing: CGFloat = 6
     var lineSpacing: CGFloat = 7
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+    func makeCache(subviews: Subviews) -> [CGSize] {
+        subviews.map { $0.sizeThatFits(.unspecified) }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout [CGSize]) -> CGSize {
         let maxWidth = proposal.width ?? .infinity
         var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0, widest: CGFloat = 0
-        for view in subviews {
-            let s = view.sizeThatFits(.unspecified)
+        for s in cache {
             if x > 0, x + spacing + s.width > maxWidth {
                 widest = Swift.max(widest, x)
                 x = 0
@@ -310,11 +313,10 @@ struct BallFlow: Layout {
         return CGSize(width: min(widest, maxWidth), height: y + lineHeight)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout [CGSize]) {
         let maxWidth = bounds.width
         var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0
-        for view in subviews {
-            let s = view.sizeThatFits(.unspecified)
+        for (view, s) in zip(subviews, cache) {
             if x > 0, x + spacing + s.width > maxWidth {
                 x = 0
                 y += lineHeight + lineSpacing
