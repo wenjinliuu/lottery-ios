@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>对个号 · App Store 截图工作台</title><style>
 *{box-sizing:border-box}body{margin:0;background:#e9edf1;color:#182135;font:16px/1.4 "PingFang SC","Noto Sans CJK SC",sans-serif}header{background:white;padding:14px 5vw;display:flex;align-items:center;gap:16px;flex-wrap:wrap}select,button{font:inherit;padding:7px 12px;border:1px solid #b7bfc9;border-radius:8px;background:white}header span{color:#576070}.stage{width:min(92vw,480px);margin:20px auto;container-type:inline-size}.poster{position:relative;overflow:hidden;background:#fff;width:100%;aspect-ratio:1320/2868}.copy{position:absolute;left:7.2%;right:6%;top:4.7%}.brand{font-size:3.7cqw;font-weight:650;letter-spacing:.02em;color:#4c5868}.brand b{color:#225dbc;margin-right:.25em}h1{font-size:8.6cqw;line-height:1.16;letter-spacing:-.055em;margin:.4em 0 .25em;color:#111c2b}p{margin:0;color:#465566;font-size:3.25cqw;line-height:1.45}.device{position:absolute;top:22.8%;width:72.5%;left:13.75%;padding:1.25%;border-radius:10.6cqw;background:linear-gradient(100deg,#54575a,#e4e5e7 .8%,#5a5c60 1.4%,#171819 2.1%,#121314 97.8%,#68696a 98.7%,#eceff1 99.1%,#57595e);box-shadow:0 1.8cqw 3.6cqw #15233a27,inset 0 0 0 .2cqw #676b70}.device img{display:block;width:100%;border-radius:9.4cqw;position:relative}.device:before,.device:after{content:"";position:absolute;width:.44cqw;background:linear-gradient(90deg,#444,#aaa,#444);border-radius:.3cqw;top:25%;height:9%;left:-.34cqw}.device:after{left:auto;right:-.34cqw;top:29%;height:11%}.island{position:absolute;top:1.15%;left:38.5%;width:23%;height:2.75%;background:#101113;border-radius:9cqw}.export header{display:none}.export .stage{width:1320px;margin:0}.export .poster{height:2868px}[contenteditable]:focus{outline:1px dashed #477ecd}
-</style></head><body><header><b>商店截图工作台</b><select aria-label="选择画面"></select><button id="reset">恢复此页文案</button><span>点标题和说明可编辑，修改会保存在此浏览器。</span></header><main class="stage"><section class="poster"><div class="copy"><div class="brand"><b>●</b> 对个号</div><h1 contenteditable="true"></h1><p contenteditable="true"></p></div><div class="device"><img alt=""><i class="island"></i></div></section></main><script>
+</style></head><body><header><b>商店截图工作台</b><select aria-label="选择画面"></select><button id="download">导出高清 PNG</button><button id="reset">恢复此页文案</button><span>点标题和说明可编辑，修改会保存在此浏览器。</span></header><main class="stage"><section class="poster"><div class="copy"><div class="brand"><b>●</b> 对个号</div><h1 contenteditable="true"></h1><p contenteditable="true"></p></div><div class="device"><img alt=""><i class="island"></i></div></section></main><script src="vendor/html2canvas.min.js"></script><script>
 const base='../../Tests/LotteryWalletUITests/__Snapshots__/';
 const slides=[
  ['识别','票面号码，逐注识别','专用识别模型辅助读号，存入票夹前逐注核对。','AppStoreScreenshotTests/04-scan.png'],
@@ -16,5 +16,20 @@ if(params.has('export')) document.body.classList.add('export');
 function show(i){const slide=slides[i];let copy;try{copy=JSON.parse(localStorage.getItem('store-slide-'+i))}catch{};title.textContent=copy?.[0]??slide[1];desc.textContent=copy?.[1]??slide[2];img.src=base+slide[3];img.alt=slide[0]+'模拟器截图';select.value=i;}
 select.onchange=()=>show(+select.value);for(const field of [title,desc])field.oninput=()=>localStorage.setItem('store-slide-'+select.value,JSON.stringify([title.textContent,desc.textContent]));
 document.querySelector('#reset').onclick=()=>{localStorage.removeItem('store-slide-'+select.value);show(+select.value)};
+document.querySelector('#download').onclick=async e=>{
+  const button=e.currentTarget;
+  button.disabled=true;
+  try{
+    await img.decode();
+    const canvas=await html2canvas(document.querySelector('.poster'),{
+      scale:1,backgroundColor:'#fff',logging:false,
+      onclone:doc=>doc.body.classList.add('export')
+    });
+    const link=document.createElement('a');
+    link.download=select.options[select.selectedIndex].text+'.png';
+    link.href=canvas.toDataURL('image/png');
+    link.click();
+  }catch{alert('导出失败，请检查截图是否已加载。')}finally{button.disabled=false}
+};
 show(Math.min(3,Math.max(0,parseInt(params.get('page'))||0)));
 </script></body></html>
