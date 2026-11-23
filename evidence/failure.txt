@@ -1,0 +1,80 @@
+2026-11-23 11:00:48.716 Df LotteryWallet[28586:15730] [com.apple.dt.xctest:Default] Sending animations idle reply with error: (null)
+2026-11-23 11:00:51.866 Df LotteryWallet[28586:1572e] [com.apple.dt.xctest:Default] Sending animations idle reply with error: (null)
+)} (error: (null))
+        ↪︎ Elements matching predicate '"票夹" IN identifiers' with results: <XCTElementQueryResults: 0x108ed68e0> (error: (null))
+)} (error: (null))
+2026-11-23 11:00:52.564 Df LotteryWallet[28586:15737] [com.apple.dt.xctest:Default] Replying to query ↪︎ Descendants matching predicate identifier == "NotificationShortLookView" OR elementType == 7 with results: <XCTElementQueryResults: 0x108ed5920> (error: (null))
+2026-11-23 11:00:55.789 Df LotteryWallet[28586:156b7] [com.apple.dt.xctest:Default] Sending animations idle reply with error: (null)
+)} (error: (null))
+    ↪︎ Elements matching predicate '"票夹" IN identifiers' with results: <XCTElementQueryResults: 0x108e8d620> (error: (null))
+2026-11-23 11:00:57.225 Df LotteryWallet[28586:15744] [com.apple.dt.xctest:Default] Sending animations idle reply with error: (null)
+)} (error: (null))
+2026-11-23 11:00:57.377 Df LotteryWallet[28586:15744] [com.apple.dt.xctest:Default] Replying to query  with results: <XCTElementQueryResults: 0x108e8dcb0> (error: (null))
+)} (error: (null))
+2026-11-23 11:00:57.740 Df LotteryWallet[28586:15734] [com.apple.dt.xctest:Default] Replying to query ↪︎ Descendants matching predicate identifier == "NotificationShortLookView" OR elementType == 7 with results: <XCTElementQueryResults: 0x108e8d7d0> (error: (null))
+)} (error: (null))
+2026-11-23 11:00:57.850 Df LotteryWallet[28586:15734] [com.apple.dt.xctest:Default] Replying to query  with results: <XCTElementQueryResults: 0x108e8d950> (error: (null))
+)} (error: (null))
+2026-11-23 11:00:57.952 Df LotteryWallet[28586:15734] [com.apple.dt.xctest:Default] Replying to query  with results: <XCTElementQueryResults: 0x108e8da10> (error: (null))
+)} (error: (null))
+2026-11-23 11:00:58.346 Df LotteryWallet[28586:15744] [com.apple.dt.xctest:Default] Replying to query  with results: <XCTElementQueryResults: 0x108e8d860> (error: (null))
+)} (error: (null))
+2026-11-23 11:00:58.860 Df LotteryWallet[28586:1573e] [com.apple.dt.xctest:Default] Replying to query  with results: <XCTElementQueryResults: 0x108e8d3e0> (error: (null))
+)} (error: (null))
+2026-11-23 11:00:59.089 Df LotteryWallet[28586:1572b] [com.apple.dt.xctest:Default] Replying to query  with results: <XCTElementQueryResults: 0x108e8d6b0> (error: (null))
+2026-11-23 11:01:01.036 Df LotteryWallet[28586:15744] [com.apple.dt.xctest:Default] Sending animations idle reply with error: (null)
+)} (error: (null))
+    ↪︎ Elements matching predicate '"票夹" IN identifiers' with results: <XCTElementQueryResults: 0x108e8dc20> (error: (null))
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Hit area is too small
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Hit area is too small
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Dynamic Type font sizes are unsupported
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Dynamic Type font sizes are partially unsupported
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Text clipped
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Text clipped
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Text clipped
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Text clipped
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Text clipped
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Text clipped
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Label not human-readable
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Label not human-readable
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast failed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast failed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast failed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast failed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast failed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast failed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast failed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast failed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast failed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Contrast nearly passed
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Potentially inaccessible text
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Potentially inaccessible text
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome] : Potentially inaccessible text
+Test Case '-[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditHome]' failed (59.656 seconds).
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditSettings] : failed: caught error: "Error Domain=com.apple.xcode.xctest.accessibilityAudit Code=-56 "Audit failed to complete in time" UserInfo={NSLocalizedDescription=Audit failed to complete in time}"
+Test Case '-[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditSettings]' failed (76.046 seconds).
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AccessibilityAuditTests.swift:26: error: -[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditWallet] : failed: caught error: "Error Domain=com.apple.xcode.xctest.accessibilityAudit Code=-56 "Audit failed to complete in time" UserInfo={NSLocalizedDescription=Audit failed to complete in time}"
+Test Case '-[LotteryWalletUITests.AccessibilityAuditTests testAccessibilityAuditWallet]' failed (40.300 seconds).
+Test Case '-[LotteryWalletUITests.AppStoreScreenshotTests testCaptureNotificationBanner]' started.
+/Users/runner/work/lottery-ios/lottery-ios/Tests/LotteryWalletUITests/AppStoreScreenshotTests.swift:118: error: -[LotteryWalletUITests.AppStoreScreenshotTests testCaptureNotificationBanner] : failed - 系统未接受示例通知请求
+Test Case '-[LotteryWalletUITests.AppStoreScreenshotTests testCaptureNotificationBanner]' failed (43.981 seconds).
+	AppStoreScreenshotTests.testCaptureNotificationBanner()
