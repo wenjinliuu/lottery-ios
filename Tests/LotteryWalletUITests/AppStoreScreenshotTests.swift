@@ -111,11 +111,17 @@ final class AppStoreScreenshotTests: XCTestCase {
         app.launchArguments.append("--store-notification")
         app.launch()
         let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        // Provisional authorization sends this simulator-only sample straight
-        // to Notification Center without an alert that can block later OCR tests.
-        let scheduled = app.descendants(matching: .any)["store.notification.scheduled"].firstMatch
-        guard scheduled.waitForExistence(timeout: 30) else {
-            XCTFail("系统未接受示例通知请求")
+        let status = app.staticTexts["store.notification.status"]
+        let allow = board.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
+        let deadline = Date().addingTimeInterval(45)
+        while Date() < deadline {
+            if allow.exists { allow.tap() }
+            if status.exists, status.label == "已排程 3 条" { break }
+            settle(0.3)
+        }
+        guard status.exists, status.label == "已排程 3 条" else {
+            capture("notification-permission-failure")
+            XCTFail("系统排程状态：" + (status.exists ? status.label : app.debugDescription))
             return
         }
         // Accessibility can expose the banner before its first visible frame.
@@ -140,6 +146,10 @@ final class AppStoreScreenshotTests: XCTestCase {
                 capture("07-notification", screenshot: shot)
                 return
             }
+            if attempt == 3 || attempt == 8 {
+                let group = board.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS %@", "notifications", "条通知")).firstMatch
+                if group.exists && group.isHittable { group.tap() }
+            }
             if attempt == 5 {
                 // Some simulator builds open on the clock with earlier alerts collapsed.
                 let lower = board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
@@ -148,6 +158,7 @@ final class AppStoreScreenshotTests: XCTestCase {
             }
             settle(0.5)
         }
+        capture("notification-visible-failure")
         let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         evidence.name = "notification-center-failure"
         evidence.lifetime = .keepAlways
