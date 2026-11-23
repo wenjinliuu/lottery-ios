@@ -175,6 +175,22 @@ struct TicketScanView: View {
         // 示例模式：UI 测试给了一张票据照片，直接进裁切，省掉系统相册那一步。
         .task {
             guard stage == .intro, let image = DemoData.scanImage else { return }
+            #if DEBUG && targetEnvironment(simulator)
+            // Store photography uses two masked copies of the approved sample.
+            // Their captions illustrate the two styles; OCR runs on separate fixtures.
+            if ProcessInfo.processInfo.arguments.contains("--store-display-pair") {
+                preview = image
+                marks = [(70.0, GameKey.dlt), (790.0, .ssq)].map { left, game in
+                    let x = CGFloat(left) / 1500, right = (CGFloat(left) + 640) / 1500
+                    let top = CGFloat(140) / 1200, bottom = CGFloat(1100) / 1200
+                    let quad = TicketQuad(topLeft: CGPoint(x: x, y: top), topRight: CGPoint(x: right, y: top),
+                                          bottomRight: CGPoint(x: right, y: bottom), bottomLeft: CGPoint(x: x, y: bottom))
+                    return TicketLocateView.Mark(quad: quad, game: game)
+                }
+                stage = .locate
+                return
+            }
+            #endif
             if ProcessInfo.processInfo.environment["DEMO_SCAN_LOCATE"] == "1" {
                 await locateTickets(image)
             } else {

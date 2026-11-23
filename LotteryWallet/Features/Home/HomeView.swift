@@ -218,6 +218,14 @@ struct HomeView: View {
         pendingGames = drawStore.pendingDrawUpdates()
         let order = drawStore.carouselOrder()
         carouselGames = order
+        #if DEBUG && targetEnvironment(simulator)
+        if DemoData.isEnabled, ProcessInfo.processInfo.arguments.contains("--store-dlt"),
+           let index = order.firstIndex(of: .dlt) {
+            carouselIndex = index
+            pageIndex = index + 1
+            return
+        }
+        #endif
         // 轮播顺序会随「今天开哪个彩种」变化，旧的下标可能越界，
         // 越界后 TabView 会白屏一页。
         if carouselIndex >= order.count || pageIndex > order.count + 1 || pageIndex < 0 {
@@ -492,6 +500,9 @@ struct HomeView: View {
     /// 减弱动效下**完全不转** —— 自动播放的轮播是无障碍里最经典的问题之一，
     /// 对前庭敏感和阅读较慢的用户都是干扰。
     private func runAutoScroll() async {
+        #if DEBUG && targetEnvironment(simulator)
+        if DemoData.isEnabled, ProcessInfo.processInfo.arguments.contains("--store-dlt") { return }
+        #endif
         guard !reduceMotion, carouselGames.count > 1 else { return }
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(4))

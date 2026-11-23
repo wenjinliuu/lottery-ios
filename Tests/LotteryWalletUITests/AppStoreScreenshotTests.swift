@@ -25,6 +25,7 @@ final class AppStoreScreenshotTests: XCTestCase {
     }
 
     func testCaptureStoreScreenshots() {
+        app.launchArguments.append("--store-dlt")
         app.launch()
         XCTAssertTrue(app.staticTexts["累计收支"].waitForExistence(timeout: 15), "首页没有加载出来")
         // Screen readiness is established above; live network draw text is optional for demo screenshots.
@@ -95,6 +96,17 @@ final class AppStoreScreenshotTests: XCTestCase {
         capture("06-multiple")
     }
 
+    func testCaptureMaskedDisplayPair() {
+        app.launchEnvironment["DEMO_SCAN_IMAGE"] = Self.scanTicket.deletingLastPathComponent()
+            .appendingPathComponent("store-display-pair.jpg").path
+        app.launchArguments.append("--store-display-pair")
+        app.launch()
+        app.tabBars.buttons.matching(NSPredicate(format: "label CONTAINS %@", "扫描")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["找到 2 张票"].waitForExistence(timeout: 15))
+        settle()
+        capture("08-display-pair")
+    }
+
     func testCaptureNotificationBanner() throws {
         app.launchArguments.append("--store-notification")
         app.launch()
@@ -115,13 +127,14 @@ final class AppStoreScreenshotTests: XCTestCase {
             read.recognitionLanguages = ["zh-Hans", "en-US"]
             try? VNImageRequestHandler(cgImage: image).perform([read])
             let words = (read.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined()
-            guard words.contains("2026134"), words.contains("奖金") else { return nil }
+            guard ["2026134", "26132", "26308", "奖金"].allSatisfy({ words.contains($0) }) else { return nil }
             return shot
         }
         XCUIDevice.shared.press(.home)
         let start = board.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.003))
         let end = board.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.85))
         start.press(forDuration: 0.15, thenDragTo: end)
+        settle(8)
         for attempt in 0..<12 {
             if let shot = visibleNotification() {
                 capture("07-notification", screenshot: shot)
