@@ -113,6 +113,7 @@ final class KeyFlowTests: XCTestCase {
     }
 
     func testBallCountPreviews() {
+        app.launchArguments.append("--store-dlt")
         for (hits, shown) in [(309, 309), (2000, 1000)] {
             app.terminate()
             app.launchEnvironment["JAR_PREVIEW_HITS"] = String(hits)

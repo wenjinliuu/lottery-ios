@@ -36,8 +36,8 @@ struct WalletTicketCard: View {
         card.count > Self.collapsedLineLimit || !card.whole.isEmpty
     }
 
-    private var visibleLines: [TicketCard.Line] {
-        Array(card.lines.prefix(isExpanded ? TicketCard.lineLimit : Self.collapsedLineLimit))
+    private var visibleLines: ArraySlice<TicketCard.Line> {
+        card.lines.prefix(isExpanded ? TicketCard.lineLimit : Self.collapsedLineLimit)
     }
 
     private var hiddenCount: Int {
@@ -266,7 +266,7 @@ struct WalletTicketCard: View {
 
     private var lines: some View {
         LazyVStack(alignment: .leading, spacing: 7) {
-            ForEach(Array(visibleLines.enumerated()), id: \.element.id) { index, line in
+            ForEach(visibleLines.enumerated(), id: \.element.id) { index, line in
                 lineRow(index: index, line: line)
             }
             if hiddenCount > 0 {
@@ -309,7 +309,8 @@ struct WalletTicketCard: View {
                 numbers: line.numbers,
                 matched: line.matched,
                 size: 27,
-                dimUnmatched: line.hasResult
+                dimUnmatched: line.hasResult,
+                printed: isExpanded
             )
 
             Spacer(minLength: 0)

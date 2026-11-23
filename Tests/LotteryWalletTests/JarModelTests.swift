@@ -51,7 +51,9 @@ final class JarModelTests: XCTestCase {
         physics.fillPacked(count: count, radius: denseRadius, width: width, height: height)
         XCTAssertTrue(physics.isResting)
         XCTAssertEqual(physics.balls.count, count)
-        XCTAssertGreaterThan(physics.balls.map { $0.y - $0.radius }.min() ?? 0, height * 0.17)
+        let headroom = physics.balls.map { $0.y - $0.radius }.min() ?? 0
+        XCTAssertGreaterThanOrEqual(headroom, denseRadius * 2)
+        XCTAssertLessThan(headroom, height * 0.16)
         XCTAssertEqual(physics.balls.map { $0.y + $0.radius }.max() ?? 0, height, accuracy: 0.001)
     }
 
@@ -60,7 +62,10 @@ final class JarModelTests: XCTestCase {
         let capacity = JarBuilder.capacity(width: 335, height: 222)
         XCTAssertEqual(capacity, 1_000)
         XCTAssertGreaterThanOrEqual(JarBuilder.radius(count: capacity, width: 335, height: 222) * 2, JarBuilder.minimumDiameter)
-        XCTAssertLessThan(JarBuilder.capacity(width: 275, height: 222), capacity)
+        XCTAssertEqual(JarBuilder.capacity(width: 275, height: 222), capacity)
+        XCTAssertLessThan(JarBuilder.capacity(width: 230, height: 190), capacity)
+        XCTAssertEqual(JarBuilder.radius(count: 4, width: 335, height: 222),
+                       JarBuilder.radius(count: 5, width: 335, height: 222))
     }
 
     func testNoMatchingBalls() {

@@ -63,19 +63,43 @@ enum JarBuilder {
         return Jar(counts: counts)
     }
 
-    /// Occupied disk area; a settled hexagonal pile also contains gaps between disks.
-    private static let areaFraction = 0.64
     static let minimumDiameter = 7.5
 
+    // Count complete staggered rows, reserving one ball diameter (at least 8pt)
+    // above the pile. Allow for the two missing edge columns at the rounded base.
+    private static func slots(diameter: Double, width: Double, height: Double) -> Int {
+        let columns = Int(width / diameter)
+        let pileHeight = height - max(8, diameter)
+        guard columns > 0, pileHeight >= diameter else { return 0 }
+        let rows = 1 + Int((pileHeight - diameter) / (diameter * sqrt(3) / 2))
+        let curvedRows = min(rows, Int(ceil(28 / (diameter * sqrt(3) / 2))))
+        let cornerLoss = curvedRows * 2 * Int(ceil(28 / diameter))
+        return max(0, rows * columns - rows / 2 - cornerLoss)
+    }
+
     static func capacity(width: Double, height: Double) -> Int {
-        guard width >= minimumDiameter, height >= minimumDiameter else { return 0 }
-        let minArea = Double.pi * pow(minimumDiameter / 2, 2)
-        return min(displayLimit, max(1, Int(width * height * areaFraction / minArea)))
+        min(displayLimit, slots(diameter: minimumDiameter, width: width, height: height))
     }
 
     static func radius(count: Int, width: Double, height: Double) -> Double {
         guard count > 0, width > 0, height > 0 else { return 0 }
-        let ideal = sqrt(width * height * areaFraction / (Double.pi * Double(count)))
-        return min(Double(DrawCardMetrics.maxBall) / 2, min(width, height) / 2, max(minimumDiameter / 2, ideal))
+        let largest = min(Double(DrawCardMetrics.maxBall), width, height)
+        var diameter = largest
+        while diameter > minimumDiameter && slots(diameter: diameter, width: width, height: height) < count {
+            let next = max(minimumDiameter, diameter * 0.9)
+            // Anchor the last tier to a full jar so 1,000 balls don't land just
+            // after a size change with a conspicuous empty space above them.
+            if slots(diameter: next, width: width, height: height) >= displayLimit {
+                var low = next, high = diameter
+                for _ in 0..<12 {
+                    let mid = (low + high) / 2
+                    if slots(diameter: mid, width: width, height: height) >= displayLimit { low = mid }
+                    else { high = mid }
+                }
+                return low / 2
+            }
+            diameter = next
+        }
+        return diameter / 2
     }
 }
