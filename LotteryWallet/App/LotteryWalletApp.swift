@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UserNotifications
 import Observation
 
 @main
@@ -39,6 +40,26 @@ struct LotteryWalletApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                #if DEBUG && targetEnvironment(simulator)
+                .task {
+                    guard DemoData.isEnabled, ProcessInfo.processInfo.arguments.contains("--store-notification") else { return }
+                    let center = UNUserNotificationCenter.current()
+                    guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else { return }
+                    let raw = UNMutableNotificationContent()
+                    raw.title = "双色球 2026134 期开奖"
+                    raw.body = "04 05 10 17 21 32 + 08"
+                    var draw = Draw()
+                    draw.gameKey = .ssq
+                    var summary = DrawNotificationStore.Summary()
+                    summary.purchased = 2
+                    summary.cost = 4
+                    summary.winners = 1
+                    summary.prize = 5
+                    guard let content = DrawPushPayload.personalizedContent(raw, draw: draw, summary: summary) else { return }
+                    try? await center.add(UNNotificationRequest(identifier: "store-demo", content: content,
+                        trigger: UNTimeIntervalNotificationTrigger(timeInterval: 5, repeats: false)))
+                }
+                #endif
                 .environment(drawStore)
                 .environment(settings)
                 .environment(storeHealth)

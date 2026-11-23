@@ -84,8 +84,28 @@ final class AppStoreScreenshotTests: XCTestCase {
         XCTAssertTrue(scan.waitForExistence(timeout: 15))
         scan.tap()
         XCTAssertTrue(app.staticTexts["找到 2 张票"].waitForExistence(timeout: 90))
-        settle()
+        for title in ["1 大乐透", "2 双色球"] {
+            guard app.staticTexts[title].waitForExistence(timeout: 90) else {
+                XCTFail("票框缺少彩种标签：\(title)")
+                return
+            }
+        }
         capture("06-multiple")
+    }
+
+    func testCaptureNotificationBanner() throws {
+        app.launchArguments.append("--store-notification")
+        app.launch()
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = board.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
+        if allow.waitForExistence(timeout: 3) { allow.tap() }
+        let result = board.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "2026134")).firstMatch
+        guard result.waitForExistence(timeout: 20) else {
+            XCTFail("系统没有显示开奖通知横幅")
+            return
+        }
+        capture("07-notification")
     }
 
     // MARK: - 工具

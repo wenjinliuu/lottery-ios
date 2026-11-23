@@ -189,7 +189,7 @@ struct HomeView: View {
         guard chartStyle == HomeChartStyle.jar.rawValue else { return }
         if DemoData.isEnabled, let value = ProcessInfo.processInfo.environment["JAR_PREVIEW_HITS"],
            let hits = Int(value), [309, 2000].contains(hits) {
-            let red = hits / 2, blue = hits / 3
+            let red = hits * 55 / 100, blue = hits * 40 / 100
             jar = JarBuilder.Jar(counts: [.red: red, .blue: blue, .yellow: hits - red - blue])
             return
         }
