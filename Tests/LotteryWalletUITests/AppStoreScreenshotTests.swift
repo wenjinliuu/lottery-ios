@@ -103,10 +103,9 @@ final class AppStoreScreenshotTests: XCTestCase {
         if allow.waitForExistence(timeout: 3) { allow.tap() }
         let result = board.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@", "2026134")).firstMatch
-        guard result.waitForExistence(timeout: 20) else {
-            XCTFail("系统没有显示开奖通知横幅")
-            return
-        }
+        // A banner may already have been filed in Notification Center.
+        // Its transient accessibility element is never a capture prerequisite.
+        _ = result.waitForExistence(timeout: 8)
         // Accessibility can expose the banner before its first visible frame.
         // Read the actual screenshot pixels, and keep the very frame we verified.
         func visibleNotification() -> XCUIScreenshot? {
@@ -118,10 +117,6 @@ final class AppStoreScreenshotTests: XCTestCase {
             let words = (read.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined()
             guard words.contains("2026134"), words.contains("奖金") else { return nil }
             return shot
-        }
-        if let banner = visibleNotification() {
-            capture("07-notification", screenshot: banner)
-            return
         }
         XCUIDevice.shared.press(.home)
         let start = board.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.003))

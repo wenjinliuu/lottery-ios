@@ -48,40 +48,32 @@
         width: 100%;
         aspect-ratio: 1320/2868;
       }
-      .copy {
-        position: absolute;
-        left: 7.2%;
-        right: 6%;
-        top: 4.7%;
-      }
-      .brand {
-        font-size: 3.7cqw;
-        font-weight: 650;
-        letter-spacing: 0.02em;
-        color: #4c5868;
-      }
-      .brand b {
-        color: #225dbc;
-        margin-right: 0.25em;
-      }
-      h1 {
-        font-size: 8.6cqw;
-        line-height: 1.16;
-        letter-spacing: -0.055em;
-        margin: 0.4em 0 0.25em;
-        color: #111c2b;
-      }
-      p {
-        margin: 0;
-        color: #465566;
-        font-size: 3.25cqw;
-        line-height: 1.45;
-      }
+      .copy { position:absolute; z-index:2; left:7.4%; right:6.5%; top:4.3%; }
+      .brand { display:flex; gap:1.9cqw; align-items:center; color:#202938; font-size:3.8cqw; font-weight:750; }
+      .mark { width:8.2cqw; height:8.2cqw; border-radius:1.9cqw; box-shadow:0 .2cqw .9cqw #14243e28; }
+      h1 { font-size:10.1cqw; line-height:1.12; letter-spacing:-.055em; font-weight:850; margin:.64em 0 .26em; color:#101b2f; white-space:pre-line; }
+      p { margin:0; color:#455066; font-size:3.6cqw; line-height:1.52; max-width:81cqw; }
+      .poster { --pale:#e4efff; --mid:#bfd7ff; isolation:isolate; }
+      .poster[data-slide="1"] { --pale:#fde9e4; --mid:#ffcbbd; }
+      .poster[data-slide="2"] { --pale:#e6edff; --mid:#bdcdff; }
+      .poster[data-slide="3"] { --pale:#e9edf9; --mid:#d4dff4; }
+      .poster::before,.poster::after { content:""; position:absolute; z-index:-1; border-radius:9cqw; }
+      .poster::before { top:43%; left:-19%; width:143%; height:74%; transform:rotate(-11deg); background:var(--pale); }
+      .poster::after { top:53%; left:-24%; width:148%; height:72%; transform:rotate(-4deg); background:var(--mid); }
+      .detail { display:none; position:absolute; z-index:3; border:.65cqw solid white; background:white; border-radius:4cqw; overflow:hidden; box-shadow:0 1.3cqw 4cqw #172d4c35; }
+      .detail img { display:block; position:absolute; max-width:none; }
+      /* Enlargements are crops of the same original simulator frame. */
+      [data-slide="0"] .detail { display:block; left:2.6%; width:90%; top:63%; height:16.3%; }
+      [data-slide="0"] .detail img { width:144%; left:-7%; top:-268%; }
+      [data-slide="3"] .detail { display:block; left:2.8%; width:94.4%; top:61%; height:23%; }
+      [data-slide="3"] .detail img { width:114%; left:-7%; top:-156%; }
+      [data-slide="2"] .detail { display:block; left:3%; width:94%; top:70%; height:10.3%; }
+      [data-slide="2"] .detail img { width:108%; left:-4%; top:-804%; }
       .device {
         position: absolute;
-        top: 22.8%;
-        width: 72.5%;
-        left: 13.75%;
+        top: 32.5%;
+        width: 87%;
+        left: 8.5%;
         padding: 1.25%;
         border-radius: 10.6cqw;
         background: linear-gradient(
@@ -99,6 +91,10 @@
           0 1.8cqw 3.6cqw #15233a27,
           inset 0 0 0 0.2cqw #676b70;
       }
+      [data-slide="1"] .device { width:94%; left:3%; top:32%; }
+      [data-slide="3"] .device { width:76%; left:17%; top:34%; }
+      [data-slide="2"] .device { top:37%; left:8%; width:86%; }
+      [data-slide="4"] .device { width:91%; left:5%; top:34%; }
       .device img {
         display: block;
         width: 100%;
@@ -157,46 +153,28 @@
     <main class="stage">
       <section class="poster">
         <div class="copy">
-          <div class="brand"><b>●</b> 对个号</div>
+          <div class="brand"><img class="mark" src="app-icon.png" alt="" />对个号</div>
           <h1 contenteditable="true"></h1>
           <p contenteditable="true"></p>
         </div>
         <div class="device"><img alt="" /><i class="island"></i></div>
+        <div class="detail" aria-hidden="true"><img alt="" /></div>
       </section>
     </main>
     <script src="vendor/html2canvas.min.js"></script>
     <script>
       const base = "../../Tests/LotteryWalletUITests/__Snapshots__/";
       const slides = [
-        [
-          "识别",
-          "票面号码，逐注识别",
-          "专用识别模型辅助读号，存入票夹前逐注核对。",
-          "AppStoreScreenshotTests/04-scan.png",
-        ],
-        [
-          "多票",
-          "一次拍下，多张识别",
-          "逐张框选彩票，同一张照片里的票可以一起识别。",
-          "AppStoreScreenshotTests/06-multiple.png",
-        ],
-        [
-          "球罐",
-          "每次命中，都入一球",
-          "按月或按年回看命中号码，摇一摇，让小球滚起来。",
-          "KeyFlowTests/home-jar.png",
-        ],
-        [
-          "票夹",
-          "每张票，都有明细",
-          "开奖号码、命中情况和票面收支，放在一起看。",
-          "AppStoreScreenshotTests/02-wallet.png",
-        ],
+        ["识别", "拍张彩票，\n号码不用抄", "专用识别模型逐注读号，存入票夹前可以对照票面修改。", "AppStoreScreenshotTests/04-scan.png"],
+        ["多票", "双色球、大乐透，\n一起拍", "一张照片里有几张票，就分开框选、逐张核对。", "AppStoreScreenshotTests/06-multiple.png"],
+        ["通知", "开了什么号，\n中了几注", "开奖后，一条通知就能看见开奖号码、命中注数和已知奖金。", "AppStoreScreenshotTests/07-notification.png"],
+        ["球罐", "把命中的号码，\n攒成一罐", "每次命中都算数。按月或按年回看，还能摇动小球。", "KeyFlowTests/balls-309-rest.png"],
+        ["票夹", "你的票夹，\n留在你的手机里", "票据默认保存在本机。需要备份时，可自行开启 iCloud 备份。", "AppStoreScreenshotTests/02-wallet.png"],
       ];
       const select = document.querySelector("select"),
         title = document.querySelector("h1"),
         desc = document.querySelector("p"),
-        img = document.querySelector("img");
+        img = document.querySelector(".device img");
       slides.forEach(([name], i) => select.add(new Option(name, i)));
       const params = new URLSearchParams(location.search);
       if (params.has("export")) document.body.classList.add("export");
@@ -204,11 +182,13 @@
         const slide = slides[i];
         let copy;
         try {
-          copy = JSON.parse(localStorage.getItem("store-slide-" + i));
+          copy = JSON.parse(localStorage.getItem("store-v2-slide-" + i));
         } catch {}
         title.textContent = copy?.[0] ?? slide[1];
         desc.textContent = copy?.[1] ?? slide[2];
+        document.querySelector(".poster").dataset.slide = i;
         img.src = base + slide[3];
+        document.querySelector(".detail img").src = img.src;
         img.alt = slide[0] + "模拟器截图";
         select.value = i;
       }
@@ -216,11 +196,11 @@
       for (const field of [title, desc])
         field.oninput = () =>
           localStorage.setItem(
-            "store-slide-" + select.value,
+            "store-v2-slide-" + select.value,
             JSON.stringify([title.textContent, desc.textContent]),
           );
       document.querySelector("#reset").onclick = () => {
-        localStorage.removeItem("store-slide-" + select.value);
+        localStorage.removeItem("store-v2-slide-" + select.value);
         show(+select.value);
       };
       document.querySelector("#download").onclick = async (e) => {
@@ -244,7 +224,7 @@
           button.disabled = false;
         }
       };
-      show(Math.min(3, Math.max(0, parseInt(params.get("page")) || 0)));
+      show(Math.min(slides.length - 1, Math.max(0, parseInt(params.get("page")) || 0)));
     </script>
   </body>
 </html>

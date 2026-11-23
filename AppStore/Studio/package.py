@@ -22,10 +22,11 @@ def package(destination):
         return '"' + embedded(snapshots / match[2]) + '"'
 
     page, count = re.subn(pattern, embed_snapshot, template)
-    if count != 4:
-        raise ValueError(f"Expected four store screenshots, found {count}")
+    if count != 5:
+        raise ValueError(f"Expected five store screenshots, found {count}")
     page = re.sub(r"const base\s*=\s*['\"][^'\"]*['\"]", 'const base = ""', page)
     page = page.replace("vendor/html2canvas.min.js", embedded(studio / "vendor/html2canvas.min.js"))
+    page = page.replace('src="app-icon.png"', 'src="' + embedded(studio / "app-icon.png") + '"')
     license_text = (studio / "vendor/LICENSE").read_text()
     page = page.replace("</html>", f"<!-- html2canvas license\n{license_text}\n-->\n</html>")
     destination.write_text(page)
