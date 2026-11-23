@@ -84,8 +84,9 @@ final class AppStoreScreenshotTests: XCTestCase {
         XCTAssertTrue(scan.waitForExistence(timeout: 15))
         scan.tap()
         XCTAssertTrue(app.staticTexts["找到 2 张票"].waitForExistence(timeout: 90))
-        for title in ["1 大乐透", "2 双色球"] {
-            guard app.staticTexts[title].waitForExistence(timeout: 90) else {
+        for title in ["大乐透", "双色球"] {
+            let mark = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label ENDSWITH %@", "第 ", "张票，" + title)).firstMatch
+            guard mark.waitForExistence(timeout: 90) else {
                 XCTFail("票框缺少彩种标签：\(title)")
                 return
             }
