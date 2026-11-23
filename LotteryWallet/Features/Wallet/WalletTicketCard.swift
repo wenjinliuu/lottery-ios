@@ -309,7 +309,8 @@ struct WalletTicketCard: View {
                 numbers: line.numbers,
                 matched: line.matched,
                 size: 27,
-                dimUnmatched: line.hasResult
+                dimUnmatched: line.hasResult,
+                printed: isExpanded
             )
 
             Spacer(minLength: 0)

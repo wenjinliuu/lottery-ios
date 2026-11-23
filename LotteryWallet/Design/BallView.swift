@@ -68,7 +68,7 @@ struct BallView: View {
         return isDimmed ? color.accentColor : Color.white
     }
 
-    private var accessibilityText: String {
+    fileprivate var accessibilityText: String {
         if isUnknown { return "这一位没认出来，点一下补" }
         if isHit { return "\(label) 已命中" }
         return isDimmed ? "\(label) 未命中" : label
@@ -93,6 +93,41 @@ struct BallSurface: View {
             .fill(fill)
             .overlay(Circle().strokeBorder(.white.opacity(isDimmed ? 0 : 0.35), lineWidth: 0.8))
             .overlay(Circle().strokeBorder(isDimmed ? .clear : color.rimStroke, lineWidth: 0.8))
+    }
+}
+
+/// Expanded tickets repeat the same numbered faces across many combinations.
+@MainActor
+private struct PrintedTicketBall: View {
+    let ball: BallView
+    @Environment(\.displayScale) private var scale
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+    private static let cache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.totalCostLimit = 8 * 1024 * 1024
+        return cache
+    }()
+
+    private var face: UIImage? {
+        let key = "\(ball.color.rawValue)/\(ball.value)/\(ball.isHit)/\(ball.isDimmed)/\(ball.padded)/\(ball.size)/\(scale)/\(scheme)/\(contrast)" as NSString
+        if let image = Self.cache.object(forKey: key) { return image }
+        let renderer = ImageRenderer(content: ball.padding(5).environment(\.colorScheme, scheme))
+        renderer.scale = scale
+        guard let image = renderer.uiImage else { return nil }
+        let bytes = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+        Self.cache.setObject(image, forKey: key, cost: bytes)
+        return image
+    }
+
+    var body: some View {
+        if let face {
+            Image(uiImage: face).renderingMode(.original)
+                .frame(width: ball.size, height: ball.size)
+                .accessibilityLabel(Text(ball.accessibilityText))
+        } else {
+            ball
+        }
     }
 }
 
@@ -170,15 +205,18 @@ private func flatten(sections: [GameSection],
 }
 
 @ViewBuilder
-private func ballFlow(_ items: [BallItem], size: CGFloat, onOverflow: (() -> Void)?) -> some View {
+private func ballFlow(_ items: [BallItem], size: CGFloat, printed: Bool = false, onOverflow: (() -> Void)?) -> some View {
     BallFlow(spacing: size * 0.19, lineSpacing: size * 0.22) {
         ForEach(items) { item in
             if item.overflow > 0 {
                 OverflowBall(hidden: item.overflow, color: item.color, size: size, action: onOverflow)
                     .padding(.leading, item.leadingGap)
             } else {
-                BallView(value: item.value, color: item.color, size: size,
+                let ball = BallView(value: item.value, color: item.color, size: size,
                          isHit: item.isHit, isDimmed: item.isDimmed, padded: item.padded)
+                Group {
+                    if printed { PrintedTicketBall(ball: ball) } else { ball }
+                }
                     .padding(.leading, item.leadingGap)
             }
         }
@@ -216,12 +254,14 @@ struct TicketNumbersSnapshotView: View {
     var size: CGFloat = 30
     var dimUnmatched: Bool = false
 
+    var printed = false
+
     var body: some View {
         ballFlow(flatten(sections: game.sections,
                          values: { numbers[$0.key] ?? [] },
                          matched: { matched[$0.key] ?? [] },
                          size: size, dimUnmatched: dimUnmatched, limit: 0),
-                 size: size, onOverflow: nil)
+                 size: size, printed: printed, onOverflow: nil)
     }
 }
 
