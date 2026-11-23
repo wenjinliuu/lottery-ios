@@ -10,28 +10,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          run-id: 45157503812
+          run-id: 45157510407
           github-token: ${{ github.token }}
-          name: build-test-312
+          name: build-test-119
           path: /tmp/evidence
       - name: Collect system screenshot evidence
         run: |
           mkdir -p evidence
-          python3 - <<'PY'
-          import pathlib,struct
-          root=pathlib.Path('/tmp/evidence')
-          for f in (root/'Test.xcresult/Data').glob('data.*'):
-              with f.open('rb') as h: head=h.read(24)
-              if head.startswith(b'\x89PNG') and struct.unpack('>II', head[16:24])==(1320,2868):
-                  import shutil
-                  shutil.copyfile(f, pathlib.Path('evidence')/(f.name+'.png'))
-          PY
-          find /tmp/evidence -maxdepth 2 -type f | head -80
-          for f in /tmp/evidence/*.log; do
-            if test -f "$f"; then grep -E '(error: |testCaptureNotificationBanner|Test Case.* failed)' "$f" | tail -80 >>evidence/failure.txt || true; fi
-          done
-          find /tmp/evidence -maxdepth 2 -iname '*report*' -type f -exec cp '{}' evidence/ ';'
-          git add evidence
+          python3 - <<'PYTHON'
+          import json, pathlib, shutil
+          root=pathlib.Path('/tmp/evidence/report/attachments')
+          for test in json.loads((root/'manifest.json').read_text()):
+              for a in test['attachments']:
+                  if '07-notification' in a['suggestedHumanReadableName']:
+                      shutil.copyfile(root/a['exportedFileName'],'evidence/verified-notification.png')
+          PYTHON
+          test -s evidence/verified-notification.png
+          git add evidence/verified-notification.png
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'Collect simulator evidence for store notification validation'
