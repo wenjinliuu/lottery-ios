@@ -16,18 +16,15 @@ jobs:
           path: /tmp/evidence
       - name: Collect system screenshot evidence
         run: |
-          mkdir -p evidence
+          mkdir -p release-frames
           python3 - <<'PYTHON'
-          import json, pathlib, shutil
-          root=pathlib.Path('/tmp/evidence/report/attachments')
-          for test in json.loads((root/'manifest.json').read_text()):
-              for a in test['attachments']:
-                  if '07-notification' in a['suggestedHumanReadableName']:
-                      shutil.copyfile(root/a['exportedFileName'],'evidence/verified-notification.png')
+          import pathlib,struct,shutil
+          for f in pathlib.Path('/tmp/evidence/Test.xcresult/Data').glob('data.*'):
+              with f.open('rb') as h: head=h.read(24)
+              if head.startswith(b'\x89PNG') and struct.unpack('>II',head[16:24])==(1320,2868):
+                  shutil.copyfile(f,pathlib.Path('release-frames')/(f.name+'.png'))
           PYTHON
-          cp /tmp/evidence/report/attachments/manifest.json evidence/release-manifest.json
-          cp /tmp/evidence/report/report.md evidence/release-report.md
-          git add evidence
+          git add release-frames
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'Collect simulator evidence for store notification validation'
