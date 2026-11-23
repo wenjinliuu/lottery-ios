@@ -1,4 +1,5 @@
 import XCTest
+import Vision
 
 /// App Store 截图：用示例票据启动，截首页、票夹、统计、扫描复核、设置五张整屏图。
 ///
@@ -106,7 +107,35 @@ final class AppStoreScreenshotTests: XCTestCase {
             XCTFail("系统没有显示开奖通知横幅")
             return
         }
-        capture("07-notification")
+        // Accessibility can expose the banner before its first visible frame.
+        // Read the actual screenshot pixels, and keep the very frame we verified.
+        func visibleNotification() -> XCUIScreenshot? {
+            let shot = XCUIScreen.main.screenshot()
+            guard let image = shot.image.cgImage else { return nil }
+            let read = VNRecognizeTextRequest()
+            read.recognitionLanguages = ["zh-Hans", "en-US"]
+            try? VNImageRequestHandler(cgImage: image).perform([read])
+            let words = (read.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined()
+            guard words.contains("2026134"), words.contains("奖金") else { return nil }
+            return shot
+        }
+        if let banner = visibleNotification() {
+            capture("07-notification", screenshot: banner)
+            return
+        }
+        XCUIDevice.shared.press(.home)
+        let start = board.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.003))
+        let end = board.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.85))
+        start.press(forDuration: 0.15, thenDragTo: end)
+        for _ in 0..<8 {
+            if let shot = visibleNotification() {
+                capture("07-notification", screenshot: shot)
+                return
+            }
+            settle(0.4)
+        }
+        XCTFail("截图像素中没有同时读到期号和奖金")
+
     }
 
     // MARK: - 工具
@@ -123,8 +152,7 @@ final class AppStoreScreenshotTests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
     }
 
-    private func capture(_ name: String, file: StaticString = #filePath) {
-        let screenshot = XCUIScreen.main.screenshot()
+    private func capture(_ name: String, screenshot: XCUIScreenshot = XCUIScreen.main.screenshot(), file: StaticString = #filePath) {
         let attachment = XCTAttachment(screenshot: screenshot)
         attachment.name = name
         attachment.lifetime = .keepAlways
