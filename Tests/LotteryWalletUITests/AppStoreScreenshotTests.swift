@@ -100,12 +100,16 @@ final class AppStoreScreenshotTests: XCTestCase {
         app.launch()
         let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let allow = board.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
-        if allow.waitForExistence(timeout: 3) { allow.tap() }
-        let result = board.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", "2026134")).firstMatch
-        // A banner may already have been filed in Notification Center.
-        // Its transient accessibility element is never a capture prerequisite.
-        _ = result.waitForExistence(timeout: 8)
+        let scheduled = app.staticTexts["store.notification.scheduled"]
+        for _ in 0..<12 {
+            if scheduled.exists { break }
+            if allow.exists { allow.tap() }
+            if scheduled.waitForExistence(timeout: 1) { break }
+        }
+        guard scheduled.exists else {
+            XCTFail("系统未接受示例通知请求")
+            return
+        }
         // Accessibility can expose the banner before its first visible frame.
         // Read the actual screenshot pixels, and keep the very frame we verified.
         func visibleNotification() -> XCUIScreenshot? {
@@ -122,13 +126,23 @@ final class AppStoreScreenshotTests: XCTestCase {
         let start = board.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.003))
         let end = board.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.85))
         start.press(forDuration: 0.15, thenDragTo: end)
-        for _ in 0..<8 {
+        for attempt in 0..<12 {
             if let shot = visibleNotification() {
                 capture("07-notification", screenshot: shot)
                 return
             }
-            settle(0.4)
+            if attempt == 5 {
+                // Some simulator builds open on the clock with earlier alerts collapsed.
+                let lower = board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
+                let middle = board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.43))
+                lower.press(forDuration: 0.1, thenDragTo: middle)
+            }
+            settle(0.5)
         }
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "notification-center-failure"
+        evidence.lifetime = .keepAlways
+        add(evidence)
         XCTFail("截图像素中没有同时读到期号和奖金")
 
     }

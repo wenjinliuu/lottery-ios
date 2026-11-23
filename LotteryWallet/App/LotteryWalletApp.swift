@@ -11,6 +11,9 @@ struct LotteryWalletApp: App {
     /// 数据库的健康状态。建库和它一起产生，见 `ModelStore`。
     @State private var storeHealth: StoreHealth
     @State private var backupCenter = BackupCenter()
+    #if DEBUG && targetEnvironment(simulator)
+    @State private var storeNotificationScheduled = false
+    #endif
     private let container: ModelContainer
 
     /// **建库不再用 `.modelContainer(for:)`。**
@@ -41,6 +44,11 @@ struct LotteryWalletApp: App {
         WindowGroup {
             RootView()
                 #if DEBUG && targetEnvironment(simulator)
+                .overlay(alignment: .top) {
+                    if storeNotificationScheduled {
+                        Text("示例通知已排程").accessibilityIdentifier("store.notification.scheduled")
+                    }
+                }
                 .task {
                     guard DemoData.isEnabled, ProcessInfo.processInfo.arguments.contains("--store-notification") else { return }
                     let center = UNUserNotificationCenter.current()
@@ -56,8 +64,14 @@ struct LotteryWalletApp: App {
                     summary.winners = 1
                     summary.prize = 5
                     guard let content = DrawPushPayload.personalizedContent(raw, draw: draw, summary: summary) else { return }
-                    try? await center.add(UNNotificationRequest(identifier: "store-demo", content: content,
-                        trigger: UNTimeIntervalNotificationTrigger(timeInterval: 5, repeats: false)))
+                    let request = UNNotificationRequest(identifier: "store-demo", content: content,
+                        trigger: UNTimeIntervalNotificationTrigger(timeInterval: 5, repeats: false))
+                    do {
+                        try await center.add(request)
+                        storeNotificationScheduled = true
+                    } catch {
+                        return
+                    }
                 }
                 #endif
                 .environment(drawStore)
