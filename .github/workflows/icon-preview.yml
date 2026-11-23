@@ -11,6 +11,11 @@ on:
       - '.ios-ci.yml'
       - '.github/workflows/icon-preview.yml'
   workflow_dispatch:
+    inputs:
+      update_store_icon:
+        description: 用本次渲染的默认图标更新商店海报素材
+        type: boolean
+        default: false
 
 permissions:
   contents: read    # app_icon.commit_previews 没开，不写仓库
@@ -22,3 +27,29 @@ concurrency:
 jobs:
   icon:
     uses: wenjinliuu/ios-ci-workflows/.github/workflows/app-icon.yml@be908de95dad15a236d4de633576d0fda596edc4
+
+  store-icon:
+    if: github.event_name == 'workflow_dispatch' && inputs.update_store_icon
+    needs: icon
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-icon-${{ github.sha }}
+          path: ${{ runner.temp }}/app-icon
+      - name: Update the poster icon from the iOS default rendition
+        run: |
+          set -eu
+          cp "$RUNNER_TEMP/app-icon/Default.png" AppStore/Studio/app-icon.png
+          git add AppStore/Studio/app-icon.png
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Sync the rendered iOS icon into store artwork'
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"
