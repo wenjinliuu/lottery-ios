@@ -165,11 +165,19 @@ enum Palette {
         return neutral
     }
 
-    /// 页面底色。浅色下是**比系统分组灰（#F2F2F7）更白的一层浅灰**：
-    /// 白卡片要靠底色托出来，但系统那层灰放满一屏发闷。深色下保持系统的近黑。
-    static let canvas = Color(light: 0xF7F8FA, dark: 0x000000)
-    /// 卡片底色。浅色下纯白，深色下和系统分组卡片同色。
-    static let card = Color(light: 0xFFFFFF, dark: 0x1C1C1E)
+    /// 页面底色。浅色下纯净高明度白，让内容和彩色球罐自由呼吸；深色下为深曜石黑。
+    static let canvas = Color(light: 0xFFFFFF, dark: 0x090A0D)
+    /// 中性内容卡片底色。白底画布上用清透冷云雾浅灰托出层级，避免发闷。
+    static let card = Color(light: 0xF4F6FA, dark: 0x17191F)
+    /// 卡片细描边。给纯白底上的轻雾卡面一条克制的轮廓线。
+    static let cardBorder = Color(light: 0xE6ECF5, dark: 0x262B36)
+    /// 实体票据纸面底色。略暖的象牙白配柔和纸影，在纯白画布上呈现立体纸感。
+    static let paper = Color(light: 0xFCFDFE, dark: 0x181B22)
+    /// 玻璃球罐内部清透底色渐变（上浅下亮）。
+    static let jarTop = Color(light: 0xF5F9FF, dark: 0x11151E)
+    static let jarBottom = Color(light: 0xFFFFFF, dark: 0x171B25)
+    /// 轻雾胶囊底色（非玻璃的静态辅助标签/筛选条）。
+    static let surfaceChip = Color(light: 0xEEF2F8, dark: 0x222632)
     /// 分隔线。
     static let separator = Color(.separator)
 }

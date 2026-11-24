@@ -147,6 +147,7 @@ struct SettingsView: View {
                 .cardRows()
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
+            .safeAreaPadding(.bottom, 92)
             .canvasForm()
             // 导航栏不要自己糊底色，交给系统的 scroll edge effect。
             // 理由见 `HomeView` 里同一处那段注释。

@@ -2,8 +2,13 @@ import SwiftUI
 import SwiftData
 import UIKit
 
-/// 三个主页面：首页、票夹、设置。
-/// 标签栏用系统原生的液态玻璃，向下滚动时自动收起。
+/// 三个主页面（首页、票夹、设置）加底部双体液态玻璃悬浮栏：
+/// 左侧为三项导航玻璃胶囊，右侧为完全独立的球形扫描按钮。
+///
+/// 不再借用系统 `Tab(role: .search)`：iOS 27 起系统把 `.search` 默认重新合并进
+/// 主胶囊里，且它本质上是一个会触发切页的标签，逼迫代码靠 `ScreenBackdrop` 截屏
+/// 兜底防闪屏。改用 `GlassEffectContainer` 承载真实 Button 后，扫描直接弹出抽屉，
+/// 彻底省掉截屏补丁，同时保持三页各自独立的导航栈与滚动位置。
 struct RootView: View {
     @Environment(DrawStore.self) private var drawStore
     @Environment(AppSettings.self) private var settings
@@ -23,6 +28,8 @@ struct RootView: View {
     private var unseenCount: Int { Set(unseenRecords.map(\.batchId)).count }
 
     @State private var selection: MainTab = .home
+    /// 访问过的标签页保持挂载，切页不丢滚动位置和导航栈，冷启动也不必预建全部三页。
+    @State private var mountedTabs: Set<MainTab> = [.home]
     /// 当前开着的抽屉，以及关掉它之后要接着开的那张。
     @State private var activeSheet: RootSheet?
     @State private var startupChecksComplete = false
@@ -32,122 +39,53 @@ struct RootView: View {
     /// 不塞进 `RootSheet` 里是因为那是个 `String` 原始值的枚举，
     /// 它同时充当 sheet 的 id —— 挂上一张图会把 id 搞脏。
     @State private var entryReference: EntryReference?
-    /// 提示条和烟花挂在**引用类型**上，不是挂在环境里的闭包上。
-    ///
-    /// 上一版是 `.environment(\.showToast, ShowToastAction { ... })` —— 闭包
-    /// 没法比较，根视图每过一次 body 就换出一个新的 `ShowToastAction`，
-    /// 于是**所有读这个环境值的页面**（票夹、扫描、录入、设置）都被判定为
-    /// 环境变了，跟着重算一遍。而它们其实只是想要一个「弹提示」的入口。
-    /// 换成 `@Observable` 的引用类型后，注入的对象身份不变，读它的页面
-    /// 只在真正用到的属性变了才重算。
     @State private var toastCenter = ToastCenter()
     @State private var celebration = CelebrationCenter()
-    /// 点开抽屉那一刻的屏幕快照，见 `ScreenBackdrop`。
-    @State private var backdrop: UIView?
-
-    /// 点「扫描」时不切页面，只开抽屉。
-    ///
-    /// 注意这里**拦不住**选中态：`role: .search` 的标签一点下去，系统当场就把
-    /// 那一页切上来了，绑定里怎么写都退不回去（试过同步写、异步写两版）。
-    /// 所以那一页的内容是一张点击前的屏幕快照 —— 见 `ScreenBackdrop` 和下面
-    /// 扫描那个 Tab 的注释。这里只负责把抽屉打开。
-    private var tabSelection: Binding<MainTab> {
-        Binding(
-            get: { selection },
-            set: { newValue in
-                guard newValue == .scan else {
-                    selection = newValue
-                    return
-                }
-                guard activeSheet == nil else { return }
-                // 先截图，再开抽屉 —— 顺序不能反。
-                // 这一刻屏幕上还是用户刚才看的那一页，晚一步系统就切过去了。
-                backdrop = ScreenBackdrop.capture()
-                activeSheet = .scan
-            }
-        )
-    }
+    @Namespace private var dockNamespace
 
     var body: some View {
-        TabView(selection: tabSelection) {
-            Tab("首页", systemImage: "chart.line.uptrend.xyaxis", value: MainTab.home) {
+        ZStack {
+            tabLayer(.home) {
                 HomeView()
             }
-
-            Tab("票夹", systemImage: "wallet.bifold", value: MainTab.wallet) {
-                WalletView()
-            }
-            // 有新结果就在标签上挂个数字。用户不进票夹也知道昨晚开奖核对完了没有，
-            // 这才是「打开就想知道有没有核对」的正解。
-            .badge(unseenCount)
-
-            Tab("设置", systemImage: "gearshape", value: MainTab.settings) {
-                SettingsView()
-            }
-
-            // 扫描借用 `.search` 这个角色的**版式**。
-            //
-            // 系统只对这个角色做「把三个普通标签的玻璃收窄靠左、再把这一个
-            // 单独拎到右边」的排布，也就是 Apple Music 底部那个样子。
-            // 手工摆一颗悬浮圆做不到：系统标签栏的位置和宽度 SwiftUI 不暴露，
-            // 圆只能靠猜，而且没法让那条胶囊自己让开位置。
-            //
-            // 标题和图标是可以自己给的 —— 上一版没传，才显示成放大镜。
-            //
-            // 它不承载页面：选中的那一刻在 `tabSelection` 里就被拦下来了，
-            // 所以既不会切页面，也不会弹出搜索框。
-            Tab("扫描", systemImage: "camera.viewfinder", value: MainTab.scan, role: .search) {
-                // 抽屉开着的时候，这一页**是真的会显示出来的**（拦不住，见
-                // `tabSelection` 的注释）。所以它必须长得和点击前那一页一样 ——
-                // 摆的就是点击那一刻截下来的屏幕。
-                //
-                // 抽屉关掉之后系统会把选中态退回首页，快照也就跟着清掉了。
-                if let backdrop {
-                    ScreenBackdropView(snapshot: backdrop)
-                        .ignoresSafeArea()
-                        .accessibilityHidden(true)
-                } else {
-                    Palette.canvas.ignoresSafeArea()
+            if mountedTabs.contains(.wallet) {
+                tabLayer(.wallet) {
+                    WalletView(isActive: selection == .wallet)
                 }
             }
-            // 这个位置在系统眼里仍然是「标签」，读屏会念成标签而不是按钮。
-            // 用无障碍标签把它的实际作用说清楚。
-            .accessibilityLabel("扫描票据")
+            if mountedTabs.contains(.settings) {
+                tabLayer(.settings) {
+                    SettingsView()
+                }
+            }
         }
-
-        // **抽屉用回系统 sheet。**
-        //
-        // 一开始报的「点扫描时背景闪一下」，我误判成了 sheet 的呈现动画，
-        // 于是把它换成自绘的 overlay —— 结果换来一连串新毛病：没有动画、
-        // 底部灰带、拖拽时整棵内容树每帧重建（手感是抽搐 + 内容闪烁）。
-        //
-        // 真凶其实是标签栏：`role: .search` 的那一页会被真的切上来、
-        // 过一会儿才退回去。那一闪从来不是 sheet 干的。挡住它的是
-        // `ScreenBackdrop` 的快照，和用什么方式呈现抽屉无关。
-        //
-        // 认清这一点之后就没有理由自己造轮子了：拖拽、吸附、回弹、
-        // 跟手的高度切换，系统这套是渲染服务级别的，而自绘版本每一帧
-        // 都要让 SwiftUI 重新过一遍整个扫描页 —— 差距不是调参能补上的。
-        // 退到后台时自动备份一次。
-        //
-        // 选这个时机而不是「记录一变就写」：录一张 20 注的复式票会连着触发
-        // 二十次写入，而备份写的是整份 JSON，等于把整个票夹重写二十遍。
-        // 退后台是「这一轮操作做完了」的天然分界点。
-        //
-        // 静默执行：这一刻 App 已经不在前台，弹什么都没人看得见。
-        // 真出问题时设置页那行「上次备份」不会往前走，那才是用户看得到的信号。
+        .background(Palette.canvas.ignoresSafeArea())
+        .overlay(alignment: .bottom) {
+            FloatingGlassDock(
+                selection: Binding(
+                    get: { selection },
+                    set: { next in
+                        mountedTabs.insert(next)
+                        withAnimation(.spring(duration: 0.3, bounce: 0.16)) {
+                            selection = next
+                        }
+                    }
+                ),
+                unseenCount: unseenCount,
+                namespace: dockNamespace,
+                onScan: {
+                    guard activeSheet == nil else { return }
+                    activeSheet = .scan
+                }
+            )
+        }
         .onChange(of: scenePhase) { _, phase in
-            // 示例模式的票据只在内存里，不该变成一份备份文件留在沙盒里
-            // 自动备份常开（一天一次、留两份，见 `BackupPolicy`），开关只决定存本机还是 iCloud。
             guard !DemoData.isEnabled else { return }
             if phase == .background { autoBackup() }
             if phase == .active { Task { await DrawPushCenter.shared.refreshOnLaunch() } }
         }
         .sheet(item: $activeSheet, onDismiss: {
             guard let next = queuedSheet else {
-                // 抽屉全关完了，快照没用了 —— 留着会在下次点开时
-                // 先闪一张上一回的旧画面。照片同理，而且它还占着内存。
-                backdrop = nil
                 entryReference = nil
                 return
             }
@@ -164,16 +102,9 @@ struct RootView: View {
                 EntryFlowView(reference: entryReference)
             }
         }
-        // 这里**不能**用 withAnimation 包住状态变更。
-        // withAnimation 开的是一个全局事务，整棵视图树在这一帧里的所有变化
-        // 都会被卷进同一段动画 —— 表现就是弹个提示，底下的整票预览卡片
-        // 跟着闪一下。动画只该属于提示条自己，所以挂在它的 overlay 上。
         .environment(toastCenter)
         .environment(celebration)
         .overlay(alignment: .top) {
-            // 库打不开时顶上来的是个关掉就没的临时库。**必须一直说着**，
-            // 不能只弹一次提示 —— 上一次事故里用户在「一切正常」的界面上
-            // 录入、导入，全部写进了一个活不过这次启动的地方。
             if !storeHealth.isHealthy {
                 StoreWarningBanner()
                     .padding(.horizontal, 16)
@@ -181,24 +112,16 @@ struct RootView: View {
             }
         }
         .overlay {
-            // 烟花压在所有内容之上、弹窗之下。只有中奖这种罕见时刻才会触发。
             CelebrationView(trigger: celebration.trigger)
         }
         .overlay(alignment: .bottom) {
-            // 动画只作用在这一小棵子树上：把 `.animation(value:)` 挂在容器上，
-            // 提示条的进出照样有动画，而底下的票面预览、方格图不会被卷进来重画。
             ZStack(alignment: .bottom) {
                 if let toast = toastCenter.current {
                     ToastBanner(message: toast)
-                        // 悬浮标签栏大约 50pt 高，96 是为了压在它上面留一段空隙。
-                        // 左右也要留边，长文案（比如导入失败的系统报错）不能顶到屏幕边缘。
                         .padding(.horizontal, 20)
                         .padding(.bottom, 96)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .task(id: toast.id) {
-                            // 不能用 `try?` 把取消吞掉：2.6 秒内弹第二条提示时，
-                            // 第一条的任务被取消后会照样往下跑 `toast = nil`，
-                            // 把刚弹出来的第二条清掉。和 CelebrationView 是同一个坑。
                             do {
                                 try await Task.sleep(for: .seconds(2.6))
                             } catch {
@@ -210,18 +133,14 @@ struct RootView: View {
             }
             .animation(.spring(duration: 0.36, bounce: 0.18), value: toastCenter.current?.id)
         }
-        // 震动由提示自己声明，见 `ToastMessage.feedback`。
-        // 原来一律 `.success`：点号码球被拒时，选号盘那边已经震过一次，
-        // 提示又补一记重的，慢半拍到手上，像是点了两下。
         .sensoryFeedback(trigger: toastCenter.current?.id) { _, _ in toastCenter.current?.feedback }
+        .sensoryFeedback(.selection, trigger: selection)
         .onChange(of: drawStore.resultsRevision) { _, _ in
             guard startupChecksComplete, settings.autoCheck, !drawStore.checkingWallet else { return }
             let service = RecordService(context: context, drawStore: drawStore)
             if let outcome = try? service.checkAll(), outcome.won > 0 { celebration() }
         }
         .task {
-            // 弹抽屉时不要把背后染灰 —— 那套行为在这里恢复得不跟手，
-            // 设置页「外观」那一行的图标甚至根本恢复不回来。见 TintDimming。
             TintDimming.disable()
             async let pushRegistration: Void = DrawPushCenter.shared.refreshOnLaunch()
             await drawStore.bootstrap()
@@ -229,6 +148,16 @@ struct RootView: View {
             startupChecksComplete = true
             await pushRegistration
         }
+    }
+
+    @ViewBuilder
+    private func tabLayer<Content: View>(_ tab: MainTab, @ViewBuilder content: () -> Content) -> some View {
+        let isCurrent = selection == tab
+        content()
+            .opacity(isCurrent ? 1 : 0)
+            .allowsHitTesting(isCurrent)
+            .accessibilityHidden(!isCurrent)
+            .zIndex(isCurrent ? 1 : 0)
     }
 
     /// 冷启动拿到开奖数据后：先按官方日历校正预测期号，再自动核对。
@@ -287,10 +216,120 @@ enum RootSheet: String, Identifiable {
     var id: String { rawValue }
 }
 
-enum MainTab: Hashable {
+enum MainTab: String, Hashable, CaseIterable, Identifiable {
     case home, wallet, settings
-    /// 只是标签栏右边那颗独立按钮，不对应任何页面。
-    case scan
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .home: "首页"
+        case .wallet: "票夹"
+        case .settings: "设置"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .home: "chart.line.uptrend.xyaxis"
+        case .wallet: "wallet.bifold"
+        case .settings: "gearshape"
+        }
+    }
+
+    var selectedSymbol: String {
+        switch self {
+        case .home: "chart.line.uptrend.xyaxis"
+        case .wallet: "wallet.bifold.fill"
+        case .settings: "gearshape.fill"
+        }
+    }
+}
+
+// MARK: - 底部双体液态玻璃悬浮栏
+
+/// 左侧三项主页面液态玻璃胶囊 + 右侧完全独立的球形液态玻璃扫描按钮。
+struct FloatingGlassDock: View {
+    @Binding var selection: MainTab
+    let unseenCount: Int
+    let namespace: Namespace.ID
+    let onScan: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        GlassEffectContainer(spacing: 12) {
+            HStack(spacing: 12) {
+                HStack(spacing: 2) {
+                    ForEach(MainTab.allCases) { tab in
+                        tabButton(tab)
+                    }
+                }
+                .padding(4)
+                .glassPill(interactive: false)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("dock.tabs")
+
+                Button(action: onScan) {
+                    Image(systemName: "camera.viewfinder")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 58, height: 58)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .glassCircle(tint: .accentColor)
+                .accessibilityLabel("扫描票据")
+                .accessibilityIdentifier("dock.scan")
+            }
+            .padding(.horizontal, 18)
+            .padding(.bottom, 6)
+        }
+    }
+
+    private func tabButton(_ tab: MainTab) -> some View {
+        let isSelected = selection == tab
+        return Button {
+            selection = tab
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: isSelected ? tab.selectedSymbol : tab.symbol)
+                    .font(.system(size: 18, weight: isSelected ? .semibold : .medium))
+                    .overlay(alignment: .topTrailing) {
+                        if tab == .wallet && unseenCount > 0 {
+                            Text(unseenCount > 99 ? "99+" : "\(unseenCount)")
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 5)
+                                .frame(minWidth: 17, minHeight: 17)
+                                .background(Palette.profit, in: Capsule())
+                                .offset(x: 11, y: -6)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                Text(tab.label)
+                    .scaledFont(10, weight: isSelected ? .semibold : .medium)
+                    .lineLimit(1)
+            }
+            .foregroundStyle(isSelected ? Color.accentColor : Color.primary.opacity(0.76))
+            .frame(maxWidth: .infinity)
+            .frame(height: 50)
+            .background {
+                if isSelected {
+                    Capsule()
+                        .fill(Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.08))
+                        .matchedGeometryEffect(id: "dock.active.pill", in: namespace)
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(tab.label)
+        .accessibilityValue(tab == .wallet && unseenCount > 0 ? "\(unseenCount) 个新结果" : "")
+        .accessibilityIdentifier("dock.tab.\(tab.rawValue)")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
 }
 
 // MARK: - 轻提示

@@ -3,6 +3,7 @@ import SwiftData
 
 /// 票夹：一张实体票对应一条票据记录，按录入时间倒序。
 struct WalletView: View {
+    var isActive: Bool = true
 
     @Environment(DrawStore.self) private var drawStore
     @Environment(\.modelContext) private var context
@@ -127,7 +128,7 @@ struct WalletView: View {
                                     // 滚进屏幕 = 用户有机会看到了。先记下来，
                                     // 离开页面时才真正写库。
                                     .onAppear {
-                                        if item.isNewResult { seenThisVisit.insert(item.id) }
+                                        if isActive && item.isNewResult { seenThisVisit.insert(item.id) }
                                     }
                             }
                         }
@@ -186,14 +187,17 @@ struct WalletView: View {
             // 每次切回来都重排的话，去设置看一眼再回来，「新结果」那一区
             // 就当场空了 —— 用户根本没来得及看完。
             .onAppear {
-                if let last = lastFreezeAt {
-                    needsRefreeze = Date().timeIntervalSince(last) > Self.refreezeAfter
-                } else {
-                    needsRefreeze = true
-                }
-                rebuild()
+                guard isActive else { return }
+                handleActivate()
             }
             .onDisappear { commitSeen() }
+            .onChange(of: isActive) { _, active in
+                if active {
+                    handleActivate()
+                } else {
+                    commitSeen()
+                }
+            }
             .onChange(of: scenePhase) { _, phase in
                 // 切到后台也算看完了这一轮，否则用户直接上划退出，已读就丢了
                 if phase != .active {
@@ -204,6 +208,18 @@ struct WalletView: View {
                 needsRefreeze = true
                 rebuild()
             }
+        }
+    }
+
+    private func handleActivate() {
+        if let last = lastFreezeAt {
+            needsRefreeze = Date().timeIntervalSince(last) > Self.refreezeAfter
+        } else {
+            needsRefreeze = true
+        }
+        rebuild()
+        for card in previewCards where card.isNewResult {
+            seenThisVisit.insert(card.id)
         }
     }
 
@@ -242,10 +258,7 @@ struct WalletView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity)
-            .background(Palette.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentCard(cornerRadius: 18, padding: 14)
         }
         .buttonStyle(.plain)
         .padding(.top, 2)
@@ -355,8 +368,8 @@ struct WalletView: View {
         if item == .pending {
             return isOn ? AnyShapeStyle(Palette.warning) : AnyShapeStyle(Palette.warning.opacity(0.15))
         }
-        // 没选中的用和首页分段控件一样的浅灰底，不再是一块块白卡片
-        return isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary.opacity(0.06))
+        // 没选中的用轻雾浅底，在纯白画布上清爽有层次
+        return isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Palette.surfaceChip)
     }
 
     /// 空状态要分清是「一张票都没有」还是「筛选之后没有」。
@@ -367,7 +380,7 @@ struct WalletView: View {
             ContentUnavailableView {
                 Label("票夹是空的", systemImage: "wallet.bifold")
             } description: {
-                Text("拍下你手里的实体票，或照着票面手动录入 —— 右下角那颗加号就是入口")
+                Text("拍下你手里的实体票，或照着票面手动录入 —— 右下角那颗圆形扫描按钮就是入口")
             }
             .padding(.top, 50)
         } else {

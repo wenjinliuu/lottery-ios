@@ -71,4 +71,49 @@ final class JarModelTests: XCTestCase {
     func testNoMatchingBalls() {
         XCTAssertEqual(JarBuilder.build([], range: .month, now: now), JarBuilder.Jar())
     }
+
+    func testBreakdownSeparatesSameColorZonesAcrossGames() {
+        let ssqEntry = ssq("2026-11-01", redHits: 3, blueHit: true)
+        let dltEntry = JarEntry(
+            day: "2026-11-02",
+            game: .dlt,
+            numbers: NumberSet([.front: [1, 2, 3, 4, 5], .back: [1, 2]]),
+            matched: [.front: [true, true, true, true, false], .back: [true, false]]
+        )
+        let qlcEntry = JarEntry(
+            day: "2026-11-03",
+            game: .qlc,
+            numbers: NumberSet([.nums7: [1, 2, 3, 4, 5, 6, 7]]),
+            matched: [.nums7: [true, true, false, false, false, false, false]]
+        )
+
+        let jar = JarBuilder.build([ssqEntry, dltEntry, qlcEntry], range: .year, now: now)
+        XCTAssertEqual(jar.hits, 11)
+        // 双色球蓝球(1)和大乐透前区(4)共用 .blue；大乐透后区(1)和七乐彩基本号(2)共用 .yellow，
+        // 汇总颜色表合并它们，但明细表必须按彩种和号码区准确分开。
+        XCTAssertEqual(jar.counts[.blue], 5)
+        XCTAssertEqual(jar.counts[.yellow], 3)
+        XCTAssertEqual(jar.breakdown.map(\.game), [.dlt, .ssq, .qlc])
+
+        let dltZones = jar.breakdown[0].zones
+        XCTAssertEqual(dltZones.map(\.label), ["前区", "后区"])
+        XCTAssertEqual(dltZones.map(\.hits), [4, 1])
+
+        let ssqZones = jar.breakdown[1].zones
+        XCTAssertEqual(ssqZones.map(\.label), ["红球", "蓝球"])
+        XCTAssertEqual(ssqZones.map(\.hits), [3, 1])
+
+        let qlcZones = jar.breakdown[2].zones
+        XCTAssertEqual(qlcZones.map(\.label), ["基本号"])
+        XCTAssertEqual(qlcZones.map(\.hits), [2])
+    }
+
+    func testScaledZoneCountsSumsToVisibleLimitProportionally() {
+        let jar = JarBuilder.demoPreview(hits: 2_000)
+        XCTAssertEqual(jar.hits, 2_000)
+        XCTAssertEqual(jar.breakdown.reduce(0) { $0 + $1.hits }, 2_000)
+        let scaled = jar.scaledZoneCounts(limit: JarBuilder.displayLimit)
+        XCTAssertEqual(scaled.values.reduce(0, +), JarBuilder.displayLimit)
+        XCTAssertEqual(scaled["ssq.red"], 550)
+    }
 }

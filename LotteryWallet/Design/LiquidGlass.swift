@@ -11,18 +11,17 @@ import SwiftUI
 /// 页面代码一律走下面这些语义化修饰符。
 extension View {
 
-    /// 内容卡片：浅灰底上的白色圆角块（颜色见 `Palette.card`），不是玻璃。
-    func contentCard(cornerRadius: CGFloat = 16, padding: CGFloat = 16) -> some View {
-        self
+    /// 内容卡片：纯白画布上的清透冷雾浅灰圆角块 + 极细轮廓线，不是玻璃。
+    func contentCard(cornerRadius: CGFloat = 22, padding: CGFloat = 16) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return self
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Palette.card)
-            )
+            .background(shape.fill(Palette.card))
+            .overlay(shape.strokeBorder(Palette.cardBorder, lineWidth: 1))
     }
 
-    /// 系统表单换成和其他页面同一套配色：近白浅灰底、白卡片（见 `Palette.canvas`）。
+    /// 系统表单换成和其他页面同一套配色：纯净白底 + 冷雾浅灰分组块。
     ///
     /// 挂在 Form 上；行背景要单独给，见 `cardRows()`。
     func canvasForm() -> some View {
@@ -42,7 +41,7 @@ extension View {
         // A solid glass shape has only one reflective edge. Reveal its perimeter
         // so the balls show through the softer rim and stay crisp in the center.
         return glassEffect(.clear, in: outline)
-            .mask(outline.strokeBorder(lineWidth: width).opacity(0.48))
+            .mask(outline.strokeBorder(lineWidth: width).opacity(0.56))
     }
 
     /// 拖动图表时浮在曲线上的当日金额。
@@ -50,12 +49,12 @@ extension View {
         glassEffect(.regular, in: .rect(cornerRadius: 15))
     }
 
-    /// 胶囊玻璃：悬浮在内容之上的筛选 chip、分段控件。
+    /// 胶囊玻璃：悬浮在内容之上的筛选 chip、摇一摇与命中明细入口。
     func glassPill(tint: Color? = nil, interactive: Bool = true) -> some View {
         glassEffect(GlassStyle.pill(tint: tint, interactive: interactive), in: Capsule())
     }
 
-    /// 圆形玻璃：右下角悬浮扫描 / 添加按钮。
+    /// 圆形玻璃：右下角独立悬浮扫描按钮。
     func glassCircle(tint: Color? = nil) -> some View {
         glassEffect(GlassStyle.pill(tint: tint, interactive: true), in: Circle())
     }
@@ -63,6 +62,45 @@ extension View {
     /// 让相邻的玻璃元素在动画中融合（形变、聚拢、分离）。
     func glassMorph(id: some Hashable, in namespace: Namespace.ID) -> some View {
         glassEffectID(id, in: namespace)
+    }
+}
+
+/// 首页顶部的清透彩光雾。极低饱和度的三色径向柔光自然融入纯白/深色画布，
+/// 打破系统灰表单的沉闷感，同时完全不干扰前方文字对比度。
+struct HomeAmbientBackdrop: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let strength: Double = colorScheme == .dark ? 0.11 : 0.085
+        ZStack(alignment: .top) {
+            Palette.canvas
+            ZStack {
+                Circle()
+                    .fill(BallColor.blue.light.opacity(strength))
+                    .frame(width: 300, height: 300)
+                    .blur(radius: 68)
+                    .offset(x: -115, y: -70)
+                Circle()
+                    .fill(BallColor.red.light.opacity(strength * 0.85))
+                    .frame(width: 260, height: 260)
+                    .blur(radius: 66)
+                    .offset(x: 120, y: -55)
+                Circle()
+                    .fill(BallColor.yellow.light.opacity(strength * 0.72))
+                    .frame(width: 220, height: 220)
+                    .blur(radius: 62)
+                    .offset(x: 10, y: 15)
+            }
+            .frame(height: 260)
+            .clipped()
+            .mask(
+                LinearGradient(colors: [.black, .black.opacity(0.45), .clear],
+                               startPoint: .top, endPoint: .bottom)
+            )
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

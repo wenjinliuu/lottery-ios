@@ -48,7 +48,7 @@ final class AppStoreScreenshotTests: XCTestCase {
         app.launchEnvironment["DEMO_SCAN_IMAGE"] = Self.scanTicket.path
         app.launch()
 
-        let scan = app.tabBars.buttons.matching(NSPredicate(format: "label CONTAINS %@", "扫描")).firstMatch
+        let scan = app.buttons["dock.scan"]
         XCTAssertTrue(scan.waitForExistence(timeout: 15), "找不到扫描按钮")
         scan.tap()
 
@@ -82,7 +82,7 @@ final class AppStoreScreenshotTests: XCTestCase {
         app.launchEnvironment["DEMO_SCAN_IMAGE"] = pair.path
         app.launchEnvironment["DEMO_SCAN_LOCATE"] = "1"
         app.launch()
-        let scan = app.tabBars.buttons.matching(NSPredicate(format: "label CONTAINS %@", "扫描")).firstMatch
+        let scan = app.buttons["dock.scan"]
         XCTAssertTrue(scan.waitForExistence(timeout: 15))
         scan.tap()
         XCTAssertTrue(app.staticTexts["找到 2 张票"].waitForExistence(timeout: 90))
@@ -101,7 +101,9 @@ final class AppStoreScreenshotTests: XCTestCase {
             .appendingPathComponent("store-display-pair.jpg").path
         app.launchArguments.append("--store-display-pair")
         app.launch()
-        app.tabBars.buttons.matching(NSPredicate(format: "label CONTAINS %@", "扫描")).firstMatch.tap()
+        let scan = app.buttons["dock.scan"]
+        XCTAssertTrue(scan.waitForExistence(timeout: 15))
+        scan.tap()
         XCTAssertTrue(app.staticTexts["找到 2 张票"].waitForExistence(timeout: 15))
         settle()
         capture("08-display-pair")
@@ -170,7 +172,14 @@ final class AppStoreScreenshotTests: XCTestCase {
     // MARK: - 工具
 
     private func open(tab: String) {
-        let button = app.tabBars.buttons[tab]
+        let id: String
+        switch tab {
+        case "首页": id = "dock.tab.home"
+        case "票夹": id = "dock.tab.wallet"
+        case "设置": id = "dock.tab.settings"
+        default: id = tab
+        }
+        let button = app.buttons[id].firstMatch
         XCTAssertTrue(button.waitForExistence(timeout: 10), "找不到标签：\(tab)")
         button.tap()
         settle()

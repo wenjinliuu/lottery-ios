@@ -13,8 +13,19 @@ final class KeyFlowTests: XCTestCase {
         app.launch()
     }
 
+    private func dockTab(_ name: String) -> XCUIElement {
+        let id: String
+        switch name {
+        case "首页": id = "dock.tab.home"
+        case "票夹": id = "dock.tab.wallet"
+        case "设置": id = "dock.tab.settings"
+        default: id = name
+        }
+        return app.buttons[id].firstMatch
+    }
+
     func testWalletTopEdgeAfterScrolling() throws {
-        app.tabBars.buttons["票夹"].tap()
+        dockTab("票夹").tap()
         let title = app.navigationBars["票夹"]
         XCTAssertTrue(title.waitForExistence(timeout: 10))
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.71))
@@ -24,21 +35,29 @@ final class KeyFlowTests: XCTestCase {
         capture("wallet-soft-top")
     }
 
-    /// 三个主页面都能打开。
+    /// 三个主页面都能打开，且扫描按钮独立位于底栏胶囊右侧。
     func testEveryMainTabOpens() {
         for tab in ["票夹", "设置", "首页"] {
-            let button = app.tabBars.buttons[tab]
+            let button = dockTab(tab)
             XCTAssertTrue(button.waitForExistence(timeout: 10), "找不到标签：\(tab)")
             button.tap()
             XCTAssertTrue(button.isSelected, "点了「\(tab)」没有切过去")
         }
+
+        let scan = app.buttons["dock.scan"]
+        let settings = app.buttons["dock.tab.settings"]
+        XCTAssertTrue(scan.waitForExistence(timeout: 10), "找不到独立扫描按钮")
+        XCTAssertGreaterThan(scan.frame.minX, settings.frame.maxX, "扫描按钮应独立位于底栏胶囊右侧")
+        scan.tap()
+        let close = app.buttons["关闭"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "点扫描按钮没有弹出扫描抽屉")
+        close.tap()
     }
 
     /// 首页的累计收支来自示例票据：票面 734 元、奖金 1,146 元、结余 412 元
     /// （Scripts/make-demo-data.py 生成时打印的数字）。
     func testHomeShowsDemoTotals() {
         XCTAssertTrue(app.staticTexts["累计收支"].waitForExistence(timeout: 10), "首页没有累计收支")
-        // 金额和「元」是分开的两段字（「元」小一号），按数字找
         for text in ["412", "734", "1,146"] {
             let element = app.descendants(matching: .any)
                 .matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
@@ -48,45 +67,57 @@ final class KeyFlowTests: XCTestCase {
 
     /// 票夹里能看到示例票据的彩种。
     func testWalletListsDemoTickets() {
-        app.tabBars.buttons["票夹"].tap()
+        dockTab("票夹").tap()
         let ticket = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@ OR label CONTAINS %@ OR label CONTAINS %@",
                                                           "双色球", "大乐透", "七乐彩", "七星彩")).firstMatch
         XCTAssertTrue(ticket.waitForExistence(timeout: 10), "票夹里没有示例票据")
     }
 
-    /// 首页切到号码球罐：罐子出来，点「摇一摇」球会被吹起来。
-    /// 录制快照时顺手存两张图（停稳的、吹起来的），改了罐子的样子可以直接看。
+    /// 首页默认展示放大版玻璃球罐：点命中胶囊弹按彩种/球区细分的液态玻璃分布卡，
+    /// 点「摇一摇」吹球，切曲线/方格保留时间范围。
     func testHomeBallJar() {
         let style = app.segmentedControls["home.chart.style"]
         XCTAssertTrue(style.waitForExistence(timeout: 10), "首页没有图表样式切换")
-        XCTAssertEqual(style.buttons.count, 3, "图表样式应该是曲线、方格、球罐三种")
-        style.buttons.element(boundBy: 2).tap()
+        XCTAssertEqual(style.buttons.count, 3, "图表样式应该是球罐、曲线、方格三种")
+        XCTAssertTrue(style.buttons.element(boundBy: 0).isSelected, "首页默认应展示玻璃球罐")
 
         let shake = app.buttons["home.jar.shake"]
-        XCTAssertTrue(shake.waitForExistence(timeout: 10), "切到球罐后没有「摇一摇」")
+        XCTAssertTrue(shake.waitForExistence(timeout: 10), "球罐视图缺少「摇一摇」")
         let range = app.segmentedControls["home.range"]
         XCTAssertTrue(range.buttons["本年"].isSelected)
-        let total = app.staticTexts["home.jar.total"]
-        XCTAssertTrue(total.waitForExistence(timeout: 10))
+        let total = app.buttons["home.jar.total"]
+        XCTAssertTrue(total.waitForExistence(timeout: 10), "缺少命中球明细入口胶囊")
         let yearTotal = total.label
+
         range.buttons["本月"].tap()
         XCTAssertNotEqual(total.label, yearTotal, "球罐应按当前月份统计")
         style.buttons.element(boundBy: 1).tap()
         XCTAssertTrue(range.buttons["本月"].isSelected)
-        style.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(range.buttons["本月"].isSelected)
         style.buttons.element(boundBy: 2).tap()
+        XCTAssertTrue(range.buttons["本月"].isSelected)
+        style.buttons.element(boundBy: 0).tap()
         XCTAssertNotEqual(total.label, yearTotal, "切回球罐应保留本月")
         range.buttons["本年"].tap()
         XCTAssertEqual(total.label, yearTotal)
         RunLoop.current.run(until: Date().addingTimeInterval(1.5))
         capture("home-jar")
 
+        // 点命中胶囊，弹出按彩种与号码区细分的玻璃明细卡片。
+        total.tap()
+        XCTAssertTrue(app.staticTexts["命中号码分布"].waitForExistence(timeout: 10), "点击命中数没有弹出分布明细卡")
+        XCTAssertTrue(app.staticTexts["双色球"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["红球"].waitForExistence(timeout: 5))
+        capture("home-jar-breakdown")
+        let closeBreakdown = app.buttons["home.jar.breakdown.close"]
+        XCTAssertTrue(closeBreakdown.waitForExistence(timeout: 5))
+        closeBreakdown.tap()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+
         shake.tap()
         RunLoop.current.run(until: Date().addingTimeInterval(0.9))
         capture("home-jar-shaking")
 
-        style.buttons.element(boundBy: 1).tap()
+        style.buttons.element(boundBy: 2).tap()
         let heatmap = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label BEGINSWITH %@", "逐日收支方格图")).firstMatch
         XCTAssertTrue(heatmap.waitForExistence(timeout: 10))
@@ -104,11 +135,11 @@ final class KeyFlowTests: XCTestCase {
         app.buttons["完成"].tap()
         let range = app.segmentedControls["home.range"]
         let style = app.segmentedControls["home.chart.style"]
-        for index in [0, 1, 2] {
+        for index in [1, 2, 0] {
             style.buttons.element(boundBy: index).tap()
             XCTAssertTrue(range.buttons["2026-07"].isSelected)
         }
-        XCTAssertTrue(app.staticTexts["home.jar.total"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["home.jar.total"].waitForExistence(timeout: 10))
         capture("home-dark-july")
     }
 
@@ -118,10 +149,7 @@ final class KeyFlowTests: XCTestCase {
             app.terminate()
             app.launchEnvironment["JAR_PREVIEW_HITS"] = String(hits)
             app.launch()
-            let style = app.segmentedControls["home.chart.style"]
-            XCTAssertTrue(style.waitForExistence(timeout: 10))
-            style.buttons.element(boundBy: 2).tap()
-            let total = app.staticTexts["home.jar.total"]
+            let total = app.buttons["home.jar.total"]
             XCTAssertTrue(total.waitForExistence(timeout: 10))
             let shake = app.buttons["home.jar.shake"]
             RunLoop.current.run(until: Date().addingTimeInterval(1))
