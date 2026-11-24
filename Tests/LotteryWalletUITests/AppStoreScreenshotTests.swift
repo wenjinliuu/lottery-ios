@@ -114,10 +114,12 @@ final class AppStoreScreenshotTests: XCTestCase {
         app.launch()
         let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let status = app.staticTexts["store.notification.status"]
-        let allow = board.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
+        let allowAlert = board.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
+        let allowButton = board.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
         let deadline = Date().addingTimeInterval(45)
         while Date() < deadline {
-            if allow.exists { allow.tap() }
+            if allowAlert.exists { allowAlert.tap() }
+            else if allowButton.exists && allowButton.isHittable { allowButton.tap() }
             if status.exists, status.label == "已排程 3 条" { break }
             settle(0.3)
         }

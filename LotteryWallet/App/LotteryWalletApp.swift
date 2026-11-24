@@ -77,6 +77,15 @@ struct LotteryWalletApp: App {
             storeNotificationStatus = error.localizedDescription
             return
         }
+        // iOS 27 模拟器点完「允许」后 usernoted 偶尔滞后几十毫秒才落盘授权，
+        // 立刻调 add() 会抛 Source is not authorized，这里确认状态并做短暂重试。
+        for _ in 0..<6 {
+            let settings = await center.notificationSettings()
+            if settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(300))
+        }
         let examples: [(GameKey, String, String)] = [
             (.pl5, "排列 5 26308 期开奖", "3 6 2 9 1"),
             (.dlt, "大乐透 26132 期开奖", "02 09 16 26 35 + 06 11"),
@@ -100,8 +109,22 @@ struct LotteryWalletApp: App {
                 }
                 guard let content = DrawPushPayload.personalizedContent(raw, draw: draw, summary: summary) else { return }
                 let trigger = UNTimeIntervalNotificationTrigger(timeInterval: Double(5 + index), repeats: false)
-                try await center.add(UNNotificationRequest(identifier: "store-" + game.rawValue,
-                                                          content: content, trigger: trigger))
+                let request = UNNotificationRequest(identifier: "store-" + game.rawValue,
+                                                    content: content, trigger: trigger)
+                var lastError: Error?
+                for attempt in 0..<4 {
+                    do {
+                        try await center.add(request)
+                        lastError = nil
+                        break
+                    } catch {
+                        lastError = error
+                        if attempt < 3 {
+                            try? await Task.sleep(for: .milliseconds(450))
+                        }
+                    }
+                }
+                if let lastError { throw lastError }
             }
             storeNotificationStatus = "已排程 3 条"
         } catch {
