@@ -73,31 +73,30 @@ struct LotteryWalletApp: App {
         for _ in 0..<20 where UIApplication.shared.applicationState != .active {
             try? await Task.sleep(for: .milliseconds(150))
         }
-        try? await Task.sleep(for: .milliseconds(600))
+        try? await Task.sleep(for: .milliseconds(450))
         let center = UNUserNotificationCenter.current()
         do {
             let existing = await center.notificationSettings()
-            if existing.authorizationStatus != .authorized && existing.authorizationStatus != .provisional {
+            if existing.authorizationStatus != .authorized {
                 guard try await center.requestAuthorization(options: [.alert, .sound]) else {
                     storeNotificationStatus = "系统权限已关闭"
                     return
                 }
             }
         } catch {
-            storeNotificationStatus = error.localizedDescription
+            storeNotificationStatus = "排程失败：\(error.localizedDescription)"
             return
         }
         storeNotificationStatus = "已授权，等待排程"
         // iOS 27 模拟器点完「允许」后 usernoted 偶尔滞后才把授权写入通知仓库，
-        // 立刻调 add() 会抛 Source is not authorized，这里确认状态并做纯重试。
-        for _ in 0..<12 {
+        // 立刻调 add() 会抛 Source is not authorized，这里确认状态并做短暂重试。
+        for _ in 0..<8 {
             let settings = await center.notificationSettings()
-            if settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional {
+            if settings.authorizationStatus == .authorized {
                 break
             }
-            try? await Task.sleep(for: .milliseconds(350))
+            try? await Task.sleep(for: .milliseconds(300))
         }
-        try? await Task.sleep(for: .milliseconds(500))
         let examples: [(GameKey, String, String)] = [
             (.pl5, "排列 5 26308 期开奖", "3 6 2 9 1"),
             (.dlt, "大乐透 26132 期开奖", "02 09 16 26 35 + 06 11"),
@@ -124,15 +123,18 @@ struct LotteryWalletApp: App {
                 let request = UNNotificationRequest(identifier: "store-" + game.rawValue,
                                                     content: content, trigger: trigger)
                 var lastError: Error?
-                for attempt in 0..<10 {
+                for attempt in 0..<5 {
                     do {
                         try await center.add(request)
                         lastError = nil
                         break
                     } catch {
                         lastError = error
-                        if attempt < 9 {
-                            try? await Task.sleep(for: .milliseconds(600))
+                        if attempt == 1 {
+                            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+                        }
+                        if attempt < 4 {
+                            try? await Task.sleep(for: .milliseconds(450))
                         }
                     }
                 }
@@ -140,7 +142,8 @@ struct LotteryWalletApp: App {
             }
             storeNotificationStatus = "已排程 3 条"
         } catch {
-            storeNotificationStatus = error.localizedDescription
+            let s = await center.notificationSettings()
+            storeNotificationStatus = "排程失败[auth=\(s.authorizationStatus.rawValue),alert=\(s.alertSetting.rawValue)]：\(error.localizedDescription)"
             return
         }
     }

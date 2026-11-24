@@ -112,19 +112,47 @@ final class AppStoreScreenshotTests: XCTestCase {
 
     func testCaptureNotificationBanner() throws {
         app.launchArguments.append("--store-notification")
-        app.launch()
         let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let status = app.staticTexts["store.notification.status"]
         let allowAlert = board.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
         let allowButton = board.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
-        let deadline = Date().addingTimeInterval(60)
-        while Date() < deadline {
-            if allowAlert.exists { allowAlert.tap() }
-            else if allowButton.exists && allowButton.isHittable { allowButton.tap() }
-            if status.exists, status.label == "已排程 3 条" { break }
-            settle(0.4)
+
+        func runSchedulingPass(timeout: TimeInterval) -> Bool {
+            app.launch()
+            let deadline = Date().addingTimeInterval(timeout)
+            while Date() < deadline {
+                if allowAlert.exists {
+                    allowAlert.tap()
+                    settle(0.6)
+                } else if allowButton.exists && allowButton.isHittable {
+                    allowButton.tap()
+                    settle(0.6)
+                }
+                if status.exists {
+                    let label = status.label
+                    if label == "已排程 3 条" { return true }
+                    if label.hasPrefix("排程失败") || label == "系统权限已关闭" { return false }
+                }
+                settle(0.4)
+            }
+            return status.exists && status.label == "已排程 3 条"
         }
-        guard status.exists, status.label == "已排程 3 条" else {
+
+        // 模拟器上首次点击系统「允许」后，usernoted 偶发未向当前进程同步授权仓库；
+        // 失败时先重启 App 建立新 XPC 会话，若仍未同步则通过系统设置切换一次「允许通知」写穿仓库。
+        var scheduled = runSchedulingPass(timeout: 25)
+        if !scheduled {
+            app.terminate()
+            settle(1.5)
+            scheduled = runSchedulingPass(timeout: 22)
+        }
+        if !scheduled {
+            app.terminate()
+            enableNotificationsInSettings()
+            settle(1.2)
+            scheduled = runSchedulingPass(timeout: 22)
+        }
+        guard scheduled else {
             let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             evidence.name = "notification-permission-failure"
             evidence.lifetime = .keepAlways
@@ -175,6 +203,70 @@ final class AppStoreScreenshotTests: XCTestCase {
     }
 
     // MARK: - 工具
+
+    /// 通过模拟器系统「设置 → 通知 → 对个号」切换一次「允许通知」，
+    /// 强制 BBSettingsGateway 写入 usernoted 通知仓库，绕过 iOS 模拟器偶发的授权不同步。
+    private func enableNotificationsInSettings() {
+        let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+        settings.terminate()
+        settle(0.5)
+        settings.launch()
+        settle(1.0)
+
+        let notifPredicate = NSPredicate(format: "label IN %@", ["Notifications", "通知"])
+        func findInSettings(_ predicate: NSPredicate) -> XCUIElement? {
+            let candidates: [XCUIElement] = [
+                settings.buttons.matching(predicate).firstMatch,
+                settings.cells.matching(predicate).firstMatch,
+                settings.staticTexts.matching(predicate).firstMatch
+            ]
+            return candidates.first(where: { $0.exists && $0.isHittable })
+                ?? candidates.first(where: { $0.exists })
+        }
+
+        var notifRow = findInSettings(notifPredicate)
+        for _ in 0..<3 where notifRow == nil {
+            settings.swipeUp()
+            settle(0.4)
+            notifRow = findInSettings(notifPredicate)
+        }
+        guard let notifRow else {
+            settings.terminate()
+            return
+        }
+        notifRow.tap()
+        settle(1.0)
+
+        let appPredicate = NSPredicate(format: "label CONTAINS %@", "对个号")
+        var appRow = findInSettings(appPredicate)
+        for _ in 0..<8 where appRow == nil || !(appRow?.isHittable ?? false) {
+            settings.swipeUp()
+            settle(0.4)
+            appRow = findInSettings(appPredicate)
+        }
+        guard let appRow else {
+            settings.terminate()
+            return
+        }
+        appRow.tap()
+        settle(0.8)
+
+        let allowToggle = settings.switches
+            .matching(NSPredicate(format: "label IN %@", ["Allow Notifications", "允许通知"]))
+            .firstMatch
+        let toggle = allowToggle.waitForExistence(timeout: 4) ? allowToggle : settings.switches.firstMatch
+        if toggle.exists || toggle.waitForExistence(timeout: 3) {
+            if (toggle.value as? String) == "1" {
+                toggle.tap()
+                settle(0.6)
+                toggle.tap()
+            } else {
+                toggle.tap()
+            }
+            settle(0.8)
+        }
+        settings.terminate()
+    }
 
     private func open(tab: String) {
         let id: String
