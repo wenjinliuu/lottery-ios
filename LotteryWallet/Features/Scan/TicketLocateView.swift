@@ -95,54 +95,65 @@ struct TicketLocateView: View {
     private var footer: some View {
         VStack(spacing: 10) {
             if let index = marks.firstIndex(where: { $0.id == selected }) {
-              HStack(spacing: 22) {
-                // 机器没认出彩种、或者认错了：在这里直接指定，识别的时候按指定的来
-                Menu {
-                    ForEach(GameKey.ordered) { game in
-                        Button(game.label) {
-                            marks[index].game = game
-                            marks[index].forcedGame = game
-                            marks[index].isResolving = false
+                GlassGroup(spacing: 12) {
+                    HStack(spacing: 12) {
+                        // 机器没认出彩种、或者认错了：在这里直接指定，识别的时候按指定的来
+                        Menu {
+                            ForEach(GameKey.ordered) { game in
+                                Button(game.label) {
+                                    marks[index].game = game
+                                    marks[index].forcedGame = game
+                                    marks[index].isResolving = false
+                                }
+                            }
+                        } label: {
+                            Label(marks[index].game == nil ? "指定彩种" : "改彩种", systemImage: "tag")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .glassPill(tint: .white, interactive: true)
                         }
+                        .accessibilityIdentifier("locate.game")
+                        Button(role: .destructive) {
+                            withAnimation(.easeOut(duration: 0.15)) {
+                                marks.remove(at: index)
+                                selected = nil
+                            }
+                        } label: {
+                            Label("删掉第 \(index + 1) 个框", systemImage: "trash")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Color(hex: 0xFF8E8E))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .glassPill(tint: .red, interactive: true)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("locate.remove")
                     }
-                } label: {
-                    Label(marks[index].game == nil ? "指定彩种" : "改彩种", systemImage: "tag")
-                        .font(.footnote.weight(.semibold))
                 }
-                .tint(.white)
-                .accessibilityIdentifier("locate.game")
-                Button(role: .destructive) {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        marks.remove(at: index)
-                        selected = nil
-                    }
-                } label: {
-                    Label("删掉第 \(index + 1) 个框", systemImage: "trash")
-                        .font(.footnote.weight(.semibold))
-                }
-                .tint(.red)
-                .accessibilityIdentifier("locate.remove")
-              }
             } else {
                 Text(Disclaimer.crop)
                     .scaledFont(10)
                     .foregroundStyle(.white.opacity(0.6))
                     .multilineTextAlignment(.center)
             }
-            HStack(spacing: 12) {
-                Button("重拍") { onCancel() }
-                    .buttonStyle(SecondaryGlassButton(tint: .white))
-                    .fixedSize()
+            GlassGroup(spacing: 12) {
+                HStack(spacing: 12) {
+                    Button("重拍") { onCancel() }
+                        .buttonStyle(SecondaryGlassButton(tint: .white))
+                        .fixedSize()
 
-                Button("加一个框") { add() }
-                    .buttonStyle(SecondaryGlassButton(tint: .white))
-                    .fixedSize()
-                    .accessibilityIdentifier("locate.add")
+                    Button("加一个框") { add() }
+                        .buttonStyle(SecondaryGlassButton(tint: .white))
+                        .fixedSize()
+                        .accessibilityIdentifier("locate.add")
 
-                Button(marks.count > 1 ? "识别这 \(marks.count) 张" : "识别这张") { onConfirm() }
-                    .buttonStyle(ProminentGlassButton(tint: .accentColor))
-                    .disabled(marks.isEmpty)
-                    .accessibilityIdentifier("locate.confirm")
+                    Button(marks.count > 1 ? "识别这 \(marks.count) 张" : "识别这张") { onConfirm() }
+                        .buttonStyle(ProminentGlassButton(tint: .accentColor))
+                        .disabled(marks.isEmpty)
+                        .accessibilityIdentifier("locate.confirm")
+                }
             }
         }
         .padding(.horizontal, 20)

@@ -167,17 +167,16 @@ enum Palette {
 
     /// 页面底色。浅色下纯净高明度白，让内容和彩色球罐自由呼吸；深色下为深曜石黑。
     static let canvas = Color(light: 0xFFFFFF, dark: 0x090A0D)
-    /// 中性内容卡片底色。白底画布上用清透冷云雾浅灰托出层级，避免发闷。
-    static let card = Color(light: 0xF4F6FA, dark: 0x17191F)
-    /// 卡片细描边。给纯白底上的轻雾卡面一条克制的轮廓线。
-    static let cardBorder = Color(light: 0xE6ECF5, dark: 0x262B36)
+    /// 表单类二级页（备份、数据状态）的极浅瓷白底，让纯白行块保持清晰分组层次。
+    static let groupedCanvas = Color(light: 0xF7F8FB, dark: 0x090A0D)
+    /// 内容卡片底色。浅色为纯净悬浮白，配细描边与柔和中性纸影；深色为深灰石板面。
+    static let card = Color(light: 0xFFFFFF, dark: 0x17191F)
+    /// 卡片细描边。给纯白悬浮卡片一条克制利落的轮廓线。
+    static let cardBorder = Color(light: 0xE8ECF4, dark: 0x282E3A)
     /// 实体票据纸面底色。略暖的象牙白配柔和纸影，在纯白画布上呈现立体纸感。
     static let paper = Color(light: 0xFCFDFE, dark: 0x181B22)
-    /// 玻璃球罐内部清透底色渐变（上浅下亮）。
-    static let jarTop = Color(light: 0xF5F9FF, dark: 0x11151E)
-    static let jarBottom = Color(light: 0xFFFFFF, dark: 0x171B25)
-    /// 轻雾胶囊底色（非玻璃的静态辅助标签/筛选条）。
-    static let surfaceChip = Color(light: 0xEEF2F8, dark: 0x222632)
+    /// 静态辅助胶囊底色。
+    static let surfaceChip = Color(light: 0xF1F4F9, dark: 0x232734)
     /// 分隔线。
     static let separator = Color(.separator)
 }

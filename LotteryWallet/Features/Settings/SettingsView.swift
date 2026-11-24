@@ -20,140 +20,220 @@ struct SettingsView: View {
         @Bindable var settings = settings
 
         NavigationStack {
-            Form {
-                Group {
-                    Section {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    settingsSection(footer: "每次打开应用并拿到新开奖数据时，自动核对待开奖的票据。") {
                         Toggle(isOn: $settings.autoCheck) {
                             row("checkmark.circle.fill", .green, "开奖后自动核对")
                         }
-                    } footer: {
-                        Text("每次打开应用并拿到新开奖数据时，自动核对待开奖的票据。")
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                     }
 
-                    Section {
+                    settingsSection(footer: "票夹有待开奖的票据时，由手机核对并提醒结果。票据不会上传。") {
                         Toggle(isOn: pushBinding) {
-                            LabeledContent {
+                            HStack(spacing: 8) {
+                                row("bell.badge.fill", .red, "开奖通知")
+                                Spacer(minLength: 8)
                                 if push.status != .off {
                                     Text(push.status.label)
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
                                         .multilineTextAlignment(.trailing)
                                 }
-                            } label: {
-                                row("bell.badge.fill", .red, "开奖通知")
                             }
                         }
-                    } footer: {
-                        Text("票夹有待开奖的票据时，由手机核对并提醒结果。票据不会上传。")
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                     }
 
-                    Section {
-                        Picker(selection: $settings.appearance) {
-                            ForEach(AppSettings.Appearance.allCases) { item in
-                                Label(item.label, systemImage: item.symbol).tag(item)
-                            }
-                        } label: {
+                    settingsSection {
+                        HStack(spacing: 12) {
                             row("circle.lefthalf.filled", .indigo, "外观")
+                            Spacer(minLength: 8)
+                            Menu {
+                                ForEach(AppSettings.Appearance.allCases) { item in
+                                    Button {
+                                        settings.appearance = item
+                                    } label: {
+                                        if settings.appearance == item {
+                                            Label(item.label, systemImage: "checkmark")
+                                        } else {
+                                            Label(item.label, systemImage: item.symbol)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: settings.appearance.symbol)
+                                        .font(.caption.weight(.semibold))
+                                    Text(settings.appearance.label)
+                                        .font(.subheadline.weight(.medium))
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .scaledFont(9, weight: .bold)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .foregroundStyle(.primary)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .glassPill(interactive: true)
+                            }
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 11)
                     }
 
-                    // 数据只有**一组**，三行。
-                    //
-                    // 原来是分开的两组：「数据状态」（开奖数据、开奖日历、往期缓存、
-                    // 刷新）和「数据」（本机记录、备份）。可是在用户心里它们是同一
-                    // 件事 —— 我的数据现在什么样、怎么带走、怎么清掉。分成两组只是
-                    // 因为它们是分两次做出来的。
-                    //
-                    // 每一行只留一句话，细节都在各自的详情页里：
-                    // 开奖数据的来源和日历进 `DrawDataView`，备份和清空进 `BackupView`。
-                    Section {
+                    // 数据只有一组，四行：数据状态、本机记录、刷新开奖数据、备份与恢复。
+                    settingsSection(header: "数据", footer: backupFooter) {
                         NavigationLink {
                             DrawDataView()
                         } label: {
-                            LabeledContent {
-                                // 一行把三件事说完：后端什么时候跑的、跑成了没有、
-                                // 八个彩种齐了几个。开奖号没更新时要的就是这三件事。
+                            HStack(spacing: 10) {
+                                row("checkmark.seal.fill", .blue, "数据状态")
+                                Spacer(minLength: 8)
                                 Text(statusSummary)
                                     .font(.footnote)
                                     .foregroundStyle(statusTint)
                                     .multilineTextAlignment(.trailing)
-                            } label: {
-                                row("checkmark.seal.fill", .blue, "数据状态")
+                                chevron
                             }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 13)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
 
-                        LabeledContent {
+                        rowDivider
+
+                        HStack(spacing: 10) {
+                            row("tray.full.fill", .orange, "本机记录")
+                            Spacer(minLength: 8)
                             Text("\(records.count) 条")
                                 .font(.footnote)
+                                .monospacedDigit()
                                 .foregroundStyle(.secondary)
-                        } label: {
-                            row("tray.full.fill", .orange, "本机记录")
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 13)
 
-                        // 刷新摆在**设置主页**，不在开奖数据详情页里。
-                        //
-                        // 这是唯一一个「想到就要用」的动作：用户发现号码没更新，
-                        // 第一反应是找个地方点一下刷新，而不是先进详情页看时间戳。
-                        // 藏在二级页里等于把最常用的那一下多挡了一层。
+                        rowDivider
+
                         Button {
                             refresh()
                         } label: {
-                            LabeledContent {
-                                if isRefreshing { ProgressView() }
-                            } label: {
+                            HStack(spacing: 10) {
                                 row("arrow.clockwise.circle.fill", .teal, "刷新开奖数据")
+                                Spacer(minLength: 8)
+                                if isRefreshing { ProgressView() }
                             }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 13)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         .disabled(isRefreshing)
 
-                        // 清空全部记录也在这里面。它是**备份的反面**，
-                        // 和备份放在一起，点之前一眼就能看到旁边那份备份在不在。
+                        rowDivider
+
                         NavigationLink {
                             BackupView()
                         } label: {
-                            row("externaldrive.fill.badge.icloud", .blue, "备份与恢复")
+                            HStack(spacing: 10) {
+                                row("externaldrive.fill.badge.icloud", .blue, "备份与恢复")
+                                Spacer(minLength: 8)
+                                chevron
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 13)
+                            .contentShape(Rectangle())
                         }
-                    } header: {
-                        Text("数据")
-                    } footer: {
-                        Text(backupFooter)
+                        .buttonStyle(.plain)
                     }
 
-                    Section {
+                    settingsSection(
+                        header: "扫描识别",
+                        footer: "打开后，扫描的复核页会多出一张标注图：绿线是票面上找到的基准（号码区上下那两条虚线），蓝框是配准后的号码区，粉格是每一个号码格子。号码认错时截这张图，就能看出是基准找歪了还是格子划错了。平时不用打开。"
+                    ) {
                         Toggle(isOn: $settings.debugVision) {
                             row("ruler.fill", .teal, "识别调试图")
                         }
-                    } header: {
-                        Text("扫描识别")
-                    } footer: {
-                        Text("打开后，扫描的复核页会多出一张标注图：绿线是票面上找到的基准（号码区上下那两条虚线），蓝框是配准后的号码区，粉格是每一个号码格子。号码认错时截这张图，就能看出是基准找歪了还是格子划错了。平时不用打开。")
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                     }
 
-                    Section {
-                        LabeledContent {
+                    settingsSection {
+                        HStack(spacing: 10) {
+                            row("app.badge.fill", .purple, "版本")
+                            Spacer(minLength: 8)
                             Text("\(AppInfo.version) (\(AppInfo.build))")
                                 .font(.footnote)
+                                .monospacedDigit()
                                 .foregroundStyle(.secondary)
-                        } label: {
-                            row("app.badge.fill", .purple, "版本")
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 13)
+
+                        rowDivider
+
                         NavigationLink {
                             AboutView()
                         } label: {
-                            row("info.circle.fill", .gray, "关于与免责声明")
+                            HStack(spacing: 10) {
+                                row("info.circle.fill", .gray, "关于与免责声明")
+                                Spacer(minLength: 8)
+                                chevron
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 13)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                 }
-                .cardRows()
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 112)
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
-            .safeAreaPadding(.bottom, 92)
-            .canvasForm()
-            // 导航栏不要自己糊底色，交给系统的 scroll edge effect。
-            // 理由见 `HomeView` 里同一处那段注释。
+            .background(Palette.canvas)
             .navigationTitle("设置")
             .task { await drawStore.loadStatus() }
         }
+    }
+
+    private func settingsSection<Content: View>(header: String? = nil,
+                                                footer: String? = nil,
+                                                @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let header {
+                Text(header)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+            }
+            VStack(spacing: 0) {
+                content()
+            }
+            .contentCard(cornerRadius: 20, padding: 0)
+            if let footer {
+                Text(footer)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 2)
+            }
+        }
+    }
+
+    private var rowDivider: some View {
+        Divider()
+            .padding(.leading, 57)
+    }
+
+    private var chevron: some View {
+        Image(systemName: "chevron.right")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.tertiary)
     }
 
     /// 设置页那一行的状态文案。

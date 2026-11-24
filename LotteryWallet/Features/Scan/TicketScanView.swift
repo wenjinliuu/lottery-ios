@@ -176,17 +176,39 @@ struct TicketScanView: View {
         .task {
             guard stage == .intro, let image = DemoData.scanImage else { return }
             #if DEBUG && targetEnvironment(simulator)
-            // Store photography uses two masked copies of the approved sample.
-            // Their captions illustrate the two styles; OCR runs on separate fixtures.
+            // Store photography uses three masked copies of the approved sample placed at varied sizes & angles.
+            // Their captions illustrate multi-lottery detection; OCR runs on separate fixtures.
             if ProcessInfo.processInfo.arguments.contains("--store-display-pair") {
                 preview = image
-                marks = [(70.0, GameKey.dlt), (790.0, .ssq)].map { left, game in
-                    let x = CGFloat(left) / 1500, right = (CGFloat(left) + 640) / 1500
-                    let top = CGFloat(140) / 1200, bottom = CGFloat(1100) / 1200
-                    let quad = TicketQuad(topLeft: CGPoint(x: x, y: top), topRight: CGPoint(x: right, y: top),
-                                          bottomRight: CGPoint(x: right, y: bottom), bottomLeft: CGPoint(x: x, y: bottom))
-                    return TicketLocateView.Mark(quad: quad, game: game)
-                }
+                marks = [
+                    TicketLocateView.Mark(
+                        quad: TicketQuad(
+                            topLeft: CGPoint(x: 0.0763, y: 0.1150),
+                            topRight: CGPoint(x: 0.4207, y: 0.0881),
+                            bottomRight: CGPoint(x: 0.4704, y: 0.5067),
+                            bottomLeft: CGPoint(x: 0.1260, y: 0.5335)
+                        ),
+                        game: .dlt
+                    ),
+                    TicketLocateView.Mark(
+                        quad: TicketQuad(
+                            topLeft: CGPoint(x: 0.6148, y: 0.1051),
+                            topRight: CGPoint(x: 0.9168, y: 0.1330),
+                            bottomRight: CGPoint(x: 0.8652, y: 0.5003),
+                            bottomLeft: CGPoint(x: 0.5632, y: 0.4724)
+                        ),
+                        game: .ssq
+                    ),
+                    TicketLocateView.Mark(
+                        quad: TicketQuad(
+                            topLeft: CGPoint(x: 0.3470, y: 0.5829),
+                            topRight: CGPoint(x: 0.6280, y: 0.5729),
+                            bottomRight: CGPoint(x: 0.6464, y: 0.9144),
+                            bottomLeft: CGPoint(x: 0.3653, y: 0.9244)
+                        ),
+                        game: .qlc
+                    )
+                ]
                 stage = .locate
                 return
             }
@@ -473,14 +495,9 @@ struct TicketScanView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
-                .background {
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
-                        .fill(.regularMaterial)
-                        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous)
-                            .strokeBorder(Palette.separator))
-                }
+                .floatingGlassPanel(cornerRadius: 28)
                 .padding(.horizontal, 12)
-                .padding(.bottom, 10)
+                .padding(.bottom, 8)
             }
         } else {
             ScrollView {
@@ -531,9 +548,9 @@ struct TicketScanView: View {
                     Label("放大核对", systemImage: "arrow.up.left.and.arrow.down.right")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 9)
+                        .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(.black.opacity(0.45), in: Capsule())
+                        .glassEffect(.regular.tint(.black.opacity(0.45)), in: Capsule())
                         .padding(9)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -702,8 +719,9 @@ struct TicketScanView: View {
                     Image(systemName: "trash")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                        .frame(width: 36, height: 36)
-                        .contentShape(Rectangle())
+                        .frame(width: 34, height: 34)
+                        .glassCircle(interactive: true)
+                        .contentShape(Circle().inset(by: -4))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("删掉这张票")
@@ -745,7 +763,7 @@ struct TicketScanView: View {
 
             costRow(value)
         }
-        .contentCard()
+        .contentCard(cornerRadius: 22, padding: 16, tint: game.tint)
     }
 
     /// 算出来的金额，旁边永远摆着**票面上印的那个合计**。
@@ -870,9 +888,12 @@ struct TicketScanView: View {
                     } label: {
                         Label("补一注", systemImage: "plus.circle")
                             .font(.caption.weight(.semibold))
+                            .foregroundStyle(ticket.game.accent.accentColor)
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 6)
+                            .glassPill(tint: ticket.game.tint, interactive: true)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(ticket.game.accent.accentColor)
                 }
             }
         }
@@ -898,10 +919,12 @@ struct TicketScanView: View {
                             } label: {
                                 Label("没认出来，点这里补上", systemImage: "plus.circle")
                                     .font(.caption.weight(.semibold))
-                                    .padding(.top, 3)
+                                    .foregroundStyle(ticket.game.accent.accentColor)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .glassPill(tint: ticket.game.tint, interactive: true)
                             }
                             .buttonStyle(.plain)
-                            .foregroundStyle(ticket.game.accent.accentColor)
                             .accessibilityLabel("补上\(row.label)的号码")
                         } else {
                             BallRowView(values: row.values, color: row.color, size: 26) { _ in
@@ -1033,19 +1056,21 @@ struct TicketScanView: View {
     /// 和录入页那个分段控件是同一条。
     @ViewBuilder
     private func shapeMenu(_ value: ScannedTicket) -> some View {
+        let canSwitch = EntryMode.modes(for: value.game).count > 1
         let capsule = HStack(spacing: 3) {
             Text(headLabel(value))
-            if EntryMode.modes(for: value.game).count > 1 {
+            if canSwitch {
                 Image(systemName: "chevron.down").scaledFont(8, weight: .bold)
             }
         }
         .font(.caption2.weight(.bold))
         .foregroundStyle(value.game.onTint)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(value.game.tint, in: Capsule())
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .glassProminentPill(tint: value.game.tint, interactive: canSwitch)
+        .overlay(Capsule().strokeBorder(value.game.accent.solidStroke, lineWidth: 1))
 
-        if EntryMode.modes(for: value.game).count > 1 {
+        if canSwitch {
             Menu {
                 ForEach(TicketShape.allCases) { shape in
                     Button {
@@ -1154,23 +1179,38 @@ struct TicketScanView: View {
         let modes = value.game.playModes
         if value.game == .k8, modes.count > 1 {
             let current = value.playMode.isEmpty ? value.game.defaultPlayMode : value.playMode
+            let currentLabel = modes.first(where: { $0.key == current })?.label ?? current
             HStack(spacing: 8) {
                 Text("票面玩法").font(.subheadline)
                 Spacer(minLength: 8)
-                Picker("票面玩法", selection: Binding(
-                    get: { current },
-                    set: { newValue in
-                        ticket.playMode.wrappedValue = newValue
-                        // 逐注玩法（3D 的实体票每注各印各的）和整票玩法冲突时，
-                        // 用户手动选的说了算 —— 否则改了票头、每一注还标着旧玩法。
-                        ticket.lineModes.wrappedValue = []
-                    })) {
+                Menu {
                     ForEach(modes) { mode in
-                        Text(mode.label).tag(mode.key)
+                        Button {
+                            ticket.playMode.wrappedValue = mode.key
+                            // 逐注玩法（3D 的实体票每注各印各的）和整票玩法冲突时，
+                            // 用户手动选的说了算 —— 否则改了票头、每一注还标着旧玩法。
+                            ticket.lineModes.wrappedValue = []
+                        } label: {
+                            if mode.key == current {
+                                Label(mode.label, systemImage: "checkmark")
+                            } else {
+                                Text(mode.label)
+                            }
+                        }
                     }
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(currentLabel)
+                            .font(.subheadline.weight(.semibold))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .scaledFont(10, weight: .bold)
+                    }
+                    .foregroundStyle(value.game.accent.accentColor)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .glassPill(tint: value.game.tint, interactive: true)
                 }
-                .pickerStyle(.menu)
-                .labelsHidden()
+                .accessibilityLabel("票面玩法，当前 \(currentLabel)")
             }
         }
     }
@@ -1250,15 +1290,9 @@ struct TicketScanView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(.regularMaterial)
-                .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .strokeBorder(Palette.separator))
-                .shadow(color: .black.opacity(0.10), radius: 16, y: -2)
-        }
+        .floatingGlassPanel(cornerRadius: 28)
         .padding(.horizontal, 12)
-        .padding(.bottom, 10)
+        .padding(.bottom, 8)
     }
 
     /// 底栏配色跟着这一批票的彩种走，和录入页一致。
@@ -1744,8 +1778,9 @@ struct PhotoZoomView: View {
                     .font(.headline)
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.4), in: Circle())
+                    .glassEffect(.regular.tint(.black.opacity(0.45)).interactive(), in: Circle())
             }
+            .buttonStyle(.plain)
             .padding(16)
         }
         .statusBarHidden()

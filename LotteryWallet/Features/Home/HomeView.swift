@@ -51,6 +51,8 @@ struct HomeView: View {
     /// 首卡的副本放在最后），滑到哨兵页上再无动画地跳回对应的真页，
     /// 这样最后一张往右滑就能接回第一张。
     @State private var pageIndex = 1
+    /// 区分代码自动轮播 / 哨兵回绕与用户手动左右滑，避免挂 DragGesture 抢占首页上下滚动。
+    @State private var isAutoAdvancing = false
     /// 自动轮播暂停到什么时候。用户一滑就往后推 12 秒。
     @State private var autoScrollResumeAt = Date.distantPast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -105,9 +107,15 @@ struct HomeView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: openProfitPicker) {
-                        Image(systemName: "calendar")
+                        HStack(spacing: 5) {
+                            Image(systemName: "calendar")
+                                .font(.footnote.weight(.semibold))
+                            Text(toolbarPeriodText)
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                        }
                     }
-                    .accessibilityLabel("选择统计区间")
+                    .accessibilityLabel("选择统计区间，当前 \(periodLabel)")
                     .accessibilityIdentifier("home.profit.period")
                 }
             }
@@ -152,6 +160,53 @@ struct HomeView: View {
         jarEntries = nil
         recomputeJar()
         recomputePeriodStats()
+    }
+
+    private var earliestPickableYear: Int {
+        let nowYear = Calendar.chinaCalendar.component(.year, from: AppClock.now)
+        return min(availableYears.min() ?? nowYear, nowYear - 2)
+    }
+
+    private var toolbarPeriodText: String {
+        if range == .all { return "全部" }
+        let cal = Calendar.chinaCalendar
+        let y = cal.component(.year, from: periodEnd)
+        let m = cal.component(.month, from: periodEnd)
+        return range == .month ? "\(y)-\(String(format: "%02d", m))" : "\(y)年"
+    }
+
+    private func canStepPeriod(by delta: Int) -> Bool {
+        guard range == .month || range == .year else { return false }
+        let cal = Calendar.chinaCalendar
+        let now = AppClock.now
+        if range == .month {
+            guard let currentStart = cal.dateInterval(of: .month, for: periodEnd)?.start,
+                  let nowStart = cal.dateInterval(of: .month, for: now)?.start,
+                  let targetStart = cal.date(byAdding: .month, value: delta, to: currentStart) else { return false }
+            let targetYear = cal.component(.year, from: targetStart)
+            return targetYear >= earliestPickableYear && targetStart <= nowStart
+        } else {
+            let nowYear = cal.component(.year, from: now)
+            let targetYear = cal.component(.year, from: periodEnd) + delta
+            return targetYear >= earliestPickableYear && targetYear <= nowYear
+        }
+    }
+
+    private func stepPeriod(by delta: Int) {
+        guard canStepPeriod(by: delta) else { return }
+        let cal = Calendar.chinaCalendar
+        let now = AppClock.now
+        if range == .month {
+            guard let currentStart = cal.dateInterval(of: .month, for: periodEnd)?.start,
+                  let targetStart = cal.date(byAdding: .month, value: delta, to: currentStart),
+                  let interval = cal.dateInterval(of: .month, for: targetStart) else { return }
+            historicalEnd = interval.contains(now) ? nil : interval.end.addingTimeInterval(-1)
+        } else if range == .year {
+            let targetYear = cal.component(.year, from: periodEnd) + delta
+            guard let first = cal.date(from: DateComponents(year: targetYear, month: 1, day: 1)),
+                  let interval = cal.dateInterval(of: .year, for: first) else { return }
+            historicalEnd = interval.contains(now) ? nil : interval.end.addingTimeInterval(-1)
+        }
     }
 
     private func openProfitPicker() {
@@ -245,11 +300,19 @@ struct HomeView: View {
     private var heroSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Text("累计收支")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
+                    Spacer(minLength: 4)
+                    if range == .month || range == .year {
+                        periodStepButton("chevron.left",
+                                         enabled: canStepPeriod(by: -1),
+                                         id: "home.period.prev",
+                                         label: range == .month ? "上个月" : "上一年") {
+                            stepPeriod(by: -1)
+                        }
+                    }
                     Picker("范围", selection: Binding(get: { range }, set: { historicalEnd = nil; range = $0 })) {
                         Text(range == .month ? periodLabel : "本月").tag(ProfitRange.month)
                         Text(range == .year ? periodLabel : "本年").tag(ProfitRange.year)
@@ -258,6 +321,14 @@ struct HomeView: View {
                     .pickerStyle(.segmented)
                     .fixedSize()
                     .accessibilityIdentifier("home.range")
+                    if range == .month || range == .year {
+                        periodStepButton("chevron.right",
+                                         enabled: canStepPeriod(by: 1),
+                                         id: "home.period.next",
+                                         label: range == .month ? "下个月" : "下一年") {
+                            stepPeriod(by: 1)
+                        }
+                    }
                 }
 
                 HStack(alignment: .center, spacing: 8) {
@@ -304,18 +375,18 @@ struct HomeView: View {
                 } else if chartStyle == HomeChartStyle.grid.rawValue {
                     VStack(alignment: .leading, spacing: 10) {
                         ProfitHeatmap(days: series.days, range: range, end: periodEnd,
-                                      width: screenWidth - HomeLayout.pagePadding * 2 - 28)
+                                      width: screenWidth - HomeLayout.pagePadding * 2)
                             .id(periodLabel)
                         HStack(spacing: 12) {
                             heatLegend(Palette.profit, "有中奖")
                             heatLegend(Palette.loss, "未中奖")
                         }
                     }
-                    .contentCard(cornerRadius: 24, padding: 14)
+                    .padding(.top, 4)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else {
                     ProfitFlowChart(series: series, mode: .cumulative)
-                        .contentCard(cornerRadius: 24, padding: 14)
+                        .padding(.top, 4)
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
             }
@@ -323,6 +394,26 @@ struct HomeView: View {
         }
         .sensoryFeedback(.selection, trigger: range)
         .sensoryFeedback(.selection, trigger: chartStyle)
+    }
+
+    private func periodStepButton(_ symbol: String,
+                                  enabled: Bool,
+                                  id: String,
+                                  label: String,
+                                  action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .scaledFont(11, weight: .bold)
+                .foregroundStyle(enabled ? Color.accentColor : Color.secondary)
+                .frame(width: 28, height: 28)
+                .glassCircle(tint: enabled ? .accentColor : nil, interactive: enabled)
+                .contentShape(Circle().inset(by: -6))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.32)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(id)
     }
 
     private var chartTotals: some View {
@@ -408,16 +499,19 @@ struct HomeView: View {
             }
             .onChange(of: pageIndex) { _, page in
                 carouselIndex = realIndex(page)
+                if isAutoAdvancing {
+                    isAutoAdvancing = false
+                } else {
+                    // 用户主动左右滑动切换了开奖卡，暂停自动轮播 12 秒，且不挂 DragGesture 阻塞竖滑。
+                    autoScrollResumeAt = Date().addingTimeInterval(12)
+                }
                 wrapIfNeeded(page)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .animation(.easeInOut(duration: 0.45), value: pageIndex)
-            // 留出 20pt 上下空间给彩种柔光阴影呼吸，避免被分页容器裁边。
+            // 留出 20pt 上下空间给柔和中性纸影呼吸，避免被分页容器裁边。
             .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: screenWidth) + 20)
             .accessibilityHint("左右滑动查看其他彩种的最新开奖")
-            .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in
-                autoScrollResumeAt = Date().addingTimeInterval(12)
-            })
             .task(id: carouselGames.count) { await runAutoScroll() }
 
             Text(Disclaimer.draw)
@@ -443,6 +537,7 @@ struct HomeView: View {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled, Date() >= autoScrollResumeAt else { continue }
+            isAutoAdvancing = true
             pageIndex += 1
         }
     }
@@ -475,6 +570,7 @@ struct HomeView: View {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(480))
             guard pageIndex == page else { return }
+            isAutoAdvancing = true
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) { pageIndex = target }
@@ -529,7 +625,7 @@ struct HomeView: View {
                     .font(.caption)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Palette.canvas, in: Capsule())
+                    .background(Palette.surfaceChip, in: Capsule())
                     .overlay(Capsule().strokeBorder(Palette.cardBorder, lineWidth: 1))
                 }
             }
@@ -955,8 +1051,8 @@ enum DrawCardMetrics {
     }
 }
 
-/// 首页轮播里的一张开奖卡：采用彩种极浅渐变染底 + 柔光细边 + 彩种环境投影，
-/// 在纯白画布上呈现清新多彩的识别度。
+/// 首页轮播里的一张开奖卡：与票夹 `TicketPaper` 保持同一套极轻彩种微染与纯净中性纸影，
+/// 填充严格裁在描边圆角内，不向外溢出彩色光晕。
 struct DrawCard: View {
     @Environment(\.screenWidth) private var screenWidth
     @Environment(\.colorScheme) private var colorScheme
@@ -985,20 +1081,21 @@ struct DrawCard: View {
                 shape.fill(
                     LinearGradient(
                         colors: [
-                            game.tint.opacity(colorScheme == .dark ? 0.16 : 0.085),
-                            game.tint.opacity(colorScheme == .dark ? 0.04 : 0.02)
+                            game.tint.opacity(colorScheme == .dark ? 0.08 : 0.035),
+                            .clear
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
             }
-            .shadow(color: game.tint.opacity(colorScheme == .dark ? 0.22 : 0.11),
-                    radius: 12, x: 0, y: 5)
+            .clipShape(shape)
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.065),
+                    radius: 11, x: 0, y: 4)
         }
         .overlay {
             shape.strokeBorder(
-                game.tint.opacity(colorScheme == .dark ? 0.28 : 0.20),
+                game.tint.opacity(colorScheme == .dark ? 0.28 : 0.22),
                 lineWidth: 1
             )
         }
@@ -1080,23 +1177,45 @@ enum DrawCountdown {
 
 /// 卡片上那两行奖级挑谁。
 enum PrizeRanking {
-    static func topTwo(of list: [PrizeEntry], game: GameKey) -> [PrizeEntry] {
-        guard game == .k8 else {
-            return ["一等奖", "二等奖"].compactMap { name in
-                list.first { $0.prizeName.contains(name) && ($0.winningCount > 0 || $0.amount > 0) }
+    static func topTwo(of list: [PrizeEntry], game: GameKey, digits: [Int] = []) -> [PrizeEntry] {
+        if game == .k8 {
+            var open: [(offset: Int, entry: PrizeEntry)] = []
+            for (offset, entry) in list.enumerated() where entry.winningCount > 0 && entry.amount > 0 {
+                open.append((offset, entry))
             }
+            let ranked = open.sorted { lhs, rhs in
+                lhs.entry.amount == rhs.entry.amount
+                    ? lhs.offset < rhs.offset
+                    : lhs.entry.amount > rhs.entry.amount
+            }
+            return Array(ranked.prefix(2).map(\.entry))
         }
-        var open: [(offset: Int, entry: PrizeEntry)] = []
-        for (offset, entry) in list.enumerated() where entry.winningCount > 0 && entry.amount > 0 {
-            open.append((offset, entry))
+
+        if game == .fc3d || game == .pl3 {
+            let direct = list.first { ($0.prizeName.contains("直选") || $0.prizeName.contains("单选")) && ($0.winningCount > 0 || $0.amount > 0) }
+            let g3 = list.first { ($0.prizeName.contains("组三") || $0.prizeName.contains("组选3") || $0.prizeName.contains("组选三")) && ($0.winningCount > 0 || $0.amount > 0) }
+            let g6 = list.first { ($0.prizeName.contains("组六") || $0.prizeName.contains("组选6") || $0.prizeName.contains("组选六")) && ($0.winningCount > 0 || $0.amount > 0) }
+            let ordered = [direct, g3, g6].compactMap { $0 }
+
+            // 优先按真实中奖注数挑（如排列3：组三期只有直选+组选3有注数，豹子期只有直选有注数）。
+            let withWinners = ordered.filter { $0.winningCount > 0 }
+            if !withWinners.isEmpty {
+                return Array(withWinners.prefix(2))
+            }
+            // 数据源未公布注数时（如福彩3D 固定奖），按当期开奖 3 码的重复形态自动匹配当期可中奖项：
+            // 3 个同号（豹子）仅直选；2 个同号为直选 + 组三；3 个不同号为直选 + 组六。
+            if digits.count == 3 {
+                switch Set(digits).count {
+                case 1: return [direct].compactMap { $0 }
+                case 2: return [direct, g3].compactMap { $0 }
+                default: return [direct, g6].compactMap { $0 }
+                }
+            }
+            return Array(ordered.prefix(2))
         }
-        let ranked = open.sorted { lhs, rhs in
-            lhs.entry.amount == rhs.entry.amount
-                ? lhs.offset < rhs.offset
-                : lhs.entry.amount > rhs.entry.amount
+
+        return ["一等奖", "二等奖"].compactMap { name in
+            list.first { $0.prizeName.contains(name) && ($0.winningCount > 0 || $0.amount > 0) }
         }
-        var picked: [PrizeEntry] = []
-        for item in ranked.prefix(2) { picked.append(item.entry) }
-        return picked
     }
 }

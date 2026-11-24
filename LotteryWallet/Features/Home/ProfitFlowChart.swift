@@ -253,7 +253,7 @@ struct ProfitFlowChart: View {
     private func marker(_ point: FlowPoint, _ value: Double, _ color: Color) -> some ChartContent {
         PointMark(x: .value("日期", point.day), y: .value("金额", value))
             .symbolSize(90)
-            .foregroundStyle(Palette.card)
+            .foregroundStyle(Palette.canvas)
         PointMark(x: .value("日期", point.day), y: .value("金额", value))
             .symbolSize(42)
             .foregroundStyle(color)

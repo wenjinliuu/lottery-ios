@@ -181,9 +181,9 @@ struct TicketReferenceImage: View {
                     Label("放大", systemImage: "arrow.up.left.and.arrow.down.right")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, 9)
                         .padding(.vertical, 4)
-                        .background(.black.opacity(0.45), in: Capsule())
+                        .glassEffect(.regular.tint(.black.opacity(0.45)), in: Capsule())
                         .padding(8)
                 }
                 .frame(maxWidth: .infinity)

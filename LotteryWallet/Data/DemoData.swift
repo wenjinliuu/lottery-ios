@@ -67,7 +67,7 @@ enum DemoData {
               let filter = CIFilter(name: "CIPixellate") else { return image }
         let extent = input.extent
         filter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)
-        filter.setValue(max(extent.width, extent.height) / 28, forKey: kCIInputScaleKey)
+        filter.setValue(max(extent.width, extent.height) / 46, forKey: kCIInputScaleKey)
         filter.setValue(CIVector(x: extent.midX, y: extent.midY), forKey: kCIInputCenterKey)
         guard let output = filter.outputImage?.cropped(to: extent),
               let cgImage = CIContext().createCGImage(output, from: extent) else { return image }

@@ -10,6 +10,9 @@ struct BallJarView: View {
     @State private var size = CGSize.zero
     @State private var isVisible = false
     @State private var shakes = 0
+    @State private var touches = 0
+    @State private var fingerPoint: CGPoint?
+    @State private var lastDragSample: (point: CGPoint, time: Date)?
     @State private var isBreakdownPresented = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -28,34 +31,44 @@ struct BallJarView: View {
             JarBallLayer(scene: scene)
                 .frame(height: Self.height)
                 .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
-                .background {
-                    shape
-                        .fill(
-                            LinearGradient(
-                                colors: [Palette.jarTop, Palette.jarBottom],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.36 : 0.075),
-                                radius: 16, x: 0, y: 8)
-                }
+                // 罐内完全透明，直接透出 App 主画布，只保留清透玻璃边框与罐口镜面高光。
+                .background(Color.clear)
                 .clipShape(shape)
+                .overlay {
+                    if let point = fingerPoint {
+                        Circle()
+                            .fill(
+                                RadialGradient(
+                                    colors: [
+                                        Color.accentColor.opacity(colorScheme == .dark ? 0.24 : 0.14),
+                                        .clear
+                                    ],
+                                    center: .center,
+                                    startRadius: 2,
+                                    endRadius: 42
+                                )
+                            )
+                            .frame(width: 84, height: 84)
+                            .position(point)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
+                }
                 .overlay(alignment: .top) {
                     // 玻璃罐口一道轻盈的镜面高光弧，增强通透器皿感。
                     Capsule()
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    .white.opacity(colorScheme == .dark ? 0.14 : 0.85),
+                                    .white.opacity(colorScheme == .dark ? 0.16 : 0.72),
                                     .white.opacity(0)
                                 ],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
                         )
-                        .frame(height: 5)
-                        .padding(.horizontal, 26)
+                        .frame(height: 4)
+                        .padding(.horizontal, 28)
                         .padding(.top, 5)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
@@ -69,12 +82,64 @@ struct BallJarView: View {
                 .overlay {
                     shape
                         .strokeBorder(
-                            Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.08),
+                            LinearGradient(
+                                colors: colorScheme == .dark
+                                    ? [Color.white.opacity(0.20), Color.white.opacity(0.08)]
+                                    : [Color.black.opacity(0.07), Color.black.opacity(0.11)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
                             lineWidth: 1
                         )
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
+                .contentShape(shape)
+                // 轻点立刻激起波纹弹跳；轻按（0.14s）后拖动即可用手指拨动小球跟随流动，
+                // 不拦截正常的上下滑动滚动首页。
+                .gesture(
+                    SpatialTapGesture()
+                        .onEnded { value in
+                            guard jar.hits > 0 else { return }
+                            scene.poke(at: value.location)
+                            touches += 1
+                        }
+                )
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.14)
+                        .sequenced(before: DragGesture(minimumDistance: 0))
+                        .onChanged { phase in
+                            guard jar.hits > 0 else { return }
+                            switch phase {
+                            case .first(true):
+                                break
+                            case .second(true, let drag):
+                                guard let drag else { return }
+                                let now = Date()
+                                let location = drag.location
+                                if fingerPoint == nil {
+                                    touches += 1
+                                    scene.poke(at: location)
+                                }
+                                fingerPoint = location
+                                if let previous = lastDragSample {
+                                    let dt = max(now.timeIntervalSince(previous.time), 1.0 / 120.0)
+                                    let vx = (location.x - previous.point.x) / dt
+                                    let vy = (location.y - previous.point.y) / dt
+                                    scene.stir(at: location, velocity: CGSize(width: vx, height: vy))
+                                }
+                                lastDragSample = (location, now)
+                            default:
+                                break
+                            }
+                        }
+                        .onEnded { _ in
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                fingerPoint = nil
+                            }
+                            lastDragSample = nil
+                        }
+                )
                 .accessibilityElement()
                 .accessibilityLabel("号码球罐")
                 .accessibilityIdentifier("home.jar.frame")
@@ -89,6 +154,7 @@ struct BallJarView: View {
                 }
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: shakes)
+        .sensoryFeedback(.impact(weight: .light), trigger: touches)
         .onChange(of: jar, initial: true) { _, _ in load() }
         .onChange(of: size) { _, _ in load() }
         .onScrollVisibilityChange(threshold: 0.1) { isVisible = $0 }
@@ -417,6 +483,18 @@ final class JarScene {
     func shake() {
         guard !colors.isEmpty else { return }
         physics.blow()
+        isAnimating = true
+    }
+
+    func poke(at point: CGPoint) {
+        guard !colors.isEmpty else { return }
+        physics.poke(at: point.x, y: point.y)
+        isAnimating = true
+    }
+
+    func stir(at point: CGPoint, velocity: CGSize) {
+        guard !colors.isEmpty else { return }
+        physics.stir(at: point.x, y: point.y, vx: velocity.width, vy: velocity.height)
         isAnimating = true
     }
 

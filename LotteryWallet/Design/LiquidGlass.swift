@@ -11,28 +11,31 @@ import SwiftUI
 /// 页面代码一律走下面这些语义化修饰符。
 extension View {
 
-    /// 内容卡片：纯白画布上的清透冷雾浅灰圆角块 + 极细轮廓线，不是玻璃。
-    func contentCard(cornerRadius: CGFloat = 22, padding: CGFloat = 16) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        return self
-            .padding(padding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(shape.fill(Palette.card))
-            .overlay(shape.strokeBorder(Palette.cardBorder, lineWidth: 1))
+    /// 内容卡片：纯净白底悬浮卡片 + 克制细描边 + 柔和中性纸影；可选附带与票夹一致的极轻彩种微染。
+    func contentCard(cornerRadius: CGFloat = 22, padding: CGFloat = 16, tint: Color? = nil) -> some View {
+        modifier(ContentCardModifier(cornerRadius: cornerRadius, padding: padding, tint: tint))
     }
 
-    /// 系统表单换成和其他页面同一套配色：纯净白底 + 冷雾浅灰分组块。
+    /// 系统表单配色：极浅瓷白分组底 + 纯白行块，避免闷灰感。
     ///
     /// 挂在 Form 上；行背景要单独给，见 `cardRows()`。
     func canvasForm() -> some View {
         self
             .scrollContentBackground(.hidden)
-            .background(Palette.canvas)
+            .background(Palette.groupedCanvas)
     }
 
     /// 表单里一组行的底色。挂在包住所有 Section 的 Group 上，逐行生效。
     func cardRows() -> some View {
         listRowBackground(Palette.card)
+    }
+
+    /// 底部悬浮液态玻璃操作面板（扫描复核底栏、手动录入底栏共用）。
+    func floatingGlassPanel(cornerRadius: CGFloat = 28) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return self
+            .glassEffect(.regular, in: shape)
+            .shadow(color: Color.black.opacity(0.08), radius: 16, x: 0, y: 4)
     }
 
     /// A single clear glass ring samples the moving canvas below its edge.
@@ -41,7 +44,7 @@ extension View {
         // A solid glass shape has only one reflective edge. Reveal its perimeter
         // so the balls show through the softer rim and stay crisp in the center.
         return glassEffect(.clear, in: outline)
-            .mask(outline.strokeBorder(lineWidth: width).opacity(0.56))
+            .mask(outline.strokeBorder(lineWidth: width).opacity(0.68))
     }
 
     /// 拖动图表时浮在曲线上的当日金额。
@@ -49,19 +52,62 @@ extension View {
         glassEffect(.regular, in: .rect(cornerRadius: 15))
     }
 
-    /// 胶囊玻璃：悬浮在内容之上的筛选 chip、摇一摇与命中明细入口。
+    /// 胶囊玻璃：悬浮在内容之上的筛选条、控制按钮与轻提示。
     func glassPill(tint: Color? = nil, interactive: Bool = true) -> some View {
         glassEffect(GlassStyle.pill(tint: tint, interactive: interactive), in: Capsule())
     }
 
-    /// 圆形玻璃：右下角独立悬浮扫描按钮。
-    func glassCircle(tint: Color? = nil) -> some View {
-        glassEffect(GlassStyle.pill(tint: tint, interactive: true), in: Circle())
+    /// 饱满着色液态玻璃胶囊：用于主强调或选中态交互按钮。
+    func glassProminentPill(tint: Color, interactive: Bool = true) -> some View {
+        glassEffect(GlassStyle.prominent(tint: tint, interactive: interactive), in: Capsule())
+    }
+
+    /// 圆形玻璃：独立悬浮扫描按钮、翻年箭头等圆形控件。
+    func glassCircle(tint: Color? = nil, interactive: Bool = true) -> some View {
+        glassEffect(GlassStyle.pill(tint: tint, interactive: interactive), in: Circle())
     }
 
     /// 让相邻的玻璃元素在动画中融合（形变、聚拢、分离）。
     func glassMorph(id: some Hashable, in namespace: Namespace.ID) -> some View {
         glassEffectID(id, in: namespace)
+    }
+}
+
+private struct ContentCardModifier: ViewModifier {
+    let cornerRadius: CGFloat
+    let padding: CGFloat
+    let tint: Color?
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                ZStack {
+                    shape.fill(Palette.card)
+                    if let tint {
+                        shape.fill(
+                            LinearGradient(
+                                colors: [tint.opacity(colorScheme == .dark ? 0.08 : 0.035), .clear],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                    }
+                }
+                .clipShape(shape)
+                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.055),
+                        radius: 10, x: 0, y: 3)
+            }
+            .overlay {
+                shape.strokeBorder(
+                    tint.map { $0.opacity(colorScheme == .dark ? 0.28 : 0.22) } ?? Palette.cardBorder,
+                    lineWidth: 1
+                )
+            }
     }
 }
 
@@ -114,7 +160,13 @@ struct HomeAmbientBackdrop: View {
 enum GlassStyle {
     static func pill(tint: Color?, interactive: Bool) -> Glass {
         var glass = Glass.regular
-        if let tint { glass = glass.tint(tint.opacity(0.22)) }
+        if let tint { glass = glass.tint(tint.opacity(0.20)) }
+        if interactive { glass = glass.interactive() }
+        return glass
+    }
+
+    static func prominent(tint: Color, interactive: Bool) -> Glass {
+        var glass = Glass.regular.tint(tint)
         if interactive { glass = glass.interactive() }
         return glass
     }
@@ -133,7 +185,7 @@ struct GlassGroup<Content: View>: View {
     }
 }
 
-/// 主操作按钮（"加入票夹"这类）。
+/// 主操作按钮（"加入票夹"、"拍摄票据"、"识别这张"等）：真正使用 Liquid Glass 着色折射材质。
 ///
 /// `foreground` 必须和 `tint` 成对给：彩种色里黄、琥珀这些浅底压白字只有 2:1，
 /// 深色模式下强调色本身就是浅蓝，白字同样读不清。
@@ -166,16 +218,16 @@ struct ProminentGlassButton: ButtonStyle {
                 .foregroundStyle(foreground)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 15)
-                .background(tint, in: Capsule())
+                .glassProminentPill(tint: tint, interactive: isEnabled)
                 .overlay(Capsule().strokeBorder(stroke, lineWidth: 1))
-                .opacity(isEnabled ? (configuration.isPressed ? 0.86 : 1) : 0.4)
-                .scaleEffect(configuration.isPressed ? 0.98 : 1)
-                .animation(.spring(response: 0.3, dampingFraction: 0.75), value: configuration.isPressed)
+                .opacity(isEnabled ? (configuration.isPressed ? 0.9 : 1) : 0.42)
+                .scaleEffect(configuration.isPressed ? 0.985 : 1)
+                .animation(.spring(response: 0.3, dampingFraction: 0.78), value: configuration.isPressed)
         }
     }
 }
 
-/// 次级操作按钮：淡色底 + 彩种色文字。
+/// 次级操作按钮：交互式液态玻璃胶囊 + 轻彩种着色。
 struct SecondaryGlassButton: ButtonStyle {
     var tint: Color
 
@@ -195,9 +247,10 @@ struct SecondaryGlassButton: ButtonStyle {
                 .foregroundStyle(tint)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 9)
-                .background(tint.opacity(0.12), in: Capsule())
-                .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.4)
-                .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+                .glassPill(tint: tint, interactive: isEnabled)
+                .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.42)
+                .scaleEffect(configuration.isPressed ? 0.97 : 1)
+                .animation(.spring(response: 0.25, dampingFraction: 0.78), value: configuration.isPressed)
         }
     }
 }
@@ -235,13 +288,16 @@ struct SectionHeader: View {
             Spacer(minLength: 12)
             if let action {
                 Button(action: action) {
-                    HStack(spacing: 2) {
+                    HStack(spacing: 3) {
                         Text(actionLabel)
                         Image(systemName: "chevron.right")
                             .font(.caption2.weight(.semibold))
                     }
-                    .font(.subheadline)
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .glassPill(interactive: true)
                 }
                 .buttonStyle(.plain)
             }

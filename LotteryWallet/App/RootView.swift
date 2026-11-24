@@ -249,6 +249,9 @@ enum MainTab: String, Hashable, CaseIterable, Identifiable {
 // MARK: - 底部双体液态玻璃悬浮栏
 
 /// 左侧三项主页面液态玻璃胶囊 + 右侧完全独立的球形液态玻璃扫描按钮。
+///
+/// 左侧主胶囊启用 `.interactive()` 液态玻璃折射与按压回弹，选中项配镜面高光玻璃透镜，
+/// 并支持手指在三项之间左右滑动切换，还原 iOS 26/27 原生悬浮标签栏的通透玻璃手感。
 struct FloatingGlassDock: View {
     @Binding var selection: MainTab
     let unseenCount: Int
@@ -256,6 +259,10 @@ struct FloatingGlassDock: View {
     let onScan: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var scrubTab: MainTab?
+    @State private var barWidth: CGFloat = 0
+
+    private var highlightedTab: MainTab { scrubTab ?? selection }
 
     var body: some View {
         GlassEffectContainer(spacing: 12) {
@@ -266,7 +273,31 @@ struct FloatingGlassDock: View {
                     }
                 }
                 .padding(4)
-                .glassPill(interactive: false)
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { barWidth = $0 }
+                .glassPill(interactive: true)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 12)
+                        .onChanged { value in
+                            guard barWidth > 0 else { return }
+                            let count = MainTab.allCases.count
+                            let step = barWidth / CGFloat(count)
+                            let index = min(max(Int(value.location.x / step), 0), count - 1)
+                            let target = MainTab.allCases[index]
+                            if scrubTab != target {
+                                withAnimation(.spring(duration: 0.28, bounce: 0.2)) {
+                                    scrubTab = target
+                                }
+                            }
+                        }
+                        .onEnded { _ in
+                            if let target = scrubTab {
+                                selection = target
+                            }
+                            withAnimation(.spring(duration: 0.28, bounce: 0.16)) {
+                                scrubTab = nil
+                            }
+                        }
+                )
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("dock.tabs")
 
@@ -289,12 +320,14 @@ struct FloatingGlassDock: View {
 
     private func tabButton(_ tab: MainTab) -> some View {
         let isSelected = selection == tab
+        let isHighlighted = highlightedTab == tab
+        let isScrubbing = scrubTab != nil && isHighlighted
         return Button {
             selection = tab
         } label: {
             VStack(spacing: 2) {
-                Image(systemName: isSelected ? tab.selectedSymbol : tab.symbol)
-                    .font(.system(size: 18, weight: isSelected ? .semibold : .medium))
+                Image(systemName: isHighlighted ? tab.selectedSymbol : tab.symbol)
+                    .font(.system(size: 18, weight: isHighlighted ? .semibold : .medium))
                     .overlay(alignment: .topTrailing) {
                         if tab == .wallet && unseenCount > 0 {
                             Text(unseenCount > 99 ? "99+" : "\(unseenCount)")
@@ -309,16 +342,15 @@ struct FloatingGlassDock: View {
                         }
                     }
                 Text(tab.label)
-                    .scaledFont(10, weight: isSelected ? .semibold : .medium)
+                    .scaledFont(10, weight: isHighlighted ? .semibold : .medium)
                     .lineLimit(1)
             }
-            .foregroundStyle(isSelected ? Color.accentColor : Color.primary.opacity(0.76))
+            .foregroundStyle(isHighlighted ? Color.accentColor : Color.primary.opacity(0.76))
             .frame(maxWidth: .infinity)
             .frame(height: 50)
             .background {
-                if isSelected {
-                    Capsule()
-                        .fill(Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.08))
+                if isHighlighted {
+                    activeLens(elevated: isScrubbing)
                         .matchedGeometryEffect(id: "dock.active.pill", in: namespace)
                 }
             }
@@ -329,6 +361,44 @@ struct FloatingGlassDock: View {
         .accessibilityValue(tab == .wallet && unseenCount > 0 ? "\(unseenCount) 个新结果" : "")
         .accessibilityIdentifier("dock.tab.\(tab.rawValue)")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// 选中项液态玻璃透镜：浅色下呈晶透镜面高光胶囊，深色下呈微亮磨砂折射透镜，
+    /// 避免实心灰椭圆的钝重感。
+    private func activeLens(elevated: Bool) -> some View {
+        let isDark = colorScheme == .dark
+        return Capsule()
+            .fill(
+                LinearGradient(
+                    colors: isDark
+                        ? [Color.white.opacity(0.20), Color.white.opacity(0.09)]
+                        : [Color.white.opacity(0.92), Color.white.opacity(0.56)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .overlay {
+                Capsule()
+                    .fill(Color.accentColor.opacity(isDark ? 0.16 : 0.08))
+            }
+            .overlay {
+                Capsule()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: isDark
+                                ? [Color.white.opacity(0.32), Color.white.opacity(0.06)]
+                                : [Color.white.opacity(0.95), Color.accentColor.opacity(0.18)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+            }
+            .shadow(color: Color.black.opacity(isDark ? 0.30 : (elevated ? 0.12 : 0.075)),
+                    radius: elevated ? 10 : 6,
+                    x: 0,
+                    y: elevated ? 3 : 2)
+            .scaleEffect(elevated ? 1.05 : 1)
     }
 }
 

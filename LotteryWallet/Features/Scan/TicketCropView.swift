@@ -90,21 +90,23 @@ struct TicketCropView: View {
     }
 
     private var buttons: some View {
-        HStack(spacing: 12) {
-            Button("重拍") { onCancel() }
+        GlassGroup(spacing: 12) {
+            HStack(spacing: 12) {
+                Button("重拍") { onCancel() }
+                    .buttonStyle(SecondaryGlassButton(tint: .white))
+                    .fixedSize()
+
+                Button("重置") {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                        quad = .default
+                    }
+                }
                 .buttonStyle(SecondaryGlassButton(tint: .white))
                 .fixedSize()
 
-            Button("重置") {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                    quad = .default
-                }
+                Button("识别这张") { onConfirm(quad) }
+                    .buttonStyle(ProminentGlassButton(tint: .accentColor))
             }
-            .buttonStyle(SecondaryGlassButton(tint: .white))
-            .fixedSize()
-
-            Button("识别这张") { onConfirm(quad) }
-                .buttonStyle(ProminentGlassButton(tint: .accentColor))
         }
     }
 

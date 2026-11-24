@@ -28,6 +28,9 @@ final class KeyFlowTests: XCTestCase {
         dockTab("票夹").tap()
         let title = app.navigationBars["票夹"]
         XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.otherElements["wallet.filter.bar"].waitForExistence(timeout: 5)
+                      || app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "全部")).firstMatch.exists,
+                      "票夹顶部应显示悬浮四合一筛选条")
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.71))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.43))
         start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
@@ -131,14 +134,25 @@ final class KeyFlowTests: XCTestCase {
         let picker = app.buttons["home.profit.period"]
         XCTAssertTrue(picker.waitForExistence(timeout: 10))
         picker.tap()
-        app.buttons["7 月"].tap()
-        app.buttons["完成"].tap()
+        // 点选月份即刻生效并自动收起日历抽屉，不再多点一次「完成」。
+        let july = app.buttons["7 月"]
+        XCTAssertTrue(july.waitForExistence(timeout: 5))
+        july.tap()
         let range = app.segmentedControls["home.range"]
         let style = app.segmentedControls["home.chart.style"]
+        XCTAssertTrue(range.buttons["2026-07"].waitForExistence(timeout: 5))
         for index in [1, 2, 0] {
             style.buttons.element(boundBy: index).tap()
             XCTAssertTrue(range.buttons["2026-07"].isSelected)
         }
+        // 验证首页内联左右快捷步进：往后一步切到 8 月，再退回 7 月保持深色截图一致。
+        let next = app.buttons["home.period.next"]
+        let prev = app.buttons["home.period.prev"]
+        XCTAssertTrue(next.waitForExistence(timeout: 5))
+        next.tap()
+        XCTAssertTrue(range.buttons["2026-08"].waitForExistence(timeout: 5))
+        prev.tap()
+        XCTAssertTrue(range.buttons["2026-07"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["home.jar.total"].waitForExistence(timeout: 10))
         capture("home-dark-july")
     }

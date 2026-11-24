@@ -186,9 +186,9 @@ struct EntryFlowView: View {
                     Label("放大", systemImage: "arrow.up.left.and.arrow.down.right")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, 9)
                         .padding(.vertical, 4)
-                        .background(.black.opacity(0.45), in: Capsule())
+                        .glassEffect(.regular.tint(.black.opacity(0.45)), in: Capsule())
                         .padding(8)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -310,11 +310,13 @@ struct EntryFlowView: View {
     private var gamePicker: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeader(title: "彩种")
-            VStack(spacing: 8) {
-                ForEach(Array(GameKey.rows.enumerated()), id: \.offset) { _, row in
-                    HStack(spacing: 8) {
-                        ForEach(row) { item in
-                            gameChip(item)
+            GlassGroup(spacing: 8) {
+                VStack(spacing: 8) {
+                    ForEach(Array(GameKey.rows.enumerated()), id: \.offset) { _, row in
+                        HStack(spacing: 8) {
+                            ForEach(row) { item in
+                                gameChip(item)
+                            }
                         }
                     }
                 }
@@ -324,7 +326,9 @@ struct EntryFlowView: View {
     }
 
     private func gameChip(_ item: GameKey) -> some View {
-        Button {
+        let isSelected = game == item
+        let shape = RoundedRectangle(cornerRadius: 13, style: .continuous)
+        return Button {
             withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
                 game = item
                 resetForGame(item)
@@ -336,24 +340,19 @@ struct EntryFlowView: View {
                 .minimumScaleFactor(0.8)
                 // 彩种色打底就必须配 onTint：黄、琥珀两个彩种压白字只有 2:1，
                 // 深色模式下所有彩种色都会换成浅端，白字同样读不清。
-                .foregroundStyle(game == item ? item.onTint : Color.primary)
+                .foregroundStyle(isSelected ? item.onTint : Color.primary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
-                .background {
-                    if game == item {
-                        RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            .fill(item.tint)
-                            .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                .strokeBorder(item.accent.solidStroke, lineWidth: 1))
-                            .shadow(color: item.tint.opacity(0.32), radius: 7, y: 3)
-                    } else {
-                        RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            .fill(Color.primary.opacity(0.05))
-                    }
-                }
+                .glassEffect(
+                    isSelected
+                        ? GlassStyle.prominent(tint: item.tint, interactive: true)
+                        : GlassStyle.pill(tint: nil, interactive: true),
+                    in: shape
+                )
+                .overlay(shape.strokeBorder(isSelected ? item.accent.solidStroke : Palette.cardBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(game == item ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
     // MARK: - 玩法 / 录入方式
@@ -395,26 +394,32 @@ struct EntryFlowView: View {
     /// 十个等价的平级选项本来就该一次全看见。固定两行五列之后没有滚动、
     /// 没有溢出，当前选中一直亮着，和其他彩种的分段控件也是同一个观感。
     private var playModeGrid: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5),
-                  spacing: 8) {
-            ForEach(game.playModes) { item in
-                let isOn = playMode == item.key
-                Button {
-                    playMode = item.key
-                } label: {
-                    Text(item.label)
-                        .font(.footnote.weight(.bold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .foregroundStyle(isOn ? game.onTint : Color.primary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
-                        .background(isOn ? AnyShapeStyle(game.tint) : AnyShapeStyle(Color.primary.opacity(0.06)),
-                                    in: Capsule())
-                        .overlay(Capsule().strokeBorder(isOn ? game.accent.solidStroke : .clear, lineWidth: 1))
+        GlassGroup(spacing: 8) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5),
+                      spacing: 8) {
+                ForEach(game.playModes) { item in
+                    let isOn = playMode == item.key
+                    Button {
+                        playMode = item.key
+                    } label: {
+                        Text(item.label)
+                            .font(.footnote.weight(.bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .foregroundStyle(isOn ? game.onTint : Color.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .glassEffect(
+                                isOn
+                                    ? GlassStyle.prominent(tint: game.tint, interactive: true)
+                                    : GlassStyle.pill(tint: nil, interactive: true),
+                                in: Capsule()
+                            )
+                            .overlay(Capsule().strokeBorder(isOn ? game.accent.solidStroke : Palette.cardBorder, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
             }
         }
         .animation(.spring(response: 0.28, dampingFraction: 0.82), value: playMode)
@@ -457,12 +462,17 @@ struct EntryFlowView: View {
                 }
                 Spacer(minLength: 0)
                 if pickedIssue != nil {
-                    Button("跟随最新") {
+                    Button {
                         pickedIssue = nil
+                    } label: {
+                        Text("跟随最新")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(game.accent.accentColor)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .glassPill(tint: game.tint, interactive: true)
                     }
                     .buttonStyle(.plain)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(game.accent.accentColor)
                 }
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.bold))
@@ -510,21 +520,28 @@ struct EntryFlowView: View {
                 )
             }
 
-            HStack(spacing: 10) {
-                Button("随机填充", systemImage: "wand.and.stars") { fillRandomSelection() }
-                    .buttonStyle(SecondaryGlassButton(tint: game.tint))
-                if mode == .manual {
-                    Button("加入", systemImage: "plus.circle") { addCandidate() }
+            GlassGroup(spacing: 10) {
+                HStack(spacing: 10) {
+                    Button("随机填充", systemImage: "wand.and.stars") { fillRandomSelection() }
                         .buttonStyle(SecondaryGlassButton(tint: game.tint))
-                        .disabled(pendingLine == nil)
+                    if mode == .manual {
+                        Button("加入", systemImage: "plus.circle") { addCandidate() }
+                            .buttonStyle(SecondaryGlassButton(tint: game.tint))
+                            .disabled(pendingLine == nil)
+                    }
+                    Spacer(minLength: 8)
+                    Button {
+                        withAnimation { resetSelections(clearCandidates: false) }
+                    } label: {
+                        Label("清空", systemImage: "eraser")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .glassPill(interactive: true)
+                    }
+                    .buttonStyle(.plain)
                 }
-                Spacer(minLength: 8)
-                Button("清空", systemImage: "eraser") {
-                    withAnimation { resetSelections(clearCandidates: false) }
-                }
-                .buttonStyle(.plain)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
             }
         }
         .contentCard()
@@ -621,9 +638,8 @@ struct EntryFlowView: View {
     // MARK: - 底栏
 
     private var saveBar: some View {
-        VStack(spacing: 8) {
-            Divider()
-            HStack(alignment: .bottom) {
+        VStack(spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
                 Text(isOverLimit
                      ? "组合超过 \(TicketBuilder.maxCombinations) 注上限"
                      : "票面共 \(combinationCount) 注")
@@ -645,12 +661,10 @@ struct EntryFlowView: View {
                 }
                 .fixedSize()
             }
-            .padding(.horizontal, 16)
 
             // 就摆在保存按钮上方 —— 这一刻正是最需要说清
             // 「本应用不卖票、你录的是你已经买到手的票」的时刻。
             DisclaimerNote(text: Disclaimer.entry)
-                .padding(.horizontal, 16)
 
             Button(draft == nil ? "加入票夹" : "保存修改") {
                 // 修改已有的票不再弹理性购彩 —— 那句提醒是针对「新增一张票」
@@ -664,10 +678,12 @@ struct EntryFlowView: View {
             // 禁用态的淡化交给按钮样式统一处理，不再各页面自己叠 opacity
             .buttonStyle(ProminentGlassButton(tint: game.tint, foreground: game.onTint, stroke: game.accent.solidStroke))
             .disabled(!canSave)
-            .padding(.horizontal, 16)
         }
-        .padding(.bottom, 14)
-        .background(.bar)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .floatingGlassPanel(cornerRadius: 28)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
     }
 
     // MARK: - 修改已有的票

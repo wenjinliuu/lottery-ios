@@ -72,6 +72,48 @@ final class PrizeRankingTests: XCTestCase {
         XCTAssertEqual(top.map(\.prizeName), ["二等奖"])
     }
 
+    /// 排列3 的线上奖级叫「直选奖 / 组选3奖 / 组选6奖」，按当期真实中奖注数展示有开出的前两项。
+    func testPl3PicksWinningFixedPrizes() {
+        let g6Draw = [
+            entry("直选奖", count: 7264, bonus: "1040"),
+            entry("组选3奖", count: 0, bonus: "346"),
+            entry("组选6奖", count: 40534, bonus: "173")
+        ]
+        XCTAssertEqual(PrizeRanking.topTwo(of: g6Draw, game: .pl3, digits: [3, 4, 6]).map(\.prizeName),
+                       ["直选奖", "组选6奖"])
+
+        let g3Draw = [
+            entry("直选奖", count: 20772, bonus: "1040"),
+            entry("组选3奖", count: 21705, bonus: "346"),
+            entry("组选6奖", count: 0, bonus: "173")
+        ]
+        XCTAssertEqual(PrizeRanking.topTwo(of: g3Draw, game: .pl3, digits: [5, 5, 2]).map(\.prizeName),
+                       ["直选奖", "组选3奖"])
+
+        let tripleDraw = [
+            entry("直选奖", count: 1200, bonus: "1040"),
+            entry("组选3奖", count: 0, bonus: "346"),
+            entry("组选6奖", count: 0, bonus: "173")
+        ]
+        XCTAssertEqual(PrizeRanking.topTwo(of: tripleDraw, game: .pl3, digits: [8, 8, 8]).map(\.prizeName),
+                       ["直选奖"])
+    }
+
+    /// 福彩3D 数据源未提供中奖注数（winningCount 为 0）时，按当期开奖 3 码形态选出对应的固定奖。
+    func testFc3dMatchesDrawPatternWhenCountsAreZero() {
+        let list = [
+            entry("直选", count: 0, bonus: "1040"),
+            entry("组三", count: 0, bonus: "346"),
+            entry("组六", count: 0, bonus: "173")
+        ]
+        XCTAssertEqual(PrizeRanking.topTwo(of: list, game: .fc3d, digits: [3, 4, 6]).map(\.prizeName),
+                       ["直选", "组六"])
+        XCTAssertEqual(PrizeRanking.topTwo(of: list, game: .fc3d, digits: [4, 4, 9]).map(\.prizeName),
+                       ["直选", "组三"])
+        XCTAssertEqual(PrizeRanking.topTwo(of: list, game: .fc3d, digits: [7, 7, 7]).map(\.prizeName),
+                       ["直选"])
+    }
+
     /// 八张卡片一个高度：快乐8 加了一行奖级之后，这个值得跟着长，
     /// 而且仍然是所有彩种共用的同一个数。
     func testUnifiedHeightLeavesRoomForTwoPrizeRows() {

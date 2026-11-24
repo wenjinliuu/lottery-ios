@@ -148,29 +148,35 @@ struct DrawHistoryView: View {
     private var gameTabs: some View {
         // 固定四列而不是 `.adaptive`：八个彩种要的是稳定的 2×4，
         // 自适应会随字号和机型变成 3+3+2 之类，每次进来排布都不一样。
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4),
-                  spacing: 8) {
-            ForEach(GameKey.ordered) { item in
-                let isOn = game == item
-                Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { game = item }
-                } label: {
-                    Text(item.label)
-                        .font(.footnote.weight(.bold))
-                        .foregroundStyle(isOn ? item.onTint : Color.primary)
-                        .lineLimit(1)
-                        // 「快乐8」和「福彩3D」不等长，等宽格子里必须允许收缩，
-                        // 否则窄机型上长名字会被截成省略号。
-                        .minimumScaleFactor(0.75)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity)
-                        .background(isOn ? AnyShapeStyle(item.tint) : AnyShapeStyle(Palette.card),
-                                    in: Capsule())
-                        .overlay(Capsule().strokeBorder(isOn ? item.accent.solidStroke : .clear, lineWidth: 1))
+        GlassGroup(spacing: 8) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4),
+                      spacing: 8) {
+                ForEach(GameKey.ordered) { item in
+                    let isOn = game == item
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { game = item }
+                    } label: {
+                        Text(item.label)
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(isOn ? item.onTint : Color.primary)
+                            .lineLimit(1)
+                            // 「快乐8」和「福彩3D」不等长，等宽格子里必须允许收缩，
+                            // 否则窄机型上长名字会被截成省略号。
+                            .minimumScaleFactor(0.75)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity)
+                            .glassEffect(
+                                isOn
+                                    ? GlassStyle.prominent(tint: item.tint, interactive: true)
+                                    : GlassStyle.pill(tint: nil, interactive: true),
+                                in: Capsule()
+                            )
+                            .overlay(Capsule().strokeBorder(isOn ? item.accent.solidStroke : .clear, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
             }
         }
         .accessibilityHint("也可以在下方左右滑动切换彩种")
@@ -200,8 +206,7 @@ struct DrawHistoryRow: View {
             // 翻到往期会以为信息丢了。
             DrawPrizeLines(game: game, draw: draw)
         }
-        // contentCard 自己就带 16pt 内边距，外面再加一层等于 32pt，
-        // 卡片里的内容会比首页窄一大截。
-        .contentCard(cornerRadius: 20)
+        // 与首页开奖卡、票夹共用同一套极轻彩种微染与纯净白底细边。
+        .contentCard(cornerRadius: 20, tint: game.tint)
     }
 }

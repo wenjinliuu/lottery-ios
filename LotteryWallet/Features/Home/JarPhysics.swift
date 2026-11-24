@@ -111,6 +111,62 @@ struct JarPhysics {
         quietSteps = 0
     }
 
+    /// 手指轻点罐内某一点：周围的球受径向波纹与轻弹力四散跳起。
+    mutating func poke(at x: Double, y: Double, radius: Double = 84, strength: Double = 780) {
+        guard !balls.isEmpty, width > 0, height > 0 else { return }
+        quietSteps = 0
+        var hitAny = false
+        for index in balls.indices {
+            let dx = balls[index].x - x
+            let dy = balls[index].y - y
+            let dist = (dx * dx + dy * dy).squareRoot()
+            guard dist < radius else { continue }
+            hitAny = true
+            let falloff = 1.0 - dist / radius
+            let ux = dist > 0.001 ? dx / dist : (random() - 0.5) * 2
+            let uy = dist > 0.001 ? dy / dist : -1.0
+            let impulse = strength * (0.45 + 0.55 * falloff)
+            balls[index].vx += ux * impulse
+            balls[index].vy += uy * impulse - strength * 0.42 * falloff
+        }
+        // 点在球堆上方的留白区域时，给正下方最靠近的一片球一个轻盈弹跳，避免“点了没反应”。
+        if !hitAny {
+            let band = max(radius * 1.1, 80)
+            for index in balls.indices {
+                let dx = balls[index].x - x
+                let absX = abs(dx)
+                guard absX < band else { continue }
+                let falloff = 1.0 - absX / band
+                balls[index].vx += (dx >= 0 ? 1 : -1) * strength * 0.28 * falloff
+                balls[index].vy -= strength * 0.58 * falloff
+            }
+        }
+    }
+
+    /// 手指按住拖动搅动：手指附近的球平滑跟随手势方向流动，并带出轻柔旋涡。
+    mutating func stir(at x: Double, y: Double, vx: Double, vy: Double, radius: Double = 90) {
+        guard !balls.isEmpty, width > 0, height > 0 else { return }
+        quietSteps = 0
+        let clampedVX = min(max(vx, -1200), 1200)
+        let clampedVY = min(max(vy, -1200), 1200)
+        for index in balls.indices {
+            let dx = balls[index].x - x
+            let dy = balls[index].y - y
+            let dist = (dx * dx + dy * dy).squareRoot()
+            guard dist < radius else { continue }
+            let falloff = 1.0 - dist / radius
+            // 既顺着手指移动速度带走，又在指尖正下方略微让位，形成自然的指尖拨动感。
+            let follow = 0.62 * falloff
+            balls[index].vx = balls[index].vx * (1 - follow * 0.5) + clampedVX * follow
+            balls[index].vy = balls[index].vy * (1 - follow * 0.5) + clampedVY * follow
+            if dist > 0.001 && dist < radius * 0.45 {
+                let push = (1.0 - dist / (radius * 0.45)) * 220
+                balls[index].vx += (dx / dist) * push
+                balls[index].vy += (dy / dist) * push
+            }
+        }
+    }
+
     mutating func wake() { quietSteps = 0 }
 
     mutating func step(_ dt: Double) {

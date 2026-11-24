@@ -51,6 +51,7 @@ struct WalletView: View {
     @State private var seenThisVisit: Set<String> = []
 
     @Environment(\.scenePhase) private var scenePhase
+    @Namespace private var filterNamespace
 
     /// 首屏一共画这么多张。一张票据是一整块带号码球的卡片，
     /// 几十上百张一次性铺开，进票夹那一下明显要卡。
@@ -115,7 +116,6 @@ struct WalletView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    filterBar
                     if visibleCards.isEmpty {
                         emptyState
                     } else {
@@ -136,8 +136,16 @@ struct WalletView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 4)
+                .padding(.top, 6)
                 .padding(.bottom, 120)
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                WalletFilterGlassBar(selection: $filter,
+                                     counts: counts,
+                                     namespace: filterNamespace)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
+                    .padding(.bottom, 8)
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
             .background(Palette.canvas)
@@ -327,51 +335,6 @@ struct WalletView: View {
         .accessibilityLabel("\(zone.title)，共 \(total) 张")
     }
 
-    // MARK: - 筛选
-
-    private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(WalletFilter.allCases) { item in
-                    let isOn = filter == item
-                    Button {
-                        withAnimation(.easeOut(duration: 0.18)) { filter = item }
-                    } label: {
-                        Text("\(item.label) \(counts[item] ?? 0)")
-                            .font(.subheadline.weight(.medium))
-                            .monospacedDigit()
-                            .foregroundStyle(chipForeground(item, isOn: isOn))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(chipBackground(item, isOn: isOn), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
-                }
-            }
-            .padding(.vertical, 2)
-        }
-        .scrollClipDisabled()
-    }
-
-    /// 「待核对」是唯一一个需要用户动手的状态，给它黄色提示色，
-    /// 其余筛选沿用强调色。
-    private func chipForeground(_ item: WalletFilter, isOn: Bool) -> Color {
-        if item == .pending {
-            return isOn ? Palette.onAccent : Palette.warning
-        }
-        // 深色模式下 AccentColor 是浅蓝，白字压上去只有 1.9:1
-        return isOn ? Palette.onAccent : Color.primary
-    }
-
-    private func chipBackground(_ item: WalletFilter, isOn: Bool) -> AnyShapeStyle {
-        if item == .pending {
-            return isOn ? AnyShapeStyle(Palette.warning) : AnyShapeStyle(Palette.warning.opacity(0.15))
-        }
-        // 没选中的用轻雾浅底，在纯白画布上清爽有层次
-        return isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Palette.surfaceChip)
-    }
-
     /// 空状态要分清是「一张票都没有」还是「筛选之后没有」。
     /// 原来两种情况都说"票夹是空的 / 添加彩票"，用户会以为记录丢了。
     @ViewBuilder
@@ -492,10 +455,19 @@ struct WalletAllTicketsView: View {
     @State private var game: GameKey?
     /// 和首屏一样：滚到过就算看过，离开这一页时统一写库。
     @State private var seenThisVisit: Set<String> = []
+    @Namespace private var filterNamespace
 
     /// 出现过的彩种。没买过的彩种不该占着筛选条。
     private var games: [GameKey] {
         GameKey.ordered.filter { key in cards.contains { $0.game == key } }
+    }
+
+    private var statusCounts: [WalletFilter: Int] {
+        var tally: [WalletFilter: Int] = [:]
+        for item in WalletFilter.allCases {
+            tally[item] = item == .all ? cards.count : cards.reduce(0) { $0 + (item.matches($1.status) ? 1 : 0) }
+        }
+        return tally
     }
 
     private var filtered: [TicketCard] {
@@ -505,7 +477,7 @@ struct WalletAllTicketsView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                filterBars
+                if games.count > 1 { gameFilterBar }
                 if filtered.isEmpty {
                     ContentUnavailableView("没有符合条件的票", systemImage: "line.3.horizontal.decrease.circle")
                         .padding(.top, 40)
@@ -533,8 +505,16 @@ struct WalletAllTicketsView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 4)
+            .padding(.top, 6)
             .padding(.bottom, 40)
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            WalletFilterGlassBar(selection: $status,
+                                 counts: statusCounts,
+                                 namespace: filterNamespace)
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 8)
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
         .background(Palette.canvas)
@@ -552,51 +532,118 @@ struct WalletAllTicketsView: View {
         }
     }
 
-    /// 两条筛选：状态一条，彩种一条。
-    private var filterBars: some View {
-        VStack(spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: false) {
+    private var gameFilterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            GlassGroup(spacing: 8) {
                 HStack(spacing: 8) {
-                    ForEach(WalletFilter.allCases) { item in
-                        let count = cards.reduce(0) { $0 + (item.matches($1.status) ? 1 : 0) }
-                        chip(title: "\(item.label) \(count)",
-                             isOn: status == item,
-                             tint: item.tint) { status = item }
+                    gameChip(title: "全部彩种", isOn: game == nil, tint: .accentColor, foreground: Palette.onAccent) {
+                        game = nil
                     }
-                }
-                .padding(.vertical, 2)
-            }
-            .scrollClipDisabled()
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    chip(title: "全部彩种", isOn: game == nil, tint: .accentColor) { game = nil }
                     ForEach(games) { key in
-                        chip(title: key.label, isOn: game == key, tint: key.tint) { game = key }
+                        gameChip(title: key.label, isOn: game == key, tint: key.tint, foreground: key.onTint) {
+                            game = key
+                        }
                     }
                 }
                 .padding(.vertical, 2)
             }
-            .scrollClipDisabled()
         }
-        .animation(.easeOut(duration: 0.18), value: status)
+        .scrollClipDisabled()
         .animation(.easeOut(duration: 0.18), value: game)
         .padding(.bottom, 2)
     }
 
-    private func chip(title: String, isOn: Bool, tint: Color, action: @escaping () -> Void) -> some View {
+    private func gameChip(title: String,
+                          isOn: Bool,
+                          tint: Color,
+                          foreground: Color,
+                          action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.footnote.weight(.semibold))
                 .monospacedDigit()
-                .foregroundStyle(isOn ? Color.white : Color.primary)
+                .foregroundStyle(isOn ? foreground : Color.primary)
                 .padding(.horizontal, 13)
                 .padding(.vertical, 7)
-                .background(isOn ? AnyShapeStyle(tint) : AnyShapeStyle(Color.primary.opacity(0.06)),
-                            in: Capsule())
+                .glassEffect(
+                    isOn
+                        ? GlassStyle.prominent(tint: tint, interactive: true)
+                        : GlassStyle.pill(tint: nil, interactive: true),
+                    in: Capsule()
+                )
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// 票夹顶部悬浮液态玻璃四合一筛选条：全部、待核对、已中奖、未中奖合并在一整条
+/// 悬浮液态玻璃胶囊内，下方票据列表滚动时透过玻璃平滑折射。
+struct WalletFilterGlassBar: View {
+    @Binding var selection: WalletFilter
+    let counts: [WalletFilter: Int]
+    let namespace: Namespace.ID
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        GlassGroup(spacing: 8) {
+            HStack(spacing: 2) {
+                ForEach(WalletFilter.allCases) { item in
+                    let isOn = selection == item
+                    Button {
+                        withAnimation(.spring(duration: 0.3, bounce: 0.16)) {
+                            selection = item
+                        }
+                    } label: {
+                        Text("\(item.label) \(counts[item] ?? 0)")
+                            .font(.caption.weight(isOn ? .bold : .semibold))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                            .foregroundStyle(foreground(item, isOn: isOn))
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 8)
+                            .background {
+                                if isOn {
+                                    activeCapsule(for: item)
+                                        .matchedGeometryEffect(id: "wallet.filter.pill", in: namespace)
+                                }
+                            }
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+                }
+            }
+            .padding(4)
+            .glassPill(interactive: true)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("wallet.filter.bar")
+    }
+
+    private func foreground(_ item: WalletFilter, isOn: Bool) -> Color {
+        if isOn {
+            return item == .lost
+                ? Color(light: 0xFFFFFF, dark: 0x101014)
+                : Palette.onAccent
+        }
+        return item == .pending && (counts[.pending] ?? 0) > 0 ? Palette.warning : Color.primary.opacity(0.82)
+    }
+
+    private func activeCapsule(for item: WalletFilter) -> some View {
+        let fill: Color = item == .lost
+            ? Color(light: 0x5E6778, dark: 0xB8C0CE)
+            : item.tint
+        return Capsule()
+            .fill(fill)
+            .overlay {
+                Capsule()
+                    .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.22 : 0.32), lineWidth: 0.8)
+            }
+            .shadow(color: fill.opacity(colorScheme == .dark ? 0.24 : 0.22), radius: 5, y: 2)
     }
 }
 

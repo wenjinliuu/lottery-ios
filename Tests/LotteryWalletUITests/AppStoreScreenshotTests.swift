@@ -104,7 +104,7 @@ final class AppStoreScreenshotTests: XCTestCase {
         let scan = app.buttons["dock.scan"]
         XCTAssertTrue(scan.waitForExistence(timeout: 15))
         scan.tap()
-        XCTAssertTrue(app.staticTexts["找到 2 张票"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["找到 3 张票"].waitForExistence(timeout: 15))
         settle()
         capture("08-display-pair")
     }

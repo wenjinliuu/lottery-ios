@@ -15,7 +15,9 @@ struct DrawPrizeLines: View {
     /// 快乐8 的奖级表是「选十中十、选十中九…」几十行，「一等奖」这个概念在它
     /// 身上不成立，所以排序第一依据是**单注奖金**而不是表里的行序。
     private var prizes: [PrizeEntry] {
-        PrizeRanking.topTwo(of: draw?.prizeList ?? [], game: game)
+        PrizeRanking.topTwo(of: draw?.prizeList ?? [],
+                            game: game,
+                            digits: draw?.drawValues[.digits] ?? [])
     }
 
     var body: some View {
@@ -32,11 +34,12 @@ struct DrawPrizeLines: View {
     /// 那两个字每行都重复一遍，纯占地方。
     private func line(_ entry: PrizeEntry, rank: Int) -> some View {
         HStack(spacing: 6) {
-            // 快乐8 没有「一等奖」这个名字，用排名区分：金额最高的那行挂奖杯。
+            // 快乐8 没有「一等奖」这个名字，用排名区分：金额最高的那行挂奖杯；
+            // 福彩3D / 排列3 以直选（单选）为最高档奖级。
             Image(systemName: isTopPrize(entry, rank: rank) ? "trophy.fill" : "rosette")
                 .scaledFont(10)
                 .foregroundStyle(game.tint)
-            Text("\(prizeLabel(entry)) \(entry.winningCount) 注")
+            Text(lineCaption(entry))
                 .font(.caption2)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -53,20 +56,39 @@ struct DrawPrizeLines: View {
         }
     }
 
-    private func isTopPrize(_ entry: PrizeEntry, rank: Int) -> Bool {
-        game == .k8 ? rank == 0 : entry.prizeName.contains("一等奖")
+    private func lineCaption(_ entry: PrizeEntry) -> String {
+        let label = prizeLabel(entry)
+        if entry.winningCount > 0 {
+            return "\(label) \(entry.winningCount) 注"
+        }
+        if game == .fc3d || game == .pl3 {
+            return "\(label) · 固定奖"
+        }
+        return "\(label) 0 注"
     }
 
-    /// 快乐8 的奖级名照抄票面，其余彩种收成「一等奖 / 二等奖」。
-    ///
-    /// 快乐8 的名字里带数字（「选十中10」），紧接着后面又是「\(注数) 注」，
-    /// 两串数字挨在一起读起来是糊的（「选十中10 11 注」）。
-    /// 把「中」后面那个数字换成中文，数字就只剩注数一处，一眼分得开。
-    private func prizeLabel(_ entry: PrizeEntry) -> String {
-        guard game == .k8 else {
-            return entry.prizeName.contains("一等奖") ? "一等奖" : "二等奖"
+    private func isTopPrize(_ entry: PrizeEntry, rank: Int) -> Bool {
+        if game == .k8 { return rank == 0 }
+        if game == .fc3d || game == .pl3 {
+            return entry.prizeName.contains("直选") || entry.prizeName.contains("单选")
         }
-        return Self.chineseHits(in: entry.prizeName)
+        return entry.prizeName.contains("一等奖")
+    }
+
+    /// 快乐8 的奖级名照抄票面；福彩3D / 排列3 统一归整为「直选 / 组三 / 组六」；
+    /// 其余彩种收成「一等奖 / 二等奖」。
+    private func prizeLabel(_ entry: PrizeEntry) -> String {
+        if game == .k8 {
+            return Self.chineseHits(in: entry.prizeName)
+        }
+        if game == .fc3d || game == .pl3 {
+            let name = entry.prizeName
+            if name.contains("直选") || name.contains("单选") { return "直选" }
+            if name.contains("组三") || name.contains("组选3") || name.contains("组选三") { return "组三" }
+            if name.contains("组六") || name.contains("组选6") || name.contains("组选六") { return "组六" }
+            return name
+        }
+        return entry.prizeName.contains("一等奖") ? "一等奖" : "二等奖"
     }
 
     /// 把奖级名里「中」后面的阿拉伯数字换成中文。

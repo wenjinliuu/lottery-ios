@@ -85,4 +85,40 @@ final class JarPhysicsTests: XCTestCase {
         let mean = physics.balls.map(\.x).reduce(0, +) / Double(physics.balls.count)
         XCTAssertGreaterThan(mean, 250)
     }
+
+    /// 轻点罐内区域：附近小球被激起弹跳、不出边界，最后能重新停稳。
+    func testPokeDisplacesNearbyBallsAndSettles() {
+        var physics = JarPhysics()
+        physics.fill(radii: Array(repeating: 8.0, count: 120), width: 330, height: 230, settled: true)
+        let before = physics.balls.map { ($0.x, $0.y) }
+        physics.poke(at: 165, y: 195)
+        XCTAssertFalse(physics.isResting)
+        for _ in 0..<20 {
+            physics.step(1.0 / 60)
+            check(physics)
+        }
+        let maxDelta = zip(before, physics.balls).map { hypot($0.0 - $1.x, $0.1 - $1.y) }.max() ?? 0
+        XCTAssertGreaterThan(maxDelta, 12, "轻点应明显弹起附近小球")
+        var steps = 0
+        while !physics.isResting && steps < 900 {
+            physics.step(1.0 / 60)
+            steps += 1
+        }
+        XCTAssertTrue(physics.isResting, "轻点弹起后要能重新落稳")
+        check(physics)
+    }
+
+    /// 手指按住拖动搅动：附近小球顺着手指速度方向移动并始终留在罐内。
+    func testStirMovesBallsAlongFingerDirection() {
+        var physics = JarPhysics()
+        physics.fill(radii: Array(repeating: 8.0, count: 100), width: 330, height: 230, settled: true)
+        let beforeMeanX = physics.balls.map(\.x).reduce(0, +) / Double(physics.balls.count)
+        for step in 0..<15 {
+            physics.stir(at: 120 + Double(step) * 8, y: 195, vx: 650, vy: -260)
+            physics.step(1.0 / 60)
+            check(physics)
+        }
+        let afterMeanX = physics.balls.map(\.x).reduce(0, +) / Double(physics.balls.count)
+        XCTAssertGreaterThan(afterMeanX, beforeMeanX + 4, "向右搅动应带动小球整体右移")
+    }
 }
