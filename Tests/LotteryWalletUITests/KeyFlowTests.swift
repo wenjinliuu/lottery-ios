@@ -108,8 +108,8 @@ final class KeyFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["双色球"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["红球"].waitForExistence(timeout: 5))
         capture("home-jar-breakdown")
-        let closeBreakdown = app.buttons["home.jar.breakdown.close"]
-        XCTAssertTrue(closeBreakdown.waitForExistence(timeout: 5))
+        let closeBreakdown = app.buttons["关闭分布"].firstMatch
+        XCTAssertTrue(closeBreakdown.waitForExistence(timeout: 5), "找不到分布卡关闭按钮")
         closeBreakdown.tap()
         RunLoop.current.run(until: Date().addingTimeInterval(0.6))
 

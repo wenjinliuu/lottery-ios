@@ -259,7 +259,6 @@ struct JarBreakdownCard: View {
         }
         .padding(16)
         .frame(width: 292)
-        .accessibilityIdentifier("home.jar.breakdown")
     }
 
     private func gameSection(_ group: JarBuilder.GameBreakdown) -> some View {

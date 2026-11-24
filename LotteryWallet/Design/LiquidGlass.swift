@@ -65,38 +65,44 @@ extension View {
     }
 }
 
-/// 首页顶部的清透彩光雾。极低饱和度的三色径向柔光自然融入纯白/深色画布，
-/// 打破系统灰表单的沉闷感，同时完全不干扰前方文字对比度。
+/// 首页顶部的清透彩光雾。用全宽径向柔光自然融入纯白/深色画布，
+/// 无矩形裁切接缝，打破系统灰表单的沉闷感，同时完全不干扰前方文字对比度。
 struct HomeAmbientBackdrop: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        let strength: Double = colorScheme == .dark ? 0.11 : 0.085
+        let strength: Double = colorScheme == .dark ? 0.14 : 0.09
         ZStack(alignment: .top) {
             Palette.canvas
-            ZStack {
-                Circle()
-                    .fill(BallColor.blue.light.opacity(strength))
-                    .frame(width: 300, height: 300)
-                    .blur(radius: 68)
-                    .offset(x: -115, y: -70)
-                Circle()
-                    .fill(BallColor.red.light.opacity(strength * 0.85))
-                    .frame(width: 260, height: 260)
-                    .blur(radius: 66)
-                    .offset(x: 120, y: -55)
-                Circle()
-                    .fill(BallColor.yellow.light.opacity(strength * 0.72))
-                    .frame(width: 220, height: 220)
-                    .blur(radius: 62)
-                    .offset(x: 10, y: 15)
+            GeometryReader { proxy in
+                let width = proxy.size.width
+                ZStack {
+                    RadialGradient(
+                        colors: [BallColor.blue.light.opacity(strength), .clear],
+                        center: UnitPoint(x: 0.14, y: 0.06),
+                        startRadius: 10,
+                        endRadius: width * 0.78
+                    )
+                    RadialGradient(
+                        colors: [BallColor.red.light.opacity(strength * 0.85), .clear],
+                        center: UnitPoint(x: 0.88, y: 0.06),
+                        startRadius: 10,
+                        endRadius: width * 0.72
+                    )
+                    RadialGradient(
+                        colors: [BallColor.yellow.light.opacity(strength * 0.65), .clear],
+                        center: UnitPoint(x: 0.52, y: 0.24),
+                        startRadius: 10,
+                        endRadius: width * 0.62
+                    )
+                }
+                .frame(width: width, height: 340)
+                .mask(
+                    LinearGradient(colors: [.black, .black.opacity(0.55), .clear],
+                                   startPoint: .top, endPoint: .bottom)
+                )
             }
-            .frame(height: 260)
-            .clipped()
-            .mask(
-                LinearGradient(colors: [.black, .black.opacity(0.45), .clear],
-                               startPoint: .top, endPoint: .bottom)
-            )
+            .frame(height: 340)
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
