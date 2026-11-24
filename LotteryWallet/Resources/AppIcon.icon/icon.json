@@ -11,140 +11,6 @@
   ],
   "groups" : [
     {
-      "blur-material" : 0.18,
-      "hidden" : false,
-      "layers" : [
-        {
-          "blend-mode-specializations" : [
-            {
-              "value" : "multiply"
-            },
-            {
-              "appearance" : "dark",
-              "value" : "screen"
-            },
-            {
-              "appearance" : "tinted",
-              "value" : "normal"
-            }
-          ],
-          "fill-specializations" : [
-            {
-              "value" : {
-                "automatic-gradient" : "display-p3:0.23137,0.50980,0.96471,1.00000"
-              }
-            },
-            {
-              "appearance" : "dark",
-              "value" : {
-                "automatic-gradient" : "display-p3:0.36078,0.63922,1.00000,1.00000"
-              }
-            }
-          ],
-          "glass" : true,
-          "hidden" : false,
-          "image-name" : "FrontTicket.svg",
-          "name" : "FrontTicket",
-          "opacity" : 0.78
-        }
-      ],
-      "lighting" : "individual",
-      "shadow-specializations" : [
-        {
-          "value" : {
-            "kind" : "layer-color",
-            "opacity" : 0.36
-          }
-        },
-        {
-          "appearance" : "dark",
-          "value" : {
-            "kind" : "neutral",
-            "opacity" : 0.45
-          }
-        },
-        {
-          "appearance" : "tinted",
-          "value" : {
-            "kind" : "neutral",
-            "opacity" : 0.45
-          }
-        }
-      ],
-      "specular" : true,
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.72
-      }
-    },
-    {
-      "blur-material" : 0.14,
-      "hidden" : false,
-      "layers" : [
-        {
-          "blend-mode-specializations" : [
-            {
-              "value" : "multiply"
-            },
-            {
-              "appearance" : "dark",
-              "value" : "screen"
-            },
-            {
-              "appearance" : "tinted",
-              "value" : "normal"
-            }
-          ],
-          "fill-specializations" : [
-            {
-              "value" : {
-                "automatic-gradient" : "display-p3:0.93725,0.26667,0.26667,1.00000"
-              }
-            },
-            {
-              "appearance" : "dark",
-              "value" : {
-                "automatic-gradient" : "display-p3:1.00000,0.38039,0.40784,1.00000"
-              }
-            }
-          ],
-          "glass" : true,
-          "hidden" : false,
-          "image-name" : "MiddleTicket.svg",
-          "name" : "MiddleTicket",
-          "opacity" : 0.80
-        }
-      ],
-      "lighting" : "individual",
-      "shadow-specializations" : [
-        {
-          "value" : {
-            "kind" : "layer-color",
-            "opacity" : 0.36
-          }
-        },
-        {
-          "appearance" : "dark",
-          "value" : {
-            "kind" : "neutral",
-            "opacity" : 0.45
-          }
-        },
-        {
-          "appearance" : "tinted",
-          "value" : {
-            "kind" : "neutral",
-            "opacity" : 0.45
-          }
-        }
-      ],
-      "specular" : true,
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.66
-      }
-    },
-    {
       "blur-material" : 0.08,
       "hidden" : false,
       "layers" : [
@@ -165,20 +31,87 @@
           "fill-specializations" : [
             {
               "value" : {
-                "automatic-gradient" : "display-p3:1.00000,0.61176,0.20392,1.00000"
+                "automatic-gradient" : "display-p3:0.15686,0.46275,0.97255,1.00000"
               }
             },
             {
               "appearance" : "dark",
               "value" : {
-                "automatic-gradient" : "display-p3:1.00000,0.68627,0.30196,1.00000"
+                "automatic-gradient" : "display-p3:0.32157,0.62745,1.00000,1.00000"
               }
             }
           ],
           "glass" : true,
           "hidden" : false,
-          "image-name" : "BackTicket.svg",
-          "name" : "BackTicket",
+          "image-name" : "FrontTicket.svg",
+          "name" : "FrontTicket",
+          "opacity" : 0.85
+        }
+      ],
+      "lighting" : "individual",
+      "shadow-specializations" : [
+        {
+          "value" : {
+            "kind" : "layer-color",
+            "opacity" : 0.38
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.45
+          }
+        },
+        {
+          "appearance" : "tinted",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.45
+          }
+        }
+      ],
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.56
+      }
+    },
+    {
+      "blur-material" : 0.06,
+      "hidden" : false,
+      "layers" : [
+        {
+          "blend-mode-specializations" : [
+            {
+              "value" : "multiply"
+            },
+            {
+              "appearance" : "dark",
+              "value" : "screen"
+            },
+            {
+              "appearance" : "tinted",
+              "value" : "normal"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "value" : {
+                "automatic-gradient" : "display-p3:0.94902,0.23137,0.25098,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "automatic-gradient" : "display-p3:1.00000,0.35294,0.38824,1.00000"
+              }
+            }
+          ],
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "MiddleTicket.svg",
+          "name" : "MiddleTicket",
           "opacity" : 0.86
         }
       ],
@@ -208,7 +141,74 @@
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.58
+        "value" : 0.52
+      }
+    },
+    {
+      "blur-material" : 0.03,
+      "hidden" : false,
+      "layers" : [
+        {
+          "blend-mode-specializations" : [
+            {
+              "value" : "multiply"
+            },
+            {
+              "appearance" : "dark",
+              "value" : "screen"
+            },
+            {
+              "appearance" : "tinted",
+              "value" : "normal"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "value" : {
+                "automatic-gradient" : "display-p3:1.00000,0.58039,0.14118,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "automatic-gradient" : "display-p3:1.00000,0.66667,0.26275,1.00000"
+              }
+            }
+          ],
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "BackTicket.svg",
+          "name" : "BackTicket",
+          "opacity" : 0.90
+        }
+      ],
+      "lighting" : "individual",
+      "shadow-specializations" : [
+        {
+          "value" : {
+            "kind" : "layer-color",
+            "opacity" : 0.40
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.45
+          }
+        },
+        {
+          "appearance" : "tinted",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.45
+          }
+        }
+      ],
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.42
       }
     }
   ],

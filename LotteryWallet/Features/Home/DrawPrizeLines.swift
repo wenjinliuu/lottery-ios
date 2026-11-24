@@ -15,9 +15,14 @@ struct DrawPrizeLines: View {
     /// 快乐8 的奖级表是「选十中十、选十中九…」几十行，「一等奖」这个概念在它
     /// 身上不成立，所以排序第一依据是**单注奖金**而不是表里的行序。
     private var prizes: [PrizeEntry] {
-        PrizeRanking.topTwo(of: draw?.prizeList ?? [],
-                            game: game,
-                            digits: draw?.drawValues[.digits] ?? [])
+        let drawnDigits: [Int] = {
+            guard let values = draw?.drawValues else { return [] }
+            if !values[.nums].isEmpty { return values[.nums] }
+            return values[.nums3]
+        }()
+        return PrizeRanking.topTwo(of: draw?.prizeList ?? [],
+                                   game: game,
+                                   digits: drawnDigits)
     }
 
     var body: some View {
