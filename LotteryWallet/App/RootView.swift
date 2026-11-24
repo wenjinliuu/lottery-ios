@@ -25,6 +25,7 @@ struct RootView: View {
     @State private var selection: MainTab = .home
     /// 当前开着的抽屉，以及关掉它之后要接着开的那张。
     @State private var activeSheet: RootSheet?
+    @State private var startupChecksComplete = false
     @State private var queuedSheet: RootSheet?
     /// 从扫描页转到手动录入时带过去的票面照片。
     ///
@@ -138,8 +139,9 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             // 示例模式的票据只在内存里，不该变成一份备份文件留在沙盒里
             // 自动备份常开（一天一次、留两份，见 `BackupPolicy`），开关只决定存本机还是 iCloud。
-            guard phase == .background, !DemoData.isEnabled else { return }
-            autoBackup()
+            guard !DemoData.isEnabled else { return }
+            if phase == .background { autoBackup() }
+            if phase == .active { Task { await DrawPushCenter.shared.refreshOnLaunch() } }
         }
         .sheet(item: $activeSheet, onDismiss: {
             guard let next = queuedSheet else {
@@ -212,12 +214,20 @@ struct RootView: View {
         // 原来一律 `.success`：点号码球被拒时，选号盘那边已经震过一次，
         // 提示又补一记重的，慢半拍到手上，像是点了两下。
         .sensoryFeedback(trigger: toastCenter.current?.id) { _, _ in toastCenter.current?.feedback }
+        .onChange(of: drawStore.resultsRevision) { _, _ in
+            guard startupChecksComplete, settings.autoCheck, !drawStore.checkingWallet else { return }
+            let service = RecordService(context: context, drawStore: drawStore)
+            if let outcome = try? service.checkAll(), outcome.won > 0 { celebration() }
+        }
         .task {
             // 弹抽屉时不要把背后染灰 —— 那套行为在这里恢复得不跟手，
             // 设置页「外观」那一行的图标甚至根本恢复不回来。见 TintDimming。
             TintDimming.disable()
+            async let pushRegistration: Void = DrawPushCenter.shared.refreshOnLaunch()
             await drawStore.bootstrap()
             await runStartupChecks()
+            startupChecksComplete = true
+            await pushRegistration
         }
     }
 

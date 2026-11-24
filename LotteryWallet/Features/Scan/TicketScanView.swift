@@ -53,8 +53,30 @@ struct TicketScanView: View {
     @State private var isResponsibleAlertPresented = false
     @State private var zoneEditorTarget: ZoneEditorTarget?
 
+    /// 支持页上「反馈不支持的票」那一节。
+    static let unsupportedTicketURL = URL(string: "https://wenjinliuu.github.io/lottery-ios/support.html#unsupported")!
+
     enum Stage {
-        case intro, crop, scanning, review
+        case intro, locate, crop, scanning, review
+    }
+
+    /// 预识别页上的框：自动找到的票，加上用户自己加的、改的。
+    @State private var marks: [TicketLocateView.Mark] = []
+    /// 预识别页上要说的话（上一次这些框里一张都没认出来）。
+    @State private var locateNotice: String?
+    /// 预识别页摆出来的同时，后台已经在逐张认了。认完的存在这里：
+    /// 一来框上的彩种用**真正识别出来的**（整张照片上的小字常常读不出票头）；
+    /// 二来用户没动过的框，点「识别」时不用再认一遍。
+    @State private var prescans: [TicketLocateView.Mark.ID: Prescan] = [:]
+    @State private var prescanTask: Task<Void, Never>?
+
+    struct Prescan {
+        /// 认的时候框在哪儿。用户拖过角之后就对不上了，要重认。
+        var quad: TicketQuad
+        /// 认的时候用户指定的彩种（没指定是 nil）。之后改了彩种也要重认。
+        var forced: GameKey?
+        var page: TicketVisionScanner.ScannedPage
+        var image: UIImage
     }
 
     /// 一个 ForEach 里挂很多个 `.sheet` 是 SwiftUI 的经典坑（只有最后一个生效），
@@ -96,11 +118,18 @@ struct TicketScanView: View {
             Group {
                 switch stage {
                 case .intro: intro
+                case .locate: locateStep
                 case .crop: cropStep
                 case .scanning: scanning
                 case .review: review
                 }
             }
+            // 找票、预识别、识别、结果，几步之间淡入淡出，不是硬切
+            .transition(.opacity)
+            .animation(.smooth(duration: 0.28), value: stage)
+            // 结果出来时震一下；预识别页加框、删框时轻点一下
+            .sensoryFeedback(trigger: stage) { _, new in new == .review ? .success : nil }
+            .sensoryFeedback(.impact(weight: .light), trigger: marks.count)
             // **必须和抽屉面板同一个底色。**
             //
             // 这里原来是 `.clear`（当年抽屉是半透明玻璃时的写法）。改成自绘
@@ -109,7 +138,7 @@ struct TicketScanView: View {
             .background(Palette.canvas)
             .navigationTitle(stage == .review ? "核对识别结果" : "扫描票据")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarVisibility(stage == .crop ? .hidden : .automatic, for: .navigationBar)
+            .toolbarVisibility(stage == .crop || stage == .locate ? .hidden : .automatic, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
@@ -117,7 +146,7 @@ struct TicketScanView: View {
                 if stage == .review {
                     ToolbarItem(placement: .primaryAction) {
                         // 重新裁一次比重拍一张常见得多 —— 号码没认全往往是框歪了
-                        Button("重新裁切") { stage = .crop }
+                        Button("重新裁切") { recrop() }
                     }
                 }
             }
@@ -146,13 +175,32 @@ struct TicketScanView: View {
         // 示例模式：UI 测试给了一张票据照片，直接进裁切，省掉系统相册那一步。
         .task {
             guard stage == .intro, let image = DemoData.scanImage else { return }
-            preview = image
-            stage = .crop
+            #if DEBUG && targetEnvironment(simulator)
+            // Store photography uses two masked copies of the approved sample.
+            // Their captions illustrate the two styles; OCR runs on separate fixtures.
+            if ProcessInfo.processInfo.arguments.contains("--store-display-pair") {
+                preview = image
+                marks = [(70.0, GameKey.dlt), (790.0, .ssq)].map { left, game in
+                    let x = CGFloat(left) / 1500, right = (CGFloat(left) + 640) / 1500
+                    let top = CGFloat(140) / 1200, bottom = CGFloat(1100) / 1200
+                    let quad = TicketQuad(topLeft: CGPoint(x: x, y: top), topRight: CGPoint(x: right, y: top),
+                                          bottomRight: CGPoint(x: right, y: bottom), bottomLeft: CGPoint(x: x, y: bottom))
+                    return TicketLocateView.Mark(quad: quad, game: game)
+                }
+                stage = .locate
+                return
+            }
+            #endif
+            if ProcessInfo.processInfo.environment["DEMO_SCAN_LOCATE"] == "1" {
+                await locateTickets(image)
+            } else {
+                preview = image
+                stage = .crop
+            }
         }
         .fullScreenCover(isPresented: $isCameraPresented) {
             CameraPicker { image in
-                preview = image
-                stage = .crop
+                begin(image)
             }
             .ignoresSafeArea()
         }
@@ -204,8 +252,7 @@ struct TicketScanView: View {
                     errorText = "这张图片读不出来"
                     return
                 }
-                preview = image
-                stage = .crop
+                begin(image)
             }
         }
         .task { await drawStore.loadYearCalendars() }
@@ -236,7 +283,7 @@ struct TicketScanView: View {
             VStack(spacing: 6) {
                 Text("把整张票放进取景框")
                     .font(.headline)
-                Text("识别全部在这台设备上完成，照片不上传也不保存。双色球、大乐透支持单式、复式、胆拖；七乐彩、快乐8、七星彩、排列3、排列5、3D 目前支持单式票。\n拍好之后框一下票面，一次认一张。")
+                Text("识别全部在这台设备上完成，照片不上传也不保存。双色球、大乐透支持单式、复式、胆拖；七乐彩、快乐8、七星彩、排列3、排列5、3D 目前支持单式票。\n一张照片里有几张票都可以，会自动分开；找不到票时再手动框。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -303,6 +350,25 @@ struct TicketScanView: View {
             }
             .ignoresSafeArea(edges: .bottom)
         }
+    }
+
+    /// 预识别：找到的票框出来给人看，可以改、可以加、可以删，点头了才去认号码。
+    @ViewBuilder
+    private var locateStep: some View {
+        if let preview {
+            TicketLocateView(image: preview, marks: $marks, notice: locateNotice) {
+                reset()
+            } onConfirm: {
+                Task { await scanMarks(preview) }
+            }
+            .ignoresSafeArea(edges: .bottom)
+        }
+    }
+
+    /// 「重新裁切」：有预识别的框就回预识别页（框还在，改哪个都行），没有就回单框裁切。
+    private func recrop() {
+        locateNotice = nil
+        stage = marks.isEmpty ? .crop : .locate
     }
 
     /// 识别中。
@@ -374,7 +440,7 @@ struct TicketScanView: View {
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 10) {
                     HStack(spacing: 12) {
-                        Button("重新裁切") { stage = .crop }
+                        Button("重新裁切") { recrop() }
                             .buttonStyle(SecondaryGlassButton(tint: .accentColor))
                             .fixedSize()
                         Button("重新拍摄") { reset() }
@@ -396,6 +462,14 @@ struct TicketScanView: View {
                     }
                     .foregroundStyle(Color.accentColor)
                     .glassPill(interactive: true)
+                    // 这种票 App 还不认识：请用户把票面发过来，我们来适配。说明在支持页上。
+                    Link(destination: Self.unsupportedTicketURL) {
+                        Text("这种票认不出来？把票面发给我们适配")
+                            .font(.footnote)
+                            .underline()
+                    }
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("scan.feedback")
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
@@ -568,7 +642,11 @@ struct TicketScanView: View {
     /// 现在两边都走 `Game.ticketLabel`，玩法是从**每一注**的集合里取的：
     /// 排列3 的组选票一眼能看出是组选还是直选，快乐8 看得出是选几。
     private func headLabel(_ ticket: ScannedTicket) -> String {
-        ticket.game.ticketLabel(modes: playModes(ticket), shape: ticket.play.shape)
+        let label = ticket.game.ticketLabel(modes: playModes(ticket), shape: ticket.play.shape)
+        // 套餐票在内部按单式存那几注，票头照票面写「套餐票」。
+        return ticket.isPackage
+            ? label.replacingOccurrences(of: TicketShape.single.label, with: TicketShape.packageLabel)
+            : label
     }
 
     /// 这张票上出现过的玩法。
@@ -772,6 +850,38 @@ struct TicketScanView: View {
                     }
                 }
             case .system, .dantuo:
+                zoneBlock(ticket)
+            }
+            // 套餐票：单式那几注下面还有一块复式选号，照票面的样子接在后面。
+            if ticket.isPackage {
+                Divider()
+                zoneBlock(ticket)
+            }
+            HStack(spacing: 10) {
+                Text(ticket.play == .single ? "点一注可以改这一注的号码" : "点号码球可以改这一区")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
+                // 少认出一注是很常见的（折痕、反光压住一行）。没有这个入口的话
+                // 用户只能整张重扫，而重扫大概率还是认不出那一行。
+                if ticket.play == .single {
+                    Button {
+                        addLine(to: ticket.id)
+                    } label: {
+                        Label("补一注", systemImage: "plus.circle")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(ticket.game.accent.accentColor)
+                }
+            }
+        }
+    }
+
+    /// 复式 / 胆拖的整票选号：一个号码区一行（胆拖是胆、拖各一行）。
+    /// 套餐票下半截那一块复式也是它。
+    @ViewBuilder
+    private func zoneBlock(_ ticket: ScannedTicket) -> some View {
                 ForEach(zoneRows(ticket), id: \.label) { row in
                     HStack(alignment: .top, spacing: 8) {
                         Text(row.label)
@@ -801,26 +911,6 @@ struct TicketScanView: View {
                         Spacer(minLength: 0)
                     }
                 }
-            }
-            HStack(spacing: 10) {
-                Text(ticket.play == .single ? "点一注可以改这一注的号码" : "点号码球可以改这一区")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Spacer(minLength: 0)
-                // 少认出一注是很常见的（折痕、反光压住一行）。没有这个入口的话
-                // 用户只能整张重扫，而重扫大概率还是认不出那一行。
-                if ticket.play == .single {
-                    Button {
-                        addLine(to: ticket.id)
-                    } label: {
-                        Label("补一注", systemImage: "plus.circle")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(ticket.game.accent.accentColor)
-                }
-            }
-        }
     }
 
     /// 删掉多认出来的那一注。
@@ -959,10 +1049,12 @@ struct TicketScanView: View {
             Menu {
                 ForEach(TicketShape.allCases) { shape in
                     Button {
-                        guard shape != value.play.shape else { return }
+                        guard value.isPackage || shape != value.play.shape else { return }
+                        if shape == .single, let index = tickets.firstIndex(where: { $0.id == value.id }),
+                           tickets[index].correctPackageToSingle() { return }
                         shapeChange = ShapeChangeRequest(ticketID: value.id, shape: shape)
                     } label: {
-                        if shape == value.play.shape {
+                        if !value.isPackage && shape == value.play.shape {
                             Label(shape.label, systemImage: "checkmark")
                         } else {
                             Text(shape.label)
@@ -972,7 +1064,7 @@ struct TicketScanView: View {
             } label: {
                 capsule
             }
-            .accessibilityLabel("票面类型 \(value.play.shape.label)，点按可以改")
+            .accessibilityLabel("票面类型 \(value.shapeLabel)，点按可以改")
         } else {
             capsule
         }
@@ -1183,9 +1275,12 @@ struct TicketScanView: View {
     private var importBlocker: String? {
         if tickets.isEmpty { return "还没有可导入的票" }
         if tickets.contains(where: { $0.count == 0 }) { return "有票没读出号码，点进去补一下" }
-        if let ticket = tickets.first(where: \.hasUnknown) {
-            return "有 \(ticket.unknownCount) 位号码没认出来，点那颗问号球补上再导入"
+        let missing = tickets.reduce(0) { $0 + $1.unknownCount }
+        if missing > 0 {
+            let affected = tickets.filter { $0.unknownCount > 0 }.count
+            return "\(affected) 张票共 \(missing) 位号码待核对，点问号球补上再导入"
         }
+        if tickets.contains(where: \.packageBlockMissing) { return "套餐票下面「前区 / 后区」那一块没读全，补上再导入" }
         if tickets.contains(where: { $0.issue.isEmpty }) { return "有票还没选期号" }
         if let ticket = unresolvedPeriods.first {
             return "第 \(ticket.issue) 期往后 \(ticket.periods) 期没在开奖日历里查到，先把期号选对"
@@ -1204,6 +1299,126 @@ struct TicketScanView: View {
 
     // MARK: - 动作
 
+    /// 拿到一张照片：先找票，把找到的框摆出来给用户看（`locateStep`），点头了再认。
+    private func begin(_ image: UIImage) {
+        preview = image
+        croppedPreview = nil
+        Task { await locateTickets(image) }
+    }
+
+    private func locateTickets(_ image: UIImage) async {
+        stage = .scanning
+        errorText = nil
+        locateNotice = nil
+        let located = await TicketLocator.findTickets(in: image)
+        // 横着或倒着拍的照片，找票时已经转正了；之后都用转正的那张。
+        preview = located.image
+        marks = located.tickets.map { TicketLocateView.Mark(quad: $0.quad, game: $0.game, isResolving: true) }
+        prescans = [:]
+        stage = .locate
+        prescan(located.image)
+    }
+
+    /// 后台把预识别页上的每个框先认一遍，认出来的彩种写回框上。
+    private func prescan(_ image: UIImage) {
+        prescanTask?.cancel()
+        let pending = marks
+        prescanTask = Task {
+            for mark in pending {
+                guard !Task.isCancelled else { return }
+                // 不管认没认出来，这个框的「识别中」都要收掉
+                defer {
+                    if let index = marks.firstIndex(where: { $0.id == mark.id }) { marks[index].isResolving = false }
+                }
+                let corrected = await TicketImagePreprocessor.prepare(image, quad: mark.quad)
+                guard var page = try? await TicketVisionScanner.scan(corrected, calendars: drawStore.yearCalendars), !Task.isCancelled else { continue }
+                polish(&page)
+                // 认的这会儿用户可能已经把这个框拖走、删了，或者自己指定了彩种
+                guard let index = marks.firstIndex(where: { $0.id == mark.id }), marks[index].quad == mark.quad,
+                      marks[index].forcedGame == nil else { continue }
+                prescans[mark.id] = Prescan(quad: mark.quad, forced: nil, page: page, image: corrected)
+                if let game = page.headerGame ?? page.result.tickets.first?.game { marks[index].game = game }
+            }
+        }
+    }
+
+    /// 按预识别页上的框逐张识别。
+    ///
+    /// 每张票各走一遍和单张**完全相同**的识别流程（摆正 → 识别 → 校验）。
+    private func scanMarks(_ image: UIImage) async {
+        prescanTask?.cancel()
+        stage = .scanning
+        errorText = nil
+        var found: [ScannedTicket] = []
+        var images: [ScannedTicket.ID: UIImage] = [:]
+        var warnings: [String] = []
+        var texts: [String] = []
+        var missed: [Int] = []
+        var last: (registration: TicketRegistration.Result, image: UIImage)?
+        var notes: [String] = []
+        for (index, mark) in marks.enumerated() {
+            let page: TicketVisionScanner.ScannedPage
+            let corrected: UIImage
+            if let ready = prescans[mark.id], ready.quad == mark.quad, ready.forced == mark.forcedGame {
+                // 预识别时已经认过、框也没动：直接用
+                (page, corrected) = (ready.page, ready.image)
+                croppedPreview = corrected
+            } else {
+                corrected = await TicketImagePreprocessor.prepare(image, quad: mark.quad)
+                croppedPreview = corrected
+                guard var scanned = try? await TicketVisionScanner.scan(corrected, game: mark.forcedGame, calendars: drawStore.yearCalendars) else {
+                    missed.append(index + 1)
+                    continue
+                }
+                polish(&scanned)
+                page = scanned
+            }
+            texts.append(marks.count > 1 ? "第 \(index + 1) 张\n\(page.result.rawText)" : page.result.rawText)
+            guard !page.result.tickets.isEmpty else {
+                missed.append(index + 1)
+                continue
+            }
+            found += page.result.tickets
+            images.merge(page.images) { current, _ in current }
+            warnings += page.result.warnings
+            last = (page.registration, corrected)
+            notes += page.registration.debug.notes.map { marks.count > 1 ? "第 \(index + 1) 张：\($0)" : $0 }
+        }
+        guard !found.isEmpty else {
+            // 框都在，却一张都没认出来：回到预识别页让用户调框。
+            croppedPreview = nil
+            locateNotice = "这\(marks.count > 1 ? "几个" : "个")框里没认出票。把框拖到票面四个角上，再试一次"
+            stage = .locate
+            return
+        }
+        // 少认了必须说出来 —— 三张票只进来两张，不说的话用户不会发现。
+        if !missed.isEmpty {
+            let which = missed.map { "第 \($0) 张" }.joined(separator: "、")
+            warnings.insert("框出了 \(marks.count) 张票，\(which)没认出来。点右上角「重新裁切」调一下那一张的框。", at: 0)
+        }
+        rawText = texts.joined(separator: "\n\n")
+        tickets = found
+        ticketImages = images
+        globalWarnings = warnings
+        // 多张票时调试图只画最后一张；要看某一张的格子，回预识别页只留那一个框再认。
+        if let last { applyDebug(last.registration, on: last.image) }
+        // 说明文字每张票的都留着：哪一张的模型读行没到位，要看得出来。
+        if settings.debugVision { debugNotes = notes }
+        if marks.count > 1 { croppedPreview = nil }
+        stage = .review
+    }
+
+    /// 单价对不上时把追加标志纠正过来，再把提示重算一遍。
+    /// 纠正本身必须说出来 —— 单注价格从 2 元变成 3 元是记账口径的变化，
+    /// 悄悄改掉的话用户看到金额对不上也不知道是哪一步动的。
+    private func polish(_ page: inout TicketVisionScanner.ScannedPage) {
+        for index in page.result.tickets.indices {
+            let note = TicketTextParser.reconcileAddOn(&page.result.tickets[index])
+            page.result.tickets[index].warnings =
+                (note.map { [$0] } ?? []) + TicketTextParser.validate(page.result.tickets[index])
+        }
+    }
+
     private func run(_ image: UIImage, quad: TicketQuad) async {
         stage = .scanning
         errorText = nil
@@ -1214,15 +1429,8 @@ struct TicketScanView: View {
         let corrected = await TicketImagePreprocessor.prepare(image, quad: quad)
         croppedPreview = corrected
         do {
-            var page = try await TicketVisionScanner.scan(corrected)
-            // 单价对不上时把追加标志纠正过来，再把提示重算一遍。
-            // 纠正本身必须说出来 —— 单注价格从 2 元变成 3 元是记账口径的变化，
-            // 悄悄改掉的话用户看到金额对不上也不知道是哪一步动的。
-            for index in page.result.tickets.indices {
-                let note = TicketTextParser.reconcileAddOn(&page.result.tickets[index])
-                page.result.tickets[index].warnings =
-                    (note.map { [$0] } ?? []) + TicketTextParser.validate(page.result.tickets[index])
-            }
+            var page = try await TicketVisionScanner.scan(corrected, calendars: drawStore.yearCalendars)
+            polish(&page)
             rawText = page.result.rawText
             tickets = page.result.tickets
             ticketImages = page.images
@@ -1251,6 +1459,10 @@ struct TicketScanView: View {
 
     private func reset() {
         stage = .intro
+        marks = []
+        locateNotice = nil
+        prescanTask?.cancel()
+        prescans = [:]
         preview = nil
         croppedPreview = nil
         photoItem = nil
@@ -1292,7 +1504,11 @@ struct TicketScanView: View {
                         // 「组选单式票」「选八单式票」，而「扫描」两个字对核对毫无帮助。
                         var item = Ticket(numbers: numbers,
                                           playMode: mode,
-                                          entryLabel: ticket.play.label)
+                                          // 套餐票：前几注是单式，后面是复式那一块展开的，标签分开存，
+                                          // 票夹才能照票面的样子画回来。
+                                          entryLabel: !ticket.isPackage ? ticket.play.label
+                                              : (index < ticket.packageSingleCount
+                                                 ? TicketShape.packageLabel : TicketShape.packageSystemLabel))
                         item.addOn = ticket.addOn
                         if ticket.game == .k8, let count = Int(mode) { item.playCount = count }
                         return item
@@ -1384,7 +1600,8 @@ private struct ScanZoneEditor: View {
                         NumberPadSection(section: section,
                                          selection: $selection,
                                          required: ticket.pickCount(for: section),
-                                         mode: ticket.play.entryMode,
+                                         // 套餐票的这一块是复式，哪怕整张票按单式存着那几注
+                                         mode: ticket.isPackage ? .system : ticket.play.entryMode,
                                          danPicking: danPicking,
                                          onReject: { showToast($0, symbol: "hand.raised", feedback: .warning) })
                     }

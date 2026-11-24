@@ -2,9 +2,7 @@
   "color-space-for-untagged-svg-colors" : "display-p3",
   "fill-specializations" : [
     {
-      "value" : {
-        "solid" : "display-p3:1.00000,1.00000,1.00000,1.00000"
-      }
+      "value" : "system-light"
     },
     {
       "appearance" : "dark",
@@ -13,109 +11,166 @@
   ],
   "groups" : [
     {
-      "blur-material" : 0.12,
+      "blur-material" : null,
       "hidden" : false,
       "layers" : [
         {
           "fill-specializations" : [
             {
               "value" : {
-                "solid" : "display-p3:0.23137,0.50980,0.96471,1.00000"
+                "automatic-gradient" : "display-p3:0.23137,0.50980,0.96471,1.00000"
               }
             },
             {
               "appearance" : "dark",
               "value" : {
-                "solid" : "display-p3:0.47451,0.70980,1.00000,1.00000"
+                "automatic-gradient" : "display-p3:0.47451,0.70980,1.00000,1.00000"
               }
             }
           ],
           "glass" : true,
           "hidden" : false,
           "image-name" : "FrontTicket.svg",
-          "name" : "FrontTicket"
+          "name" : "FrontTicket",
+          "opacity" : 0.9
         }
       ],
       "lighting" : "individual",
-      "shadow" : {
-        "kind" : "layer-color",
-        "opacity" : 0.18
-      },
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.12
-      }
+        "value" : 0.35
+      },
+      "shadow-specializations" : [
+        {
+          "value" : {
+            "kind" : "layer-color",
+            "opacity" : 0.5
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.5
+          }
+        },
+        {
+          "appearance" : "tinted",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.5
+          }
+        }
+      ]
     },
     {
-      "blur-material" : 0.12,
+      "blur-material" : null,
       "hidden" : false,
       "layers" : [
         {
           "fill-specializations" : [
             {
               "value" : {
-                "solid" : "display-p3:0.93725,0.26667,0.26667,1.00000"
+                "automatic-gradient" : "display-p3:0.93725,0.26667,0.26667,1.00000"
               }
             },
             {
               "appearance" : "dark",
               "value" : {
-                "solid" : "display-p3:1.00000,0.41961,0.44706,1.00000"
+                "automatic-gradient" : "display-p3:1.00000,0.41961,0.44706,1.00000"
               }
             }
           ],
           "glass" : true,
           "hidden" : false,
           "image-name" : "MiddleTicket.svg",
-          "name" : "MiddleTicket"
+          "name" : "MiddleTicket",
+          "opacity" : 0.9
         }
       ],
       "lighting" : "individual",
-      "shadow" : {
-        "kind" : "layer-color",
-        "opacity" : 0.16
-      },
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.1
-      }
+        "value" : 0.35
+      },
+      "shadow-specializations" : [
+        {
+          "value" : {
+            "kind" : "layer-color",
+            "opacity" : 0.5
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.5
+          }
+        },
+        {
+          "appearance" : "tinted",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.5
+          }
+        }
+      ]
     },
     {
-      "blur-material" : 0.12,
+      "blur-material" : null,
       "hidden" : false,
       "layers" : [
         {
           "fill-specializations" : [
             {
               "value" : {
-                "solid" : "display-p3:1.00000,0.61176,0.20392,1.00000"
+                "automatic-gradient" : "display-p3:1.00000,0.61176,0.20392,1.00000"
               }
             },
             {
               "appearance" : "dark",
               "value" : {
-                "solid" : "display-p3:1.00000,0.71373,0.36078,1.00000"
+                "automatic-gradient" : "display-p3:1.00000,0.71373,0.36078,1.00000"
               }
             }
           ],
           "glass" : true,
           "hidden" : false,
           "image-name" : "BackTicket.svg",
-          "name" : "BackTicket"
+          "name" : "BackTicket",
+          "opacity" : 0.9
         }
       ],
       "lighting" : "individual",
-      "shadow" : {
-        "kind" : "layer-color",
-        "opacity" : 0.14
-      },
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.09
-      }
+        "value" : 0.35
+      },
+      "shadow-specializations" : [
+        {
+          "value" : {
+            "kind" : "layer-color",
+            "opacity" : 0.5
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.5
+          }
+        },
+        {
+          "appearance" : "tinted",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.5
+          }
+        }
+      ]
     }
   ],
   "supported-platforms" : {

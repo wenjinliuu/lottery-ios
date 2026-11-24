@@ -36,12 +36,13 @@ struct WalletTicketCard: View {
         card.count > Self.collapsedLineLimit || !card.whole.isEmpty
     }
 
-    private var visibleLines: [TicketCard.Line] {
-        Array(card.lines.prefix(isExpanded ? TicketCard.lineLimit : Self.collapsedLineLimit))
+    private var visibleLines: ArraySlice<TicketCard.Line> {
+        card.lines.prefix(isExpanded ? TicketCard.lineLimit : Self.collapsedLineLimit)
     }
 
     private var hiddenCount: Int {
-        Swift.max(card.count - visibleLines.count, 0)
+        // 套餐票的逐注只算单式那几注，复式那一块另外画
+        Swift.max((card.isPackage ? card.lines.count : card.count) - visibleLines.count, 0)
     }
 
     var body: some View {
@@ -51,16 +52,19 @@ struct WalletTicketCard: View {
                 meta
                 TicketDivider(tint: game.tint).padding(.top, 10)
                 // 复式 / 胆拖按整票画；单式仍然一注一行
-                if card.whole.isEmpty {
+                if card.isPackage {
+                    // 套餐票照票面画：上面是那几注单式，下面是复式那一块。
                     lines
-                } else if isExpanded {
-                    // 展开时两样都给：上面是票面的样子，下面是展开的每一注，
-                    // 想逐注核对的人还是找得到。
-                    wholeTicket
                     TicketDivider(tint: game.tint)
+                    wholeTicket
+                } else if card.whole.isEmpty {
                     lines
                 } else {
                     wholeTicket
+                    if isExpanded {
+                        TicketDivider(tint: game.tint)
+                        lines
+                    }
                 }
                 TicketDivider(tint: game.tint)
                 footer
@@ -70,7 +74,7 @@ struct WalletTicketCard: View {
         // 中奖的票自己一直在放小烟花，不用等用户去点。
         // 中奖是几个月才遇上一次的事，它值得一直亮着。
         .overlay {
-            if card.status == .won {
+            if card.status == .won && !isExpanded {
                 // 负 padding 把画布撑得比卡片大一圈，火星才能越出边缘一点点。
                 // 幅度只有十几点，不会糊到隔壁卡片上（卡片间距 12）。
                 TicketSparkleOverlay()
@@ -96,7 +100,8 @@ struct WalletTicketCard: View {
             if isCollapsible { onToggle() }
         }
         .contextMenu {
-            if let onEdit {
+            // 套餐票不给改：录入页只有单式 / 复式 / 胆拖三种，改完保存会把它变成别的票型。
+            if let onEdit, !card.isPackage {
                 Button("修改", systemImage: "square.and.pencil", action: onEdit)
             }
             Button("复制号码", systemImage: "doc.on.doc") {
@@ -260,8 +265,8 @@ struct WalletTicketCard: View {
     }
 
     private var lines: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ForEach(Array(visibleLines.enumerated()), id: \.element.id) { index, line in
+        LazyVStack(alignment: .leading, spacing: 7) {
+            ForEach(visibleLines.enumerated(), id: \.element.id) { index, line in
                 lineRow(index: index, line: line)
             }
             if hiddenCount > 0 {
@@ -304,7 +309,8 @@ struct WalletTicketCard: View {
                 numbers: line.numbers,
                 matched: line.matched,
                 size: 27,
-                dimUnmatched: line.hasResult
+                dimUnmatched: line.hasResult,
+                printed: isExpanded
             )
 
             Spacer(minLength: 0)
@@ -366,6 +372,7 @@ struct WalletTicketCard: View {
     /// 时候，这句话都得跟着那张票 —— 兑奖依据是他手里那张纸，不是这里的记录。
     private var disclaimer: some View {
         DisclaimerNote(text: Disclaimer.card)
-            .padding(.top, 8)
+            .opacity(0.75)
+            .padding(.top, 6)
     }
 }

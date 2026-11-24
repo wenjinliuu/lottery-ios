@@ -22,15 +22,11 @@ struct BallView: View {
         return padded && value < 10 ? String(format: "%02d", value) : String(value)
     }
 
-    /// 未命中的球换成实心中性灰，而不是把彩色球调透明。
-    /// 半透明的做法会连白字一起变淡，整张票看起来像褪了色；
-    /// 灰球是「设计成这样」，透明球是「没加载完」。
-    private var fill: LinearGradient {
-        isDimmed
-            ? LinearGradient(colors: [Palette.missLight, Palette.missDeep], startPoint: .top, endPoint: .bottom)
-            : color.gradient
-    }
-
+    /// 未命中的球：很淡的彩种色底，数字用彩种的深色。
+    ///
+    /// 第一版是实心中性灰 —— 一排灰球里只有命中的有颜色，整张票显得没精神。
+    /// 也不是把彩色球整体调透明：那样白字跟着变淡，像没加载完。
+    /// 现在底是淡的、字是实的，一眼看得出是哪个彩种的球，命中的实心球照样跳得出来。
     var body: some View {
         Text(label)
             .font(.system(size: size * 0.44, weight: .heavy, design: .rounded))
@@ -50,12 +46,7 @@ struct BallView: View {
                         .fill(color.accentColor.opacity(0.12))
                         .overlay(Circle().strokeBorder(color.accentColor.opacity(0.38), lineWidth: 1))
                 } else {
-                    Circle()
-                        .fill(fill)
-                        .overlay(Circle().strokeBorder(.white.opacity(isDimmed ? 0 : 0.35), lineWidth: 0.8))
-                        // 黄球、琥珀球本身很亮，压在浅色卡片上边缘会糊掉，
-                        // 补一圈同色深端把轮廓勾出来。
-                        .overlay(Circle().strokeBorder(isDimmed ? .clear : color.rimStroke, lineWidth: 0.8))
+                    BallSurface(color: color, isDimmed: isDimmed)
                 }
             }
             // 阴影只给命中的球。一屏几百个阴影图层是票夹卡顿的来源之一，
@@ -74,13 +65,69 @@ struct BallView: View {
     private var unknownOrRegularInk: Color {
         if isUnknown { return Palette.warning }
         if isHollow { return color.accentColor }
-        return isDimmed ? Palette.missInk : Color.white
+        return isDimmed ? color.accentColor : Color.white
     }
 
-    private var accessibilityText: String {
+    fileprivate var accessibilityText: String {
         if isUnknown { return "这一位没认出来，点一下补" }
         if isHit { return "\(label) 已命中" }
         return isDimmed ? "\(label) 未命中" : label
+    }
+}
+
+/// 普通号码球与球罐共用这一层材质。球罐将它预渲染成小图，逐帧只画图。
+struct BallSurface: View {
+    let color: BallColor
+    var isDimmed = false
+
+    private var fill: LinearGradient {
+        if isDimmed {
+            return LinearGradient(colors: [color.accentColor.opacity(0.13), color.accentColor.opacity(0.19)],
+                                  startPoint: .top, endPoint: .bottom)
+        }
+        return color.gradient
+    }
+
+    var body: some View {
+        Circle()
+            .fill(fill)
+            .overlay(Circle().strokeBorder(.white.opacity(isDimmed ? 0 : 0.35), lineWidth: 0.8))
+            .overlay(Circle().strokeBorder(isDimmed ? .clear : color.rimStroke, lineWidth: 0.8))
+    }
+}
+
+/// Expanded tickets repeat the same numbered faces across many combinations.
+@MainActor
+private struct PrintedTicketBall: View {
+    let ball: BallView
+    @Environment(\.displayScale) private var scale
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+    private static let cache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.totalCostLimit = 8 * 1024 * 1024
+        return cache
+    }()
+
+    private var face: UIImage? {
+        let key = "\(ball.color.rawValue)/\(ball.value)/\(ball.isHit)/\(ball.isDimmed)/\(ball.padded)/\(ball.size)/\(scale)/\(scheme)/\(contrast)" as NSString
+        if let image = Self.cache.object(forKey: key) { return image }
+        let renderer = ImageRenderer(content: ball.padding(5).environment(\.colorScheme, scheme))
+        renderer.scale = scale
+        guard let image = renderer.uiImage else { return nil }
+        let bytes = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+        Self.cache.setObject(image, forKey: key, cost: bytes)
+        return image
+    }
+
+    var body: some View {
+        if let face {
+            Image(uiImage: face).renderingMode(.original)
+                .frame(width: ball.size, height: ball.size)
+                .accessibilityLabel(Text(ball.accessibilityText))
+        } else {
+            ball
+        }
     }
 }
 
@@ -158,15 +205,18 @@ private func flatten(sections: [GameSection],
 }
 
 @ViewBuilder
-private func ballFlow(_ items: [BallItem], size: CGFloat, onOverflow: (() -> Void)?) -> some View {
+private func ballFlow(_ items: [BallItem], size: CGFloat, printed: Bool = false, onOverflow: (() -> Void)?) -> some View {
     BallFlow(spacing: size * 0.19, lineSpacing: size * 0.22) {
         ForEach(items) { item in
             if item.overflow > 0 {
                 OverflowBall(hidden: item.overflow, color: item.color, size: size, action: onOverflow)
                     .padding(.leading, item.leadingGap)
             } else {
-                BallView(value: item.value, color: item.color, size: size,
+                let ball = BallView(value: item.value, color: item.color, size: size,
                          isHit: item.isHit, isDimmed: item.isDimmed, padded: item.padded)
+                Group {
+                    if printed { PrintedTicketBall(ball: ball) } else { ball }
+                }
                     .padding(.leading, item.leadingGap)
             }
         }
@@ -204,12 +254,14 @@ struct TicketNumbersSnapshotView: View {
     var size: CGFloat = 30
     var dimUnmatched: Bool = false
 
+    var printed = false
+
     var body: some View {
         ballFlow(flatten(sections: game.sections,
                          values: { numbers[$0.key] ?? [] },
                          matched: { matched[$0.key] ?? [] },
                          size: size, dimUnmatched: dimUnmatched, limit: 0),
-                 size: size, onOverflow: nil)
+                 size: size, printed: printed, onOverflow: nil)
     }
 }
 
@@ -240,11 +292,14 @@ struct BallFlow: Layout {
     var spacing: CGFloat = 6
     var lineSpacing: CGFloat = 7
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+    func makeCache(subviews: Subviews) -> [CGSize] {
+        subviews.map { $0.sizeThatFits(.unspecified) }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout [CGSize]) -> CGSize {
         let maxWidth = proposal.width ?? .infinity
         var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0, widest: CGFloat = 0
-        for view in subviews {
-            let s = view.sizeThatFits(.unspecified)
+        for s in cache {
             if x > 0, x + spacing + s.width > maxWidth {
                 widest = Swift.max(widest, x)
                 x = 0
@@ -258,11 +313,10 @@ struct BallFlow: Layout {
         return CGSize(width: min(widest, maxWidth), height: y + lineHeight)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout [CGSize]) {
         let maxWidth = bounds.width
         var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0
-        for view in subviews {
-            let s = view.sizeThatFits(.unspecified)
+        for (view, s) in zip(subviews, cache) {
             if x > 0, x + spacing + s.width > maxWidth {
                 x = 0
                 y += lineHeight + lineSpacing

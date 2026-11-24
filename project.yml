@@ -24,6 +24,9 @@ targets:
     platform: iOS
     sources:
       - path: LotteryWallet
+    dependencies:
+      - target: DrawNotificationService
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wenjinliu.lotterywallet
@@ -36,7 +39,7 @@ targets:
         # 对外版本号。必须和 App Store Connect 里那条版本记录写的一样，
         # 否则上传的包挂不到那条记录下面。改版本只改这一行；
         # 构建号由 CI 用 run number 覆盖，不写死在这里。
-        MARKETING_VERSION: "1.2.0"
+        MARKETING_VERSION: "1.3.0"
         CURRENT_PROJECT_VERSION: "1"
         SUPPORTS_MACCATALYST: NO
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
@@ -55,6 +58,9 @@ targets:
         NSCameraUsageDescription: 用于拍摄纸质票据并在本机识别号码，照片不会离开设备。
         NSPhotoLibraryUsageDescription: 用于从相册选择票据照片并在本机识别号码，照片不会离开设备。
         ITSAppUsesNonExemptEncryption: false
+        # 开奖通知到了之后在后台把 App 叫起来，用本机的票核对。
+        UIBackgroundModes:
+          - remote-notification
         # 让本机备份在「文件」App 里看得见、拷得走。
         #
         # 暴露的只有 App 沙盒的 Documents（里面就是 Backups 那个文件夹），
@@ -70,6 +76,43 @@ targets:
             NSUbiquitousContainerIsDocumentScopePublic: true
             NSUbiquitousContainerName: 对个号
             NSUbiquitousContainerSupportedFolderLevels: Any
+
+  DrawNotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: DrawNotificationService
+        excludes:
+          - Info.plist
+          - DrawNotificationService.entitlements
+      - path: LotteryWallet/Data/Push/DrawPushPayload.swift
+      - path: LotteryWallet/Data/Push/DrawNotificationStore.swift
+      - path: LotteryWallet/Data/V2/LotteryV2DTO.swift
+      - path: LotteryWallet/Data/V2/LotteryV2DrawMapper.swift
+      - path: LotteryWallet/Models/Draw.swift
+      - path: LotteryWallet/Models/Game.swift
+      - path: LotteryWallet/Models/NumberSet.swift
+      - path: LotteryWallet/Models/TextFormat.swift
+      - path: LotteryWallet/Models/TicketShape.swift
+      - path: LotteryWallet/Rules/PrizeRules.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wenjinliu.lotterywallet.notificationservice
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "1.3.0"
+        CURRENT_PROJECT_VERSION: "1"
+        APPLICATION_EXTENSION_API_ONLY: YES
+        CODE_SIGN_ENTITLEMENTS: DrawNotificationService/DrawNotificationService.entitlements
+        SKIP_INSTALL: YES
+    info:
+      path: DrawNotificationService/Info.plist
+      properties:
+        CFBundleDisplayName: 开奖通知
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
 
   LotteryWalletTests:
     type: bundle.unit-test

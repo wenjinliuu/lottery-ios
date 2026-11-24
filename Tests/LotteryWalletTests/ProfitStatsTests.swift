@@ -140,6 +140,9 @@ final class ProfitStatsTests: XCTestCase {
         XCTAssertLessThanOrEqual(series.days.count, ProfitStats.maxChartPoints)
         // 抽稀不能影响总额
         XCTAssertEqual(series.costTotal, Double(entries.count) * 2)
+        let grid = ProfitStats.series(entries: entries, range: .all, sampleDays: false)
+        XCTAssertEqual(grid.days.filter { $0.count > 0 }.count, entries.count)
+        XCTAssertEqual(grid.costTotal, series.costTotal)
     }
 
     func testEmptyInput() {
@@ -185,8 +188,59 @@ final class ProfitStatsTests: XCTestCase {
     /// 这个断言是给下次改动兜底的 —— 上次删 `.week` 时忘了改测试，CI 才发现。
     func testRangeOptions() {
         XCTAssertEqual(ProfitRange.allCases, [.month, .half, .year, .all])
-        XCTAssertEqual(ProfitRange.half.gridSpan, 183)
-        XCTAssertEqual(ProfitRange.year.gridSpan, 365)
+        let now = DateText.parse("2024-02-29")!
+        let first = "2023-10-01", last = "2024-02-29"
+        XCTAssertEqual(ProfitRange.month.startDay(firstDay: first, lastDay: last, now: now), "2024-02-01")
+        XCTAssertEqual(ProfitRange.year.startDay(firstDay: first, lastDay: last, now: now), "2024-01-01")
+        XCTAssertEqual(ProfitRange.all.startDay(firstDay: first, lastDay: last, now: now), first)
         XCTAssertEqual(ProfitRange.month.label, "本月")
+    }
+
+    /// 首页概览卡的「全部」：不限年份。
+    func testPeriodWithoutAYearCoversEverything() {
+        let entries = [
+            SettledEntry(day: "2025-12-30", game: .ssq, cost: 10, prize: 0, isWon: false),
+            SettledEntry(day: "2026-02-03", game: .dlt, cost: 6, prize: 5, isWon: true)
+        ]
+        let all = ProfitStats.period(entries: entries, year: nil, month: 2)
+        XCTAssertEqual(all.cost, 16)
+        XCTAssertEqual(all.ticketCount, 2)
+        XCTAssertEqual(ProfitStats.period(entries: entries, year: 2026, month: nil).cost, 6)
+    }
+
+    /// 「本年」从今年 1 月 1 日算起，不是往回数 365 天。
+    func testThisYearStartsOnJanuaryFirst() throws {
+        let entries = [
+            SettledEntry(day: "2025-12-30", game: .ssq, cost: 10, prize: 0, isWon: false),
+            SettledEntry(day: "2026-02-03", game: .dlt, cost: 6, prize: 5, isWon: true)
+        ]
+        let now = try XCTUnwrap(DateText.parse("2026-03-01"))
+        let series = ProfitStats.series(entries: entries, range: .year, now: now)
+        XCTAssertEqual(series.costTotal, 6)
+        XCTAssertEqual(ProfitRange.year.label, "本年")
+    }
+
+    // MARK: - 方格图的颜色
+
+    private func heatDay(_ date: String, cost: Double, prize: Double, won: Int) -> ProfitDay {
+        ProfitDay(date: date, day: DateText.parse(date)!, close: 0, cost: cost, prize: prize, count: 3, wonCount: won, games: [])
+    }
+
+    /// 颜色只看有没有中：花 20 中 5，净值是负的，那天也算「中了」。
+    func testHeatColourFollowsWhetherAnyBetWon() {
+        XCTAssertTrue(HeatTone.isWin(heatDay("2026-09-01", cost: 20, prize: 5, won: 1)))
+        XCTAssertFalse(HeatTone.isWin(heatDay("2026-09-02", cost: 20, prize: 0, won: 0)))
+    }
+
+    /// 深浅按这段时间里的排位分三档，不设固定的金额线。
+    func testHeatDepthIsRankedWithinTheRange() {
+        let days = [heatDay("2026-09-01", cost: 4, prize: 0, won: 0), heatDay("2026-09-02", cost: 10, prize: 0, won: 0),
+                    heatDay("2026-09-03", cost: 30, prize: 0, won: 0), heatDay("2026-09-04", cost: 6, prize: 5, won: 1)]
+        let scales = HeatTone.scales(days)
+        XCTAssertEqual(scales.losses, [4, 10, 30])
+        XCTAssertEqual(scales.wins, [5])
+        XCTAssertEqual(days.map { HeatTone.level(of: $0, wins: scales.wins, losses: scales.losses) }, [0, 1, 2, 2])
+        // 样本不到三天时不分档，都按最深的画
+        XCTAssertEqual(HeatTone.level(5, among: [5]), 2)
     }
 }

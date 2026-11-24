@@ -1,4 +1,5 @@
 import XCTest
+import Vision
 
 /// App Store 截图：用示例票据启动，截首页、票夹、统计、扫描复核、设置五张整屏图。
 ///
@@ -24,6 +25,7 @@ final class AppStoreScreenshotTests: XCTestCase {
     }
 
     func testCaptureStoreScreenshots() {
+        app.launchArguments.append("--store-dlt")
         app.launch()
         XCTAssertTrue(app.staticTexts["累计收支"].waitForExistence(timeout: 15), "首页没有加载出来")
         // Screen readiness is established above; live network draw text is optional for demo screenshots.
@@ -32,14 +34,6 @@ final class AppStoreScreenshotTests: XCTestCase {
 
         open(tab: "票夹")
         capture("02-wallet")
-
-        open(tab: "首页")
-        let stats = app.navigationBars.buttons["统计"]
-        XCTAssertTrue(stats.waitForExistence(timeout: 10), "首页没有统计入口")
-        stats.tap()
-        XCTAssertTrue(app.navigationBars["统计"].waitForExistence(timeout: 10), "统计页没有打开")
-        settle()
-        capture("03-stats")
 
         open(tab: "设置")
         capture("05-settings")
@@ -66,7 +60,8 @@ final class AppStoreScreenshotTests: XCTestCase {
         settle(1)
         recognize.tap()
 
-        XCTAssertTrue(app.navigationBars["核对识别结果"].waitForExistence(timeout: 60), "识别没有完成")
+        // 云端 Intel 模拟器上的整张票识别可能超过一分钟。
+        XCTAssertTrue(app.navigationBars["核对识别结果"].waitForExistence(timeout: 180), "识别没有完成")
         settle()
 
         // 预览图不要，往下滑到号码和票面合计完整露出来。
@@ -80,6 +75,96 @@ final class AppStoreScreenshotTests: XCTestCase {
         XCTAssertTrue(total.waitForExistence(timeout: 5), "复核页没有票面金额那一行")
         settle()
         capture("04-scan")
+    }
+
+    func testCaptureMultipleTickets() {
+        let pair = Self.scanTicket.deletingLastPathComponent().appendingPathComponent("review-pair.jpg")
+        app.launchEnvironment["DEMO_SCAN_IMAGE"] = pair.path
+        app.launchEnvironment["DEMO_SCAN_LOCATE"] = "1"
+        app.launch()
+        let scan = app.tabBars.buttons.matching(NSPredicate(format: "label CONTAINS %@", "扫描")).firstMatch
+        XCTAssertTrue(scan.waitForExistence(timeout: 15))
+        scan.tap()
+        XCTAssertTrue(app.staticTexts["找到 2 张票"].waitForExistence(timeout: 90))
+        for title in ["大乐透", "双色球"] {
+            let mark = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label ENDSWITH %@", "第 ", "张票，" + title)).firstMatch
+            guard mark.waitForExistence(timeout: 90) else {
+                XCTFail("票框缺少彩种标签：\(title)")
+                return
+            }
+        }
+        capture("06-multiple")
+    }
+
+    func testCaptureMaskedDisplayPair() {
+        app.launchEnvironment["DEMO_SCAN_IMAGE"] = Self.scanTicket.deletingLastPathComponent()
+            .appendingPathComponent("store-display-pair.jpg").path
+        app.launchArguments.append("--store-display-pair")
+        app.launch()
+        app.tabBars.buttons.matching(NSPredicate(format: "label CONTAINS %@", "扫描")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["找到 2 张票"].waitForExistence(timeout: 15))
+        settle()
+        capture("08-display-pair")
+    }
+
+    func testCaptureNotificationBanner() throws {
+        app.launchArguments.append("--store-notification")
+        app.launch()
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let status = app.staticTexts["store.notification.status"]
+        let allow = board.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
+        let deadline = Date().addingTimeInterval(45)
+        while Date() < deadline {
+            if allow.exists { allow.tap() }
+            if status.exists, status.label == "已排程 3 条" { break }
+            settle(0.3)
+        }
+        guard status.exists, status.label == "已排程 3 条" else {
+            capture("notification-permission-failure")
+            XCTFail("系统排程状态：" + (status.exists ? status.label : app.debugDescription))
+            return
+        }
+        // Accessibility can expose the banner before its first visible frame.
+        // Read the actual screenshot pixels, and keep the very frame we verified.
+        func visibleNotification() -> XCUIScreenshot? {
+            let shot = XCUIScreen.main.screenshot()
+            guard let image = shot.image.cgImage else { return nil }
+            let read = VNRecognizeTextRequest()
+            read.recognitionLanguages = ["zh-Hans", "en-US"]
+            try? VNImageRequestHandler(cgImage: image).perform([read])
+            let words = (read.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined()
+            guard ["2026134", "26132", "26308", "奖金"].allSatisfy({ words.contains($0) }) else { return nil }
+            return shot
+        }
+        XCUIDevice.shared.press(.home)
+        let start = board.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.003))
+        let end = board.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.85))
+        start.press(forDuration: 0.15, thenDragTo: end)
+        settle(8)
+        for attempt in 0..<12 {
+            if let shot = visibleNotification() {
+                capture("07-notification", screenshot: shot)
+                return
+            }
+            if attempt == 3 || attempt == 8 {
+                let group = board.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS %@", "notifications", "条通知")).firstMatch
+                if group.exists && group.isHittable { group.tap() }
+            }
+            if attempt == 5 {
+                // Some simulator builds open on the clock with earlier alerts collapsed.
+                let lower = board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
+                let middle = board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.43))
+                lower.press(forDuration: 0.1, thenDragTo: middle)
+            }
+            settle(0.5)
+        }
+        capture("notification-visible-failure")
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "notification-center-failure"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+        XCTFail("截图像素中没有同时读到期号和奖金")
+
     }
 
     // MARK: - 工具
@@ -96,8 +181,7 @@ final class AppStoreScreenshotTests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
     }
 
-    private func capture(_ name: String, file: StaticString = #filePath) {
-        let screenshot = XCUIScreen.main.screenshot()
+    private func capture(_ name: String, screenshot: XCUIScreenshot = XCUIScreen.main.screenshot(), file: StaticString = #filePath) {
         let attachment = XCTAttachment(screenshot: screenshot)
         attachment.name = name
         attachment.lifetime = .keepAlways

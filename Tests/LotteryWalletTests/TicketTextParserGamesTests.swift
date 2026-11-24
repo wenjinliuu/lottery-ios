@@ -7,6 +7,25 @@ import XCTest
 /// 号码少读或多读一个，注数就对不上，这是最硬的一道校验。
 final class TicketTextParserGamesTests: XCTestCase {
 
+    func testUnreadableSportsTitleUsesUniquePrintedIssueAndDrawDate() {
+        let date = "2026-11-20"
+        func entry(_ issue: String, on day: String) -> GameYearCalendar {
+            let item = CalendarIssue(issue: issue, drawDate: day, weekday: 0, drawTime: "", saleCloseTime: "")
+            return GameYearCalendar(name: "", drawWeekdays: [], drawTime: "", saleCloseTime: "", issues: [item])
+        }
+        let calendar = DrawCalendarYear(year: 2026, lotteries: [
+            GameKey.qxc.apiKey: entry("26133", on: date),
+            GameKey.pl3.apiKey: entry("26310", on: date),
+            GameKey.pl5.apiKey: entry("26310", on: date),
+            GameKey.dlt.apiKey: entry("26133", on: "2026-11-21")
+        ])
+        let title = "体彩\n第 26133期 2026年11月20日开奖"
+        XCTAssertEqual(TicketTextParser.calendarGame(title, calendars: [2026: calendar]), .qxc)
+        XCTAssertNil(TicketTextParser.calendarGame(title.replacingOccurrences(of: "26133", with: "26310"), calendars: [2026: calendar]))
+        XCTAssertNil(TicketTextParser.calendarGame(title.replacingOccurrences(of: "开奖", with: "售出"), calendars: [2026: calendar]))
+        XCTAssertNil(TicketTextParser.calendarGame(title, calendars: [:]))
+    }
+
     // MARK: - 七乐彩
 
     /// 福彩七乐彩单式，3 注 × 2 元 = 6 元。
@@ -411,5 +430,201 @@ final class WholeTicketDerivationTests: XCTestCase {
         XCTAssertEqual(ticket.count, 2, "重号那一注被整个丢掉了")
         XCTAssertEqual(ticket.lines.first?[.red], [6, 8, 13, 21, 29, 32])
         XCTAssertEqual(ticket.lines.first?[.blue], [4])
+    }
+
+    // MARK: - 彩种认错（2026-11 TestFlight 实测）
+
+    private let pl5WithSlogan = """
+    Wen
+    体彩 排列5
+    第26301期 2026年11月11日开奖
+    110310-337861-121179-488663 226351 i8nxCA
+    直选单式票 1倍 合计4元
+    ① 1 4 1 9 6
+    ② 3 7 7 1 6
+    从3到5到7 让数字诉说你的每一份情感
+    体彩7星彩 为生活添彩!
+    感谢您为公益事业贡献 1.48元
+    20-020689-101 00169 26/11/11 13:57:49
+    """
+
+    /// 排列5 的票面下半截印着一句「体彩7星彩，为生活添彩！」。
+    /// 上一版见到这句就认成七星彩，号码按七位去读，整张票读不出来。
+    func testSloganNamingAnotherGameDoesNotChangeTheGame() throws {
+        XCTAssertEqual(TicketTextParser.detectGame(pl5WithSlogan), .pl5)
+        let ticket = try XCTUnwrap(TicketTextParser.parse(pl5WithSlogan).tickets.first)
+        XCTAssertEqual(ticket.game, .pl5)
+        XCTAssertEqual(ticket.lines.map { $0[.nums5] }, [[1, 4, 1, 9, 6], [3, 7, 7, 1, 6]])
+    }
+
+    /// 票头的彩种名没读出来：看号码行的版式。
+    func testGameFallsBackToTheShapeOfTheNumberRows() {
+        let untitled = pl5WithSlogan.replacingOccurrences(of: "体彩 排列5", with: "体彩")
+        XCTAssertEqual(TicketTextParser.detectGame(untitled), .pl5)
+        let sevenStars = """
+        体彩
+        第26110期 2026年09月22日开奖
+        110310-296561-121124-768065 794382
+        单式票 1倍 合计10元
+        ① 3 3 2 7 6 0 11
+        ② 2 4 7 3 1 1 11
+        """
+        XCTAssertEqual(TicketTextParser.detectGame(sevenStars), .qxc)
+    }
+
+    /// 「大乐透」读成「大乐语」，票底还印着「恭喜您获赠7星彩10元彩票一张」。
+    func testHalfReadTitleAndGiftNoteStillMeansDaLeTou() {
+        let text = """
+        体彩超级大乐语 西餐
+        第26109期 2026年09月23日开奖
+        182312-609220-001294-585768 645238 EUnuLA
+        套餐票 1倍 合计18元
+        ① 02 03 22 32 33 +03 12
+        前区02 10 13 14 29
+        后区 02 07 11
+        恭喜您获赠7星彩10元彩票一张
+        """
+        XCTAssertEqual(TicketTextParser.detectGame(text), .dlt)
+    }
+
+    /// 预识别页给框上色时不猜：只知道是体彩，就标「没认出彩种」。
+    func testGuessingByIssuerIsOptional() {
+        XCTAssertNil(TicketTextParser.detectGame("体彩\n第26110期", guess: false))
+        XCTAssertEqual(TicketTextParser.detectGame("体彩\n第26110期"), .dlt)
+    }
+
+    /// 「蓝复」被认成繁体的「藍复」：上一版这一行整行丢了，14 注的复式票读不出号码。
+    func testTraditionalBlueLabelIsStillTheBlueZone() throws {
+        let text = """
+        Wen 中国福利彩票
+        玩法:双色球-复式 GN WE税号:39136822
+        7692-3402-B25E-4034-AF48/11402378/22513
+        红复:09 21 22 24 26 28 33
+        藍复:02 11
+        倍数:1
+        开奖期:2026129 26-11-10 合计28元
+        """
+        let ticket = try XCTUnwrap(TicketTextParser.parse(text).tickets.first)
+        XCTAssertEqual(ticket.selections[.red]?.selected, [9, 21, 22, 24, 26, 28, 33])
+        XCTAssertEqual(ticket.selections[.blue]?.selected, [2, 11])
+        XCTAssertEqual(ticket.totalCost, 28)
+    }
+
+    /// 「蓝复」的第一个字认成什么的都有（藍、监……）：只要是「X复:」「X单:」后面跟着号码，
+    /// 红球已经有了，它就是蓝球。
+    func testGarbledBlueLabelIsTheBlueZoneWhenRedIsAlreadyRead() throws {
+        let text = """
+        Wen CD 中国福利彩票
+        玩法:双色球-复式 詳INA WEA税号:39130622
+        7692-3402-B25E-4034-AF48/11402378/22513
+        红复:09 21 22 24 26 28 33
+        监复:02 11
+        倍数:1
+        开奖期:2026129 26-11-10 合计28元
+        """
+        let ticket = try XCTUnwrap(TicketTextParser.parse(text).tickets.first)
+        XCTAssertEqual(ticket.selections[.blue]?.selected, [2, 11])
+        XCTAssertEqual(ticket.multiple, 1, "「倍数:1」不是号码行")
+        XCTAssertEqual(ticket.totalCost, 28)
+    }
+
+    /// 快乐8 行尾的「(1)」两个括号都没认出来，只剩一个 1：它不是第六个号。
+    func testBareMultipleAtTheEndOfARowIsNotANumber() throws {
+        let text = """
+        welch 中国福利科票
+        玩法:快乐8-选五单式 机号:31130622
+        6239-4967-136C-88D3-A01D/11402378/4A71D
+        A.04 05 24 35 39 1
+        B.09 15 39 58 80
+        开奖期:2026300 26-11-10 合计4元
+        """
+        let ticket = try XCTUnwrap(TicketTextParser.parse(text).tickets.first)
+        XCTAssertEqual(ticket.lines.map { $0[.nums] }, [[4, 5, 24, 35, 39], [9, 15, 39, 58, 80]])
+        XCTAssertEqual(TicketTextParser.dropTrailingMultiple("6 2 5 7 2"), "6 2 5 7 2", "数字型的号码不能动")
+    }
+
+    /// 大乐透复式：「前区」两个字没读出来，号码还读重了一个，第 8 个号折在下一行。
+    func testUnlabelledRowsBeforeTheBackLabelAreTheFrontZone() throws {
+        let text = """
+        体彩 超级大乐语
+        第26108期 2026年09月21日开奖
+        110320-296261-117718-131535 048614 Erxx7W
+        复式票 1倍 合计112元
+        03 08 08 11 18 19 30 33
+        35
+        后区01 04
+        看江苏省城市足坪联赛
+        """
+        let ticket = try XCTUnwrap(TicketTextParser.parse(text).tickets.first)
+        XCTAssertEqual(ticket.play, .system)
+        XCTAssertEqual(ticket.selections[.front]?.selected, [3, 8, 11, 18, 19, 30, 33, 35])
+        XCTAssertEqual(ticket.selections[.back]?.selected, [1, 4])
+        XCTAssertEqual(ticket.totalCost, 112)
+    }
+
+    // MARK: - 排列3 / 3D 的组选复式
+
+    /// 排列3「组选6复式票」：一行 5 个数字，C(5,3) = 10 注，20 倍，合计 400 元。
+    /// 按票面存：玩法是组选6、票型是复式，记下这 5 个数字；算钱和兑奖时才展开成 10 注。
+    func testPickThreeGroupSixSystemTicket() throws {
+        let text = """
+        体彩 排列3
+        第26246期 2026年09月13日开奖
+        110440-357676-338715-377668 345741 cwj4e3
+        组选6复式票 20倍 合计400元
+        1 3 5 6 8
+        感谢您为公益事业贡献 136.00
+        公益体彩 乐善人生
+        07-210100-101 000602 26/09/13 12:32:46
+        """
+        let ticket = try XCTUnwrap(TicketTextParser.parse(text).tickets.first)
+        XCTAssertEqual(ticket.game, .pl3)
+        XCTAssertEqual(ticket.play, .system)
+        XCTAssertEqual(ticket.playMode, "group6")
+        XCTAssertEqual(ticket.selections[.nums3]?.selected, [1, 3, 5, 6, 8])
+        XCTAssertEqual(ticket.count, 10)
+        XCTAssertEqual(ticket.multiple, 20)
+        XCTAssertEqual(ticket.totalCost, 400)
+        XCTAssertTrue(ticket.expandedLines.contains(NumberSet([.nums3: [1, 3, 5]])))
+        XCTAssertTrue(ticket.expandedLines.allSatisfy { Set($0[.nums3]).count == 3 }, "组六每一注三个数字都不同")
+    }
+
+    /// 「组选3复式」：n 个数字是 n×(n−1) 注，每一注是一个对子加另一个数字。
+    func testPickThreeGroupThreeSystemExpandsToPairs() throws {
+        let tickets = try XCTUnwrap(TicketBuilder.expand(
+            game: .pl3, selections: [.nums3: SectionSelection(selected: [2, 5, 9])],
+            mode: .system, playMode: "group3", addOn: false))
+        XCTAssertEqual(tickets.count, 6)
+        XCTAssertTrue(tickets.map(\.numbers).contains(NumberSet([.nums3: [2, 2, 5]])))
+        XCTAssertTrue(tickets.map(\.numbers).contains(NumberSet([.nums3: [5, 5, 2]])))
+        XCTAssertTrue(tickets.allSatisfy { Set($0.numbers[.nums3]).count == 2 })
+    }
+
+    /// 组选6复式至少 4 个数字；直选的复式票面是按位排的，还没做，不能当成组选展开。
+    func testPickThreeSystemRejectsWhatItCannotExpand() {
+        let three = [SectionKey.nums3: SectionSelection(selected: [1, 2, 3])]
+        XCTAssertEqual(TicketBuilder.expand(game: .pl3, selections: three, mode: .system, playMode: "group6", addOn: false)?.count, 0)
+        let five = [SectionKey.nums3: SectionSelection(selected: [1, 3, 5, 6, 8])]
+        XCTAssertEqual(TicketBuilder.expand(game: .pl3, selections: five, mode: .system, playMode: "single", addOn: false)?.count, 0)
+        XCTAssertEqual(TicketBuilder.expand(game: .fc3d, selections: five, mode: .system, playMode: "group6", addOn: false)?.count, 10)
+        // 票头按票面写全
+        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["group6"], shape: .system), "组选6复式票")
+        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["group3"], shape: .system), "组选3复式票")
+        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["group6"], shape: .single), "组选单式票")
+    }
+
+    /// 票头糊得认不出彩种：用户在预识别页上自己指定，识别就按指定的来。
+    func testGameChosenByTheUserOverridesWhatTheTextSays() throws {
+        let text = """
+        第26301期 2026年11月11日开奖
+        直选单式票 1倍 合计4元
+        ① 1 4 1 9 6
+        ② 3 7 7 1 6
+        体彩7星彩 为生活添彩!
+        """
+        // 没有票头、广告语里又写着 7 星彩：指定排列5 之后按排列5 读
+        let ticket = try XCTUnwrap(TicketTextParser.parse(text, game: .pl5).tickets.first)
+        XCTAssertEqual(ticket.game, .pl5)
+        XCTAssertEqual(ticket.lines.map { $0[.nums5] }, [[1, 4, 1, 9, 6], [3, 7, 7, 1, 6]])
     }
 }

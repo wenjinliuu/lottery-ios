@@ -24,9 +24,31 @@ struct HomeView: View {
     @Environment(DrawStore.self) private var drawStore
     @Query(sort: \TicketRecord.createdAt, order: .reverse) private var records: [TicketRecord]
 
-    @State private var range: ProfitRange = .all
+    @State private var range: ProfitRange = .year
+    @State private var historicalEnd: Date?
+    @State private var pickerYear = 0
+    @State private var pickerMonth: Int?
+    @State private var pickerAll = false
+    @State private var showsProfitPicker = false
+
+    private var periodEnd: Date { historicalEnd ?? AppClock.now }
+    private var periodLabel: String {
+        guard let historicalEnd else { return range.label }
+        let day = DateText.day(historicalEnd)
+        return range == .month ? String(day.prefix(7)) : String(day.prefix(4)) + " 年"
+    }
+    /// 曲线、方格和球罐共用同一个时间范围。
+    @AppStorage("home.chartStyle", store: HomeChartStyle.store) private var chartStyle = HomeChartStyle.line.rawValue
     @State private var series = ProfitSeries()
+    @State private var jar = JarBuilder.Jar()
+    @State private var jarEntries: [JarEntry]?
     @State private var monthStats = ProfitStats.PeriodStats()
+    /// 下面那张概览卡看哪一段：某年某月、某年全年（月份为 nil）、或者全部。
+    @State private var overviewYear = Calendar.chinaCalendar.component(.year, from: AppClock.now)
+    @State private var overviewMonth: Int? = Calendar.chinaCalendar.component(.month, from: AppClock.now)
+    @State private var isOverviewAll = false
+    @State private var overviewYears: [Int] = []
+    @State private var isOverviewPickerPresented = false
     @State private var carouselIndex = 0
     /// TabView 的真实页码。首尾各多挂一张哨兵页（末卡的副本放在最前、
     /// 首卡的副本放在最后），滑到哨兵页上再无动画地跳回对应的真页，
@@ -42,6 +64,8 @@ struct HomeView: View {
     /// `carouselOrder` 每次都要取一遍东八区时间、过一遍八个彩种，
     /// 而 body 在滚动时一秒会跑很多次。统一在数据变化时算好存下来。
     @State private var todayGames: Set<GameKey> = []
+    /// 今天开奖的彩种各自几点开，卡片上的倒计时用。
+    @State private var todayDrawTimes: [GameKey: Date] = [:]
     @State private var pendingGames: [GameKey] = []
     @State private var carouselGames: [GameKey] = GameKey.ordered
     /// 量出来的可用宽度。量到之前用起手值，见 `HomeLayout.fallbackScreenWidth`。
@@ -92,16 +116,6 @@ struct HomeView: View {
             // 小标题得留着 —— 往下滑的时候顶上要有一条带标题的栏，和设置页一样。
             .navigationTitle("首页")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        StatsView()
-                    } label: {
-                        Image(systemName: "chart.bar.xaxis")
-                    }
-                    .accessibilityLabel("统计")
-                }
-            }
             .refreshable { await drawStore.refresh() }
             .task(id: RecordsToken(records)) { recompute() }
             .task(id: drawStore.scheduleToken) { refreshSchedule() }
@@ -109,7 +123,28 @@ struct HomeView: View {
                 // 最新开奖先显示；日历按年缓存，拿到后再显示准确的今日标记。
                 await drawStore.loadCalendar(year: ChinaClock.year())
             }
-            .onChange(of: range) { _, _ in recomputeSeries() }
+            // 换范围时曲线和数字一起过渡，不是啪地一下换掉
+            .onChange(of: periodLabel) { _, _ in
+                withAnimation(.snappy(duration: 0.35)) {
+                    recomputeSeries()
+                    recomputeJar()
+                }
+            }
+            .onChange(of: chartStyle) { _, _ in
+                recomputeSeries()
+                recomputeJar()
+            }
+            .onChange(of: overviewYear) { _, _ in recompute() }
+            .onChange(of: overviewMonth) { _, _ in recompute() }
+            .onChange(of: isOverviewAll) { _, _ in recompute() }
+            .sheet(isPresented: $isOverviewPickerPresented) {
+                PeriodPicker(year: $overviewYear, month: $overviewMonth, isAll: $isOverviewAll, years: overviewYears)
+            }
+            .sheet(isPresented: $showsProfitPicker, onDismiss: applyProfitPeriod) {
+                PeriodPicker(year: $pickerYear, month: $pickerMonth, isAll: $pickerAll,
+                             years: overviewYears + [Calendar.chinaCalendar.component(.year, from: AppClock.now) - 2],
+                             latest: AppClock.now)
+            }
             .environment(\.screenWidth, screenWidth)
         }
     }
@@ -121,21 +156,76 @@ struct HomeView: View {
     private func recompute() {
         entries = ProfitStats.snapshot(records)
         recomputeSeries()
-        let now = AppClock.now
-        let year = Calendar.chinaCalendar.component(.year, from: now)
-        let month = Calendar.chinaCalendar.component(.month, from: now)
-        monthStats = ProfitStats.period(entries: ProfitStats.snapshotAll(records), year: year, month: month)
+        jarEntries = nil
+        recomputeJar()
+        let all = ProfitStats.snapshotAll(records)
+        overviewYears = ProfitStats.availableYears(entries: all)
+        monthStats = ProfitStats.period(entries: all, year: isOverviewAll ? nil : overviewYear, month: overviewMonth)
+    }
+
+    private func openProfitPicker() {
+        let calendar = Calendar.chinaCalendar
+        pickerYear = calendar.component(.year, from: periodEnd)
+        pickerMonth = range == .month ? calendar.component(.month, from: periodEnd) : nil
+        pickerAll = range == .all
+        showsProfitPicker = true
+    }
+
+    private func applyProfitPeriod() {
+        let calendar = Calendar.chinaCalendar
+        guard !pickerAll else {
+            historicalEnd = nil
+            range = .all
+            return
+        }
+        guard let first = calendar.date(from: DateComponents(year: pickerYear, month: pickerMonth ?? 1, day: 1)),
+              let interval = calendar.dateInterval(of: pickerMonth == nil ? .year : .month, for: first),
+              first <= AppClock.now else { return }
+        historicalEnd = interval.contains(AppClock.now) ? nil : interval.end.addingTimeInterval(-1)
+        range = pickerMonth == nil ? .year : .month
+    }
+
+    private func recomputeJar() {
+        guard chartStyle == HomeChartStyle.jar.rawValue else { return }
+        if DemoData.isEnabled, let value = ProcessInfo.processInfo.environment["JAR_PREVIEW_HITS"],
+           let hits = Int(value), [309, 2000].contains(hits) {
+            let red = hits * 55 / 100, blue = hits * 40 / 100
+            jar = JarBuilder.Jar(counts: [.red: red, .blue: blue, .yellow: hits - red - blue])
+            return
+        }
+        if jarEntries == nil {
+            jarEntries = records.compactMap { record in
+                guard record.status.hasResult else { return nil }
+                return JarEntry(day: record.profitDay, game: record.game, numbers: record.ticket.numbers,
+                                matched: record.matched)
+            }
+        }
+        jar = JarBuilder.build(jarEntries ?? [], range: range, now: periodEnd)
     }
 
     private func recomputeSeries() {
-        series = ProfitStats.series(entries: entries, range: range, now: AppClock.now)
+        series = ProfitStats.series(
+            entries: entries, range: range, now: periodEnd,
+            sampleDays: chartStyle != HomeChartStyle.grid.rawValue
+        )
     }
 
     private func refreshSchedule() {
         todayGames = Set(drawStore.todayOpenGames())
+        var times: [GameKey: Date] = [:]
+        for game in todayGames { times[game] = drawStore.todayDrawTime(for: game) }
+        todayDrawTimes = times
         pendingGames = drawStore.pendingDrawUpdates()
         let order = drawStore.carouselOrder()
         carouselGames = order
+        #if DEBUG && targetEnvironment(simulator)
+        if DemoData.isEnabled, ProcessInfo.processInfo.arguments.contains("--store-dlt"),
+           let index = order.firstIndex(of: .dlt) {
+            carouselIndex = index
+            pageIndex = index + 1
+            return
+        }
+        #endif
         // 轮播顺序会随「今天开哪个彩种」变化，旧的下标可能越界，
         // 越界后 TabView 会白屏一页。
         if carouselIndex >= order.count || pageIndex > order.count + 1 || pageIndex < 0 {
@@ -146,12 +236,7 @@ struct HomeView: View {
 
     // MARK: - 累计收支
 
-    /// 从上到下一条线：标签和范围 → 大数字 → 两个小指标 → 方格图 → 四格明细。
-    ///
-    /// 中奖率和「最好的一天」紧跟在大数字下面：它们是对这个数字的**解读**
-    /// （这笔钱是怎么来的、哪天最好），放在明细里跟流水数字挤在一起就看不出主次。
-    /// 票面金额、奖金、公益金、已结算这四个流水数排成两行两列，每格有底色，
-    /// 比原来一行五个挤在一起好读得多。
+    /// 账本概览、共用金额行和当前选中的图表。
     private var profitCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
@@ -159,83 +244,161 @@ struct HomeView: View {
                     Text("累计收支")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    rangeMenu
                     Spacer(minLength: 0)
-                }
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(MoneyText.grouped(series.netTotal))
-                        // 大号字要收紧字距 —— 字号越大，字母间那点默认间隙看着越松。
-                        .font(.system(size: 44, weight: .bold, design: .rounded))
-                        .tracking(-1)
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                    Text("元")
-                        .font(.system(.title3, design: .rounded, weight: .semibold))
-                }
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .foregroundStyle(Palette.profitColor(series.netTotal))
-                .accessibilityElement(children: .combine)
-
-                HStack(spacing: 8) {
-                    inlineStat("中奖率", winRateText, tint: series.settledCount > 0 ? Palette.profit : .secondary)
-                    if let best = bestDayNet {
-                        Rectangle()
-                            .fill(Palette.separator)
-                            .frame(width: 1, height: 11)
-                        inlineStat("最好的一天", "+\(MoneyText.grouped(best)) 元", tint: Palette.profit)
+                    Button(action: openProfitPicker) {
+                        Image(systemName: "calendar")
+                            .frame(minWidth: 32, minHeight: 32)
                     }
+                    .accessibilityLabel("选择统计区间")
+                    .accessibilityIdentifier("home.profit.period")
+                    Picker("范围", selection: Binding(get: { range }, set: { historicalEnd = nil; range = $0 })) {
+                        Text(range == .month ? periodLabel : "本月").tag(ProfitRange.month)
+                        Text(range == .year ? periodLabel : "本年").tag(ProfitRange.year)
+                        Text("全部").tag(ProfitRange.all)
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    .accessibilityIdentifier("home.range")
+                }
+                HStack {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(MoneyText.grouped(series.netTotal))
+                            // 大号字要收紧字距 —— 字号越大，字母间那点默认间隙看着越松。
+                            .font(.system(size: 44, weight: .bold, design: .rounded))
+                            .tracking(-1)
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                        Text("元")
+                            .font(.system(.title3, design: .rounded, weight: .semibold))
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .foregroundStyle(Palette.profitColor(series.netTotal))
+                    .accessibilityElement(children: .combine)
+                    Spacer(minLength: 4)
+                    // 三种图表共享时间范围。
+                    Picker("图表样式", selection: $chartStyle) {
+                        Image(systemName: "chart.xyaxis.line")
+                            .accessibilityLabel("曲线")
+                            .tag(HomeChartStyle.line.rawValue)
+                        Image(systemName: "square.grid.3x3.fill")
+                            .accessibilityLabel("方格")
+                            .tag(HomeChartStyle.grid.rawValue)
+                        Image(systemName: "circle.hexagongrid.fill")
+                            .accessibilityLabel("球罐")
+                            .tag(HomeChartStyle.jar.rawValue)
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    .accessibilityIdentifier("home.chart.style")
                 }
             }
 
-            ProfitHeatmap(days: series.days, range: range,
-                          width: screenWidth - HomeLayout.pagePadding * 2 - 32)
+            chartTotals
 
-            // 公益金逐条按彩种计提，比例见 `GameKey.welfareRate` ——
-            // 原来固定乘 0.36，八个彩种里五个是错的。
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
-                      spacing: 10) {
-                statTile("票面金额", MoneyText.grouped(series.costTotal), unit: "元")
-                statTile("奖金", MoneyText.grouped(series.prizeTotal), unit: "元", tint: Palette.profit)
-                statTile("公益金", MoneyText.grouped(series.welfareTotal), unit: "元")
-                statTile("已结算", "\(series.settledCount)", unit: "注")
+            Group {
+                if chartStyle == HomeChartStyle.jar.rawValue {
+                    BallJarView(jar: jar, periodLabel: periodLabel)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                } else if chartStyle == HomeChartStyle.grid.rawValue {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ProfitHeatmap(days: series.days, range: range, end: periodEnd, width: screenWidth - 64)
+                            .id(periodLabel)
+                        HStack(spacing: 12) {
+                            heatLegend(Palette.profit, "有中奖")
+                            heatLegend(Palette.loss, "未中奖")
+                        }
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                } else {
+                    ProfitFlowChart(series: series, mode: .cumulative)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                }
             }
+            .animation(.smooth(duration: 0.3), value: chartStyle)
         }
+        // 换范围、换图表样式时各给一下轻的触感
+        .sensoryFeedback(.selection, trigger: range)
+        .sensoryFeedback(.selection, trigger: chartStyle)
         .contentCard()
     }
 
-    /// 范围选择做成一颗小胶囊，贴在「累计收支」后面 —— 它改的就是这个数。
-    private var rangeMenu: some View {
-        Menu {
-            Picker("范围", selection: $range) {
-                ForEach(ProfitRange.allCases) { Text($0.label).tag($0) }
+    private var chartTotals: some View {
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
+            GridRow {
+                inlineStat("返奖率", returnRateText, tint: series.prizeTotal > 0 ? Palette.profit : .secondary)
+                prizeTotal
             }
-        } label: {
-            HStack(spacing: 3) {
-                Text(range.label)
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.semibold))
+            GridRow {
+                spendingTotal
+                welfareTotal
             }
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(Color.primary.opacity(0.06), in: Capsule())
         }
-        .accessibilityLabel("统计范围：\(range.label)")
+        .accessibilityIdentifier("home.chart.totals")
     }
 
-    /// 这个范围里收益最高的那一天；一天都没赚过就不显示。
-    private var bestDayNet: Double? {
-        guard let best = series.days.filter({ $0.count > 0 }).max(by: { $0.net < $1.net }),
-              best.net > 0 else { return nil }
-        return best.net
+    private var spendingTotal: some View {
+        inlineStat("投入", "\(MoneyText.grouped(series.costTotal)) 元", tint: Palette.chartSpending)
     }
 
-    /// 一注都还没结算时，中奖率是 0/0 —— 那不是「中奖率 0%」，
+    private var prizeTotal: some View {
+        inlineStat("奖金", "\(MoneyText.grouped(series.prizeTotal)) 元", tint: Palette.profit)
+    }
+
+    private var welfareTotal: some View {
+        inlineStat("公益金", "\(MoneyText.grouped(series.welfareTotal)) 元", tint: Palette.warning)
+    }
+
+    /// 概览卡上那三个快捷范围选中了哪个；都不是（比如选了去年某个月）返回 -1。
+    private var overviewQuick: Int {
+        let now = AppClock.now
+        let year = Calendar.chinaCalendar.component(.year, from: now)
+        let month = Calendar.chinaCalendar.component(.month, from: now)
+        if isOverviewAll { return 2 }
+        guard overviewYear == year else { return -1 }
+        if overviewMonth == nil { return 1 }
+        return overviewMonth == month ? 0 : -1
+    }
+
+    private func setOverviewQuick(_ choice: Int) {
+        let now = AppClock.now
+        isOverviewAll = choice == 2
+        guard choice != 2 else { return }
+        overviewYear = Calendar.chinaCalendar.component(.year, from: now)
+        overviewMonth = choice == 0 ? Calendar.chinaCalendar.component(.month, from: now) : nil
+    }
+
+    /// 在概览卡上左右滑：看着某个月时换到上个月 / 下个月。不往未来翻。
+    private func shiftOverviewMonth(_ delta: Int) {
+        guard !isOverviewAll, let month = overviewMonth else { return }
+        var year = overviewYear, next = month + delta
+        if next < 1 { next = 12; year -= 1 }
+        if next > 12 { next = 1; year += 1 }
+        let now = AppClock.now
+        let thisYear = Calendar.chinaCalendar.component(.year, from: now)
+        let thisMonth = Calendar.chinaCalendar.component(.month, from: now)
+        guard year < thisYear || (year == thisYear && next <= thisMonth) else { return }
+        withAnimation(.snappy(duration: 0.3)) {
+            overviewYear = year
+            overviewMonth = next
+        }
+    }
+
+    private func heatLegend(_ tint: Color, _ title: String) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                .fill(tint)
+                .frame(width: 9, height: 9)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// 一分钱都还没结算时，返奖率是 0/0 —— 那不是「返奖率 0%」，
     /// 是「还没有能算的东西」。写成 0% 会让人以为买了都没中。
-    private var winRateText: String {
-        series.settledCount > 0 ? String(format: "%.0f%%", series.winRate) : "—"
+    private var returnRateText: String {
+        series.costTotal > 0 ? String(format: "%.0f%%", series.prizeTotal / series.costTotal * 100) : "—"
     }
 
     private func inlineStat(_ title: String, _ value: String, tint: Color) -> some View {
@@ -244,33 +407,11 @@ struct HomeView: View {
                 .foregroundStyle(.secondary)
             Text(value)
                 .monospacedDigit()
+                .contentTransition(.numericText())
                 .foregroundStyle(tint)
         }
         .font(.footnote)
         .lineLimit(1)
-    }
-
-    private func statTile(_ title: String, _ value: String, unit: String, tint: Color = .primary) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value)
-                    .font(.system(.title3, design: .rounded, weight: .semibold))
-                    .monospacedDigit()
-                Text(unit)
-                    .font(.footnote)
-            }
-            .foregroundStyle(tint)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityElement(children: .combine)
     }
 
     // MARK: - 最新开奖
@@ -297,7 +438,8 @@ struct HomeView: View {
                     let game = carouselGames[realIndex(page)]
                     DrawCard(game: game,
                              draw: drawStore.latestDraw(for: game),
-                             opensToday: todayGames.contains(game))
+                             opensToday: todayGames.contains(game),
+                             drawsAt: todayDrawTimes[game])
                         // 分页是整屏宽翻的，卡片自己不留边就会和下一张严丝合缝地
                         // 贴在一起，滑动时看起来像一整条在动，分不出是两张卡。
                         .padding(.horizontal, HomeLayout.carouselPagePadding)
@@ -358,6 +500,9 @@ struct HomeView: View {
     /// 减弱动效下**完全不转** —— 自动播放的轮播是无障碍里最经典的问题之一，
     /// 对前庭敏感和阅读较慢的用户都是干扰。
     private func runAutoScroll() async {
+        #if DEBUG && targetEnvironment(simulator)
+        if DemoData.isEnabled, ProcessInfo.processInfo.arguments.contains("--store-dlt") { return }
+        #endif
         guard !reduceMotion, carouselGames.count > 1 else { return }
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(4))
@@ -438,12 +583,46 @@ struct HomeView: View {
             .padding(.horizontal, 4)
     }
 
-    // MARK: - 本月概览
+    // MARK: - 概览
+
+    private var overviewTitle: String {
+        if isOverviewAll { return "全部概览" }
+        if let month = overviewMonth { return "\(overviewYear) 年 \(month) 月概览" }
+        return "\(overviewYear) 年概览"
+    }
 
     private var monthlyCard: some View {
-        let month = Calendar.chinaCalendar.component(.month, from: AppClock.now)
         return VStack(alignment: .leading, spacing: 14) {
-            SectionHeader(title: "\(month) 月概览", subtitle: "本机记录 · \(monthStats.ticketCount) 注")
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(overviewTitle)
+                        .font(.headline)
+                    Text("本机记录 · \(monthStats.ticketCount) 注")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 12)
+                // 选哪个月、哪一年、还是全部
+                Button {
+                    isOverviewPickerPresented = true
+                } label: {
+                    HStack(spacing: 3) {
+                        Text("选择时间")
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .font(.subheadline)
+                }
+                .accessibilityIdentifier("home.overview.period")
+            }
+            // 和上面那张卡一样的三档；要看别的月份点「选择时间」，或者在这张卡上左右滑
+            Picker("概览范围", selection: Binding(get: { overviewQuick }, set: { setOverviewQuick($0) })) {
+                Text("本月").tag(0)
+                Text("本年").tag(1)
+                Text("累计").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("home.overview.quick")
 
             // 收支是这张卡的主角，单独占一行给足字号；
             // 票面金额和奖金退到下面一行当支撑数据。
@@ -474,12 +653,12 @@ struct HomeView: View {
             }
 
             HStack(spacing: 10) {
-                miniStat("票面金额", MoneyText.format(monthStats.cost), "arrow.down.circle.fill", .secondary)
+                miniStat("票面金额", MoneyText.format(monthStats.cost), "yensign.circle.fill", .secondary)
                 miniStat("奖金", MoneyText.format(monthStats.prize), "trophy.fill", Palette.profit)
             }
 
             if monthStats.byGame.isEmpty {
-                Text("这个月还没有记录")
+                Text("这一段还没有记录")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -488,10 +667,21 @@ struct HomeView: View {
                 Divider()
                 // 原来是一张横向柱状图，只能看出长短。换成一条占比色带
                 // 加一份明细，金额和比例都直接写出来。
-                SpendBreakdown(items: monthStats.byGame, total: monthStats.cost)
+                // 彩种一共就八个，全部列出来，不并成「其他」
+                SpendBreakdown(items: monthStats.byGame, total: monthStats.cost, limit: monthStats.byGame.count)
             }
         }
         .contentCard()
+        .sensoryFeedback(.selection, trigger: overviewMonth)
+        // 横着滑才算；竖着滑是页面在滚
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { value in
+                    let dx = value.translation.width, dy = value.translation.height
+                    guard abs(dx) > 60, abs(dx) > abs(dy) * 2 else { return }
+                    shiftOverviewMonth(dx < 0 ? 1 : -1)
+                }
+        )
     }
 
     private func miniStat(_ title: String, _ value: String, _ symbol: String, _ tint: Color) -> some View {
@@ -558,6 +748,19 @@ extension EnvironmentValues {
     }
 }
 
+/// 首页那张卡片里画哪一种图。
+enum HomeChartStyle: String {
+    case line, grid, jar
+
+    /// 选的样式记在哪。示例模式（截图、界面测试）每次启动都用一份清空了的，
+    /// 不然一条测试切到球罐，后面的测试和截图打开首页看到的都是球罐。
+    static let store: UserDefaults = {
+        guard ProcessInfo.processInfo.arguments.contains("--demo-data"), let demo = UserDefaults(suiteName: "demo.home") else { return .standard }
+        demo.removePersistentDomain(forName: "demo.home")
+        return demo
+    }()
+}
+
 // MARK: - 收支热力图
 
 /// 逐日收支方格图。
@@ -584,10 +787,10 @@ struct ProfitHeatmap: View {
     private let grid: Grid
 
     /// - Parameter width: 方格图能用的宽度。
-    init(days: [ProfitDay], range: ProfitRange, width: CGFloat) {
+    init(days: [ProfitDay], range: ProfitRange, end: Date, width: CGFloat) {
         self.days = days
         self.range = range
-        let grid = Self.buildGrid(days: days, range: range)
+        let grid = Self.buildGrid(days: days, range: range, end: end)
         self.grid = grid
         let columns = CGFloat(Swift.max(grid.weeks.count, 1))
         let fitted = (width - Self.gapSize * (columns - 1)) / columns
@@ -624,27 +827,22 @@ struct ProfitHeatmap: View {
 
     @State private var selectedWeek: Int?
 
-    /// 「全部」画多少天：从第一条记录往前再留两周，最少 16 周、最多一年。
-    /// 固定画一整年的话，只有几个月记录的人看到的是一大片空格子。
-    private static func span(range: ProfitRange, days: [ProfitDay], today: Date) -> Int {
-        guard range == .all else { return range.gridSpan }
-        guard let first = days.filter({ $0.count > 0 }).map(\.day).min() else { return 16 * 7 }
-        let recorded = (Calendar.chinaCalendar.dateComponents([.day], from: first, to: today).day ?? 0) + 14
-        return Swift.min(Swift.max(recorded, 16 * 7), 365)
-    }
-
-    private static func buildGrid(days: [ProfitDay], range: ProfitRange) -> Grid {
+    private static func buildGrid(days: [ProfitDay], range: ProfitRange, end periodEnd: Date) -> Grid {
         var byDay: [String: ProfitDay] = [:]
         byDay.reserveCapacity(days.count)
         for day in days where day.count > 0 { byDay[day.date] = day }
 
         let calendar = Calendar.chinaCalendar
-        let today = AppClock.now
-        let span = Self.span(range: range, days: days, today: today)
-        guard let start = calendar.date(byAdding: .day, value: -(span - 1), to: today) else {
+        let today = calendar.startOfDay(for: periodEnd)
+        let daysWithRecords = days.filter { $0.count > 0 }
+        let firstDay = daysWithRecords.first?.date ?? DateText.day(today)
+        let lastDay = daysWithRecords.last?.date ?? firstDay
+        let startDay = range.startDay(firstDay: firstDay, lastDay: lastDay, now: today)
+        let end = range == .all ? max(today, daysWithRecords.last?.day ?? today) : today
+        guard let start = DateText.parse(startDay) else {
             return Grid(byDay: byDay, weeks: [], monthLabels: [])
         }
-        // 回退到那一周的周一，列才不会错位
+        // 先对齐到周一，再把区间外的格子留空。
         let weekdayIndex = (calendar.component(.weekday, from: start) + 5) % 7
         guard let gridStart = calendar.date(byAdding: .day, value: -weekdayIndex, to: start) else {
             return Grid(byDay: byDay, weeks: [], monthLabels: [])
@@ -652,10 +850,10 @@ struct ProfitHeatmap: View {
 
         var weeks: [[Date?]] = []
         var cursor = gridStart
-        while cursor <= today {
+        while cursor <= end {
             var column: [Date?] = []
             for _ in 0..<7 {
-                column.append(cursor <= today ? cursor : nil)
+                column.append(cursor >= start && cursor <= end ? cursor : nil)
                 guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
                 cursor = next
             }
@@ -705,9 +903,9 @@ struct ProfitHeatmap: View {
         // 图例不再单独占一行：红赚绿亏写在首页那行说明里，「最好的一天」挪到大数字下面。
         return VStack(alignment: .leading, spacing: 7) {
             ScrollView(.horizontal, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .top, spacing: gap) {
-                        ForEach(Array(grid.weeks.enumerated()), id: \.offset) { index, column in
+                LazyHStack(alignment: .top, spacing: gap) {
+                    ForEach(Array(grid.weeks.enumerated()), id: \.offset) { index, column in
+                        VStack(alignment: .leading, spacing: 5) {
                             VStack(spacing: gap) {
                                 ForEach(Array(column.enumerated()), id: \.offset) { _, date in
                                     cellView(for: date, byDay: grid.byDay)
@@ -739,17 +937,14 @@ struct ProfitHeatmap: View {
                                     // 很小的一块，不铺满、不抢戏
                                     .presentationCompactAdaptation(.popover)
                             }
-                        }
-                    }
-                    // 月份刻度跟着方格一起横向滚，所以必须画在 ScrollView **里面**，
-                    // 而且每个标签要和它那一列对齐 —— 用等宽的列去铺。
-                    HStack(alignment: .top, spacing: gap) {
-                        ForEach(Array(grid.monthLabels.enumerated()), id: \.offset) { _, label in
-                            Text(label)
+                            // 标签和本周方格一起布局，空刻度也预留一行高度。
+                            let label = grid.monthLabels[index]
+                            Text(label.isEmpty ? " " : label)
                                 .scaledFont(10)
                                 .foregroundStyle(.secondary)
                                 .fixedSize()
                                 .frame(width: cell, alignment: .leading)
+                                .allowsHitTesting(false)
                         }
                     }
                 }
@@ -819,7 +1014,8 @@ struct ProfitHeatmap: View {
     @ViewBuilder
     private func cellView(for date: Date?, byDay: [String: ProfitDay]) -> some View {
         let shape = RoundedRectangle(cornerRadius: cell > 18 ? 5 : 3, style: .continuous)
-        if let date, let day = byDay[DateText.day(date)] {
+        // 「全部」范围最前面补的那个零点不是真的买过，不涂色
+        if let date, let day = byDay[DateText.day(date)], day.count > 0 {
             shape
                 .fill(color(for: day))
                 .frame(width: cell, height: cell)
@@ -832,11 +1028,11 @@ struct ProfitHeatmap: View {
         }
     }
 
-    /// 赚的日子偏红、亏的日子偏绿，浓度按 `intensity` 算。
-    /// 最低透明度留 0.30，否则小额那天几乎和空格子分不出来。
+    /// 当天有一注中奖就是红的，都没中就是绿的；深浅分三档，见 `HeatTone`。
     private func color(for day: ProfitDay) -> Color {
-        let level = 0.30 + 0.70 * intensity(for: day)
-        return (day.net >= 0 ? Palette.profit : Palette.loss).opacity(level)
+        let scales = HeatTone.scales(days)
+        let level = HeatTone.level(of: day, wins: scales.wins, losses: scales.losses)
+        return (HeatTone.isWin(day) ? Palette.profit : Palette.loss).opacity([0.4, 0.7, 1.0][level])
     }
 }
 
@@ -1034,6 +1230,8 @@ struct DrawCard: View {
     /// 这个彩种今天开奖。原来「今日开奖」是页面顶部单独一行标签，
     /// 和它描述的卡片隔得很远；写进卡片里既更省地方也更好懂。
     var opensToday: Bool = false
+    /// 今天这一期的开奖时刻。有它，「今日开奖」那枚标签里就多一段倒计时。
+    var drawsAt: Date? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: DrawCardMetrics.blockSpacing) {
@@ -1085,12 +1283,19 @@ struct DrawCard: View {
                 .foregroundStyle(game.accent.accentColor)
 
             if opensToday {
-                Text("今日开奖")
-                    .scaledFont(10, weight: .bold)
-                    .foregroundStyle(Palette.live)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Palette.live.opacity(0.14), in: Capsule())
+                // 倒计时写在原来那枚标签**里面**，不另起一行：卡片高度是八张卡共用的
+                // 定值，多一行会把号码和奖项挤出去。
+                //
+                // 每秒一跳只重画这枚标签（`TimelineView` 的作用域），不会把整张卡、
+                // 更不会把首页拖进每秒一次的重算。示例模式不走表：截图里出现
+                // 一个每秒都在变的数，参考图就永远对不上。
+                if let drawsAt, !DemoData.isEnabled {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        todayBadge(DrawCountdown.badge(until: drawsAt, now: context.date))
+                    }
+                } else {
+                    todayBadge("今日开奖")
+                }
             }
 
             Spacer(minLength: 6)
@@ -1105,6 +1310,34 @@ struct DrawCard: View {
         }
     }
 
+}
+
+extension DrawCard {
+    fileprivate func todayBadge(_ text: String) -> some View {
+        Text(text)
+            .scaledFont(10, weight: .bold)
+            .monospacedDigit()
+            .foregroundStyle(Palette.live)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Palette.live.opacity(0.14), in: Capsule())
+            .lineLimit(1)
+            .fixedSize()
+    }
+}
+
+/// 「今日开奖」标签上的倒计时文字。
+enum DrawCountdown {
+    /// 还没到点：`今日开奖 2:14:37`（不足一小时是 `14:37`）；到点之后只剩「今日开奖」。
+    static func badge(until drawsAt: Date, now: Date) -> String {
+        let left = Int(drawsAt.timeIntervalSince(now).rounded(.up))
+        guard left > 0 else { return "今日开奖" }
+        let hours = left / 3600, minutes = left / 60 % 60, seconds = left % 60
+        let clock = hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
+            : String(format: "%d:%02d", minutes, seconds)
+        return "今日开奖 \(clock)"
+    }
 }
 
 /// 卡片上那两行奖级挑谁。

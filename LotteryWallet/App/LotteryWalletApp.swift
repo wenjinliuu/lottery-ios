@@ -1,14 +1,19 @@
 import SwiftUI
 import SwiftData
+import UserNotifications
 import Observation
 
 @main
 struct LotteryWalletApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var drawStore = DrawStore()
     @State private var settings: AppSettings
     /// 数据库的健康状态。建库和它一起产生，见 `ModelStore`。
     @State private var storeHealth: StoreHealth
     @State private var backupCenter = BackupCenter()
+    #if DEBUG && targetEnvironment(simulator)
+    @State private var storeNotificationStatus = "请求系统通知权限"
+    #endif
     private let container: ModelContainer
 
     /// **建库不再用 `.modelContainer(for:)`。**
@@ -28,13 +33,28 @@ struct LotteryWalletApp: App {
         } else {
             container = ModelStore.makeContainer(health: health)
         }
+        // 开奖通知在后台把 App 叫起来时没有任何视图，数据库只能从这里拿。
+        // 示例模式的内存库不交出去：那里面是假票据。
+        if !DemoData.isEnabled && health.isHealthy { DrawPushCenter.shared.connectWallet(container) }
         _storeHealth = State(initialValue: health)
         _settings = State(initialValue: AppSettings())
     }
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            Group {
+                #if DEBUG && targetEnvironment(simulator)
+                if DemoData.isEnabled, ProcessInfo.processInfo.arguments.contains("--store-notification") {
+                    Text(storeNotificationStatus)
+                        .accessibilityIdentifier("store.notification.status")
+                        .task { await scheduleStoreNotifications() }
+                } else {
+                    RootView()
+                }
+                #else
+                RootView()
+                #endif
+            }
                 .environment(drawStore)
                 .environment(settings)
                 .environment(storeHealth)
@@ -44,6 +64,52 @@ struct LotteryWalletApp: App {
         }
         .modelContainer(container)
     }
+    #if DEBUG && targetEnvironment(simulator)
+    @MainActor
+    private func scheduleStoreNotifications() async {
+        let center = UNUserNotificationCenter.current()
+        do {
+            guard try await center.requestAuthorization(options: [.alert, .sound]) else {
+                storeNotificationStatus = "系统权限已关闭"
+                return
+            }
+        } catch {
+            storeNotificationStatus = error.localizedDescription
+            return
+        }
+        let examples: [(GameKey, String, String)] = [
+            (.pl5, "排列 5 26308 期开奖", "3 6 2 9 1"),
+            (.dlt, "大乐透 26132 期开奖", "02 09 16 26 35 + 06 11"),
+            (.ssq, "双色球 2026134 期开奖", "04 05 10 17 21 32 + 08")
+        ]
+        center.removeAllDeliveredNotifications()
+        do {
+            for (index, example) in examples.enumerated() {
+                let (game, title, numbers) = example
+                let raw = UNMutableNotificationContent()
+                raw.title = title
+                raw.body = numbers
+                var draw = Draw()
+                draw.gameKey = game
+                var summary = DrawNotificationStore.Summary()
+                summary.purchased = game == .pl5 ? 1 : 2
+                summary.cost = Double(summary.purchased * 2)
+                if game == .ssq {
+                    summary.winners = 1
+                    summary.prize = 5
+                }
+                guard let content = DrawPushPayload.personalizedContent(raw, draw: draw, summary: summary) else { return }
+                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: Double(5 + index), repeats: false)
+                try await center.add(UNNotificationRequest(identifier: "store-" + game.rawValue,
+                                                          content: content, trigger: trigger))
+            }
+            storeNotificationStatus = "已排程 3 条"
+        } catch {
+            storeNotificationStatus = error.localizedDescription
+            return
+        }
+    }
+    #endif
 }
 
 /// 用户偏好。全部落在 UserDefaults，和票据数据分开。

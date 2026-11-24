@@ -77,6 +77,8 @@ final class DrawStore {
 
     // MARK: - 数据
 
+    private(set) var resultsRevision = 0
+    var checkingWallet = false
     private(set) var draws: [Draw] = []
     /// 各彩种的开奖日程。V2 把它从每条开奖记录里挪了出来，一个彩种一份。
     private(set) var schedules: [GameKey: DrawSchedule] = [:]
@@ -266,12 +268,12 @@ final class DrawStore {
     }
 
     /// 加载某个彩种的某一年。**同一彩种同一年不会请求两次。**
-    func loadYear(for game: GameKey, year: Int) async {
+    func loadYear(for game: GameKey, year: Int, force: Bool = false) async {
         let state = yearState(for: game, year: year)
-        if state == .loaded || state == .loading { return }
+        if (!force && state == .loaded) || state == .loading { return }
         yearStates[game, default: [:]][year] = .loading
         do {
-            let loaded = try await repository.load(.yearDraws(game, year), as: LotteryV2.YearPayload.self)
+            let loaded = try await repository.load(.yearDraws(game, year), as: LotteryV2.YearPayload.self, forceRefresh: force)
             lastSource = loaded.source
             let converted = LotteryV2Mapper.draws(loaded.value.draws, game: game)
             merge(converted)
@@ -370,9 +372,18 @@ final class DrawStore {
     func merge(_ incoming: [Draw]) {
         guard !incoming.isEmpty else { return }
         var map = Dictionary(draws.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for draw in incoming where !draw.expect.isEmpty {
+        var changed = false
+        for var draw in incoming where !draw.expect.isEmpty {
+            let previous = map[draw.id]
+            if let previous, previous.drawValues == draw.drawValues, draw.prizeList.isEmpty {
+                draw.prizeList = previous.prizeList
+            }
+            guard previous != draw else { continue }
             map[draw.id] = draw
+            changed = true
         }
+        guard changed else { return }
+        resultsRevision &+= 1
         draws = map.values.sorted(by: Self.newerFirst)
         rebuildIndex()
     }
@@ -470,6 +481,11 @@ final class DrawStore {
     private func todayCalendarIssue(for game: GameKey, now: ChinaClock) -> CalendarIssue? {
         guard let year = Int(now.date.prefix(4)) else { return nil }
         return calendarIssues(for: game, year: year).first { $0.drawDate == now.date }
+    }
+
+    /// 今天这一期的开奖时刻。今天不开、或者日历还没到，返回 nil。
+    func todayDrawTime(for game: GameKey, now: ChinaClock = .now()) -> Date? {
+        todayCalendarIssue(for: game, now: now)?.drawsAt
     }
 
     func todayOpenGames(_ now: ChinaClock = .now()) -> [GameKey] {

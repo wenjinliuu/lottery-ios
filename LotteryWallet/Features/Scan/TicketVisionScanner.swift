@@ -23,6 +23,7 @@ enum TicketVisionScanner {
     /// 一次扫描的产物：识别结果 + 那张票裁切矫正后的正片。
     struct ScannedPage {
         var result = ScanResult()
+        var headerGame: GameKey?
         /// 按票的 id 存正片，复核和改号的时候贴出来。
         /// 一次只扫一张票，所以这些指向的是同一张图。
         var images: [ScannedTicket.ID: UIImage] = [:]
@@ -39,14 +40,40 @@ enum TicketVisionScanner {
     /// 找票、摆正这两步在这之前由 `TicketCropView` + `TicketImagePreprocessor`
     /// 完成，而且最终的框是用户点头的。到这里图已经是正的、放大过的，
     /// OCR 只需要认字。
-    static func scan(_ image: UIImage) async throws -> ScannedPage {
+    ///
+    /// - Parameter game: 用户在预识别页上自己指定的彩种（票头糊了、机器没认出来的时候）。
+    ///   给了就按它来认，不再从票面文字里猜。
+    static func scan(_ image: UIImage, game forced: GameKey? = nil, calendars: [Int: DrawCalendarYear] = [:]) async throws -> ScannedPage {
         var page = ScannedPage()
         let fragments = try await recognizeFragments(in: image)
         // **配准跑在识别前面。**
         //
         // 阶段 2 起，号码是摆到配准后的格子上去认的，所以基准得先定下来。
         // 阶段 1 时它跑在最后、只画给人看；现在它是号码那条路的入口。
-        let detected = TicketTextParser.detectGame(LayoutSegmenter.lines(fragments))
+        let text = LayoutSegmenter.lines(fragments)
+        let title = text.components(separatedBy: .newlines)
+            .prefix { !TicketTextParser.isSerialLine($0) && !$0.contains("期") }
+            .filter { !TicketTextParser.isSlogan($0) }
+            .joined(separator: "\n")
+        var welfare = TicketTextParser.hasWelfareIssuer(text)
+        var headerGame = welfare ? TicketTextParser.printedWelfareGame(text) : TicketTextParser.namedGame(title)
+        if forced == nil, !welfare, headerGame == nil, let cgImage = image.cgImage,
+           let label = TicketHeaderModel.shared?.classify(cgImage) {
+            welfare = label == .welfare
+            headerGame = label.identifiesGame(in: text)
+        }
+        page.headerGame = headerGame
+        let calendarGame = forced == nil && !welfare && headerGame == nil ? TicketTextParser.calendarGame(text, calendars: calendars) : nil
+        var selected = forced ?? headerGame ?? calendarGame ?? (welfare ? nil : TicketTextParser.detectGame(text, guess: false))
+        var sevenStarsReading: ModelRowReader.Reading?
+        if !welfare, selected == nil, let classifier = DigitClassifier.shared,
+           let reading = ModelRowReader.read(image: image, fragments: fragments, game: .qxc, classifier: classifier),
+           ModelFusion.matchesSevenStars(rows: reading.rows, text: text) {
+            selected = .qxc
+            sevenStarsReading = reading
+        }
+        let detected = selected ?? (welfare ? nil : TicketTextParser.detectGame(text))
+        let parseGame = sevenStarsReading == nil ? (forced ?? headerGame ?? calendarGame) : GameKey.qxc
         var registration = await TicketRegistration.run(image: image,
                                                         fragments: fragments,
                                                         game: detected)
@@ -62,7 +89,7 @@ enum TicketVisionScanner {
         //
         // 现在整块文本一起交给解析器，同一张纸上连着打两张票的情况
         // 由 `splitBlocks` 按「玩法:」这类票头来切，那是按内容切的，不会误伤。
-        let merged = await mergedText(image: image, base: fragments, frame: registration.frame)
+        let merged = await mergedText(image: image, base: fragments, frame: registration.frame, game: detected)
         // 划出来的格子画到调试图上，盖掉阶段 1 那版"墨迹自己切出来的段" ——
         // 现在画的是真正拿去认号码的那些格子，位置对不对一眼就看得出来。
         if let grid = merged.grid, let frame = registration.frame {
@@ -73,18 +100,99 @@ enum TicketVisionScanner {
         // 「退回老路」和「新路读错」在识别结果上长得一模一样，没有这一句
         // 就只能对着号码猜 —— 上一轮我就猜错了两次。
         if let note = merged.note { registration.debug.notes.append(note) }
-        var result = TicketTextParser.parse(merged.text)
+        func parseReading(_ reading: String) -> ScanResult {
+            if welfare && parseGame == nil {
+                guard let game = TicketTextParser.printedWelfareGame(reading) else {
+                    return ScanResult(rawText: reading, warnings: TicketTextParser.summary(for: []))
+                }
+                return TicketTextParser.parse(reading, game: game)
+            }
+            return TicketTextParser.parse(reading, game: parseGame)
+        }
+        var result = parseReading(merged.text)
         if result.tickets.isEmpty {
             // 再放大一遍重试。裁切之后还认不出，多半是原图本身就糊。
             if let bigger = upscaled(image, factor: 1.6),
                let retry = try? await recognizeFragments(in: bigger) {
-                let second = TicketTextParser.parse(LayoutSegmenter.lines(retry))
+                let second = parseReading(LayoutSegmenter.lines(retry))
                 if !second.tickets.isEmpty { result = second }
+            }
+        }
+        // **第二个读数**：自己训练的模型把号码区一行一行读一遍，和上面的结果逐个号码对。
+        // 一致的留下、不一致的标问号、Vision 没认出来而模型有把握的补上 —— 见 `ModelFusion`。
+        // 号码区夹不出来、模型没加载、照片里不止一张票时整段跳过，结果和没有这一步时一样。
+        // 手选的数字票即使文字层没读出一行，也保留在复核页，让模型有机会重建。
+        let needsModelRecovery = result.tickets.isEmpty
+        if needsModelRecovery, let game = selected,
+           [.qxc, .pl5].contains(game) {
+            var ticket = ScannedTicket(game: game)
+            ticket.issue = TicketTextParser.extractIssue(text, game: game)
+            ticket.totalAmount = TicketTextParser.extractTotal(text)
+            ticket.drawDate = TicketTextParser.extractDrawDate(text)
+            ticket.multiple = TicketTextParser.extractMultiple(text) ?? 1
+            result.tickets = [ticket]
+            result.warnings = []
+        }
+        if result.tickets.count == 1, let classifier = DigitClassifier.shared {
+            let beforeRecovery = result.tickets[0].unknownCount
+            var recoveredCells = 0
+            var searchStrip: CGRect?
+            var recoveryNotes: [String] = []
+            if let reading = sevenStarsReading ?? ModelRowReader.read(image: image, fragments: fragments,
+                                                 game: result.tickets[0].game, classifier: classifier) {
+                let report = ModelFusion.fuse(&result.tickets[0], rows: reading.rows)
+                registration.debug.notes.append(report.note)
+                // 模型读到的每一行附在识别原文后面。两个读数都摆出来，哪一步出的岔子才看得出来。
+                if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
+                result.rawText += "\n\n［模型读行］\(report.note.replacingOccurrences(of: "模型读行：", with: ""))\n"
+                    + ModelFusion.describe(reading.rows)
+                if let source = image.cgImage {
+                    searchStrip = reading.zone
+                    recoveredCells = PrintedDigitRecovery.fill(&result.tickets[0], image: source, zone: reading.zone) {
+                        recoveryNotes.append("文字区 " + $0)
+                    }
+                }
+            } else {
+                registration.debug.notes.append("模型读行：号码区没夹出来，这次没有复核")
+                if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
+                result.rawText += "\n\n［模型读行］号码区没夹出来，这次没有复核"
+            }
+            // A split OCR serial or total line can clip the original search strip.
+            // Registration uses the printed geometry and supplies a second, rectified crop.
+            let remaining = result.tickets[0]
+            if remaining.play == .single, [.qxc, .pl5].contains(remaining.game),
+               remaining.unknownCount > 0 {
+                if let zone = registration.rectified?.cgImage {
+                    recoveredCells += PrintedDigitRecovery.fill(&result.tickets[0], image: zone,
+                                                                zone: CGRect(x: 0, y: 0, width: 1, height: 1), maximumWidth: 576) {
+                        recoveryNotes.append("矫正区 " + $0)
+                    }
+                }
+                if result.tickets[0].unknownCount > 0, let strip = searchStrip, let source = image.cgImage {
+                    // Keep the printed header/footer anchors while including columns lost
+                    // when the serial above the bets was split into separate OCR boxes.
+                    let margin = strip.height * 0.20
+                    let wide = CGRect(x: 0.035, y: strip.minY - margin, width: 0.93, height: strip.height + margin * 2)
+                        .intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+                    recoveredCells += PrintedDigitRecovery.fill(&result.tickets[0], image: source, zone: wide, maximumWidth: 672) {
+                        recoveryNotes.append("扩展区 " + $0)
+                    }
+                }
+            }
+            if [.qxc, .pl5].contains(remaining.game), beforeRecovery > 0 || remaining.unknownCount > 0 || recoveredCells > 0 {
+                result.rawText += "\n［逐格复核］补上 \(recoveredCells) 位，剩余 \(result.tickets[0].unknownCount) 位"
+                if !recoveryNotes.isEmpty { result.rawText += "\n" + recoveryNotes.joined(separator: "；") }
             }
         }
         // 一个字都没认出来和「认出字但拼不成票」是两回事，
         // 复核页要能把原文摆出来，否则用户只能干瞪眼。
         if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
+        if needsModelRecovery {
+            if forced == nil && headerGame != .qxc && calendarGame == nil {
+                result.tickets.removeAll { !$0.isUsable }
+            }
+            result.warnings = TicketTextParser.summary(for: result.tickets)
+        }
         page.result = result
         // 复核页每张票下面贴的那张图，裁到**有字的那一块**再给出去。
         //
@@ -125,11 +233,11 @@ enum TicketVisionScanner {
     }
 
     static func mergedText(image: UIImage, base: [TextFragment],
-                          frame: TicketFrame? = nil) async -> DigitPass {
+                          frame: TicketFrame? = nil, game selectedGame: GameKey? = nil) async -> DigitPass {
         let baseRows = LayoutSegmenter.rows(base)
         let originals = baseRows.map(LayoutSegmenter.join)
         // 彩种要先认出来，二次识别的结果才有得校验 —— 见 `isImprovement`。
-        let game = TicketTextParser.detectGame(originals.joined(separator: "\n"))
+        let game = selectedGame ?? TicketTextParser.detectGame(originals.joined(separator: "\n"))
         // 数字型彩种先走矩阵重建。它**整段接管**号码区，因为对这些票来说
         // Vision 的分行结果本身就是错的（它按竖列读），基于它再修修补补没有意义。
         if let game, let layout = DigitTicketLayout.of(game) {
@@ -795,7 +903,8 @@ enum TicketVisionScanner {
     }
 
     static func recognizeFragments(in image: UIImage,
-                                   languages: [String] = ["zh-Hans", "en-US"]) async throws -> [TextFragment] {
+                                   languages: [String] = ["zh-Hans", "en-US"],
+                                   minimumTextHeight: Float = 0.008) async throws -> [TextFragment] {
         guard let cgImage = image.cgImage else { throw ScanError.invalidImage }
         let orientation = cgOrientation(image.imageOrientation)
 
@@ -806,7 +915,7 @@ enum TicketVisionScanner {
             request.recognitionLanguages = languages
             // 彩票号码不是自然语言，语言纠正只会把号码改坏
             request.usesLanguageCorrection = false
-            request.minimumTextHeight = 0.008
+            request.minimumTextHeight = minimumTextHeight
 
             let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation)
             try handler.perform([request])
