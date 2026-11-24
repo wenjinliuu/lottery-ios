@@ -120,7 +120,12 @@ final class KeyFlowTests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.9))
         capture("home-jar-shaking")
 
-        style.buttons.element(boundBy: 2).tap()
+        let gridButton = style.buttons.element(boundBy: 2)
+        gridButton.tap()
+        if !gridButton.isSelected {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+            gridButton.tap()
+        }
         let heatmap = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label BEGINSWITH %@", "逐日收支方格图")).firstMatch
         XCTAssertTrue(heatmap.waitForExistence(timeout: 10))

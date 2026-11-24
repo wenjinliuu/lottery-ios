@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 import UserNotifications
 import Observation
 
@@ -67,24 +68,34 @@ struct LotteryWalletApp: App {
     #if DEBUG && targetEnvironment(simulator)
     @MainActor
     private func scheduleStoreNotifications() async {
+        // 等 App 窗口真正进入 active 并完成首帧展示再弹系统权限框，
+        // 避免 iOS 模拟器在 scene 激活前调用 requestAuthorization 导致弹窗丢失、异步永久挂起。
+        for _ in 0..<20 where UIApplication.shared.applicationState != .active {
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+        try? await Task.sleep(for: .milliseconds(600))
         let center = UNUserNotificationCenter.current()
         do {
-            guard try await center.requestAuthorization(options: [.alert, .sound]) else {
-                storeNotificationStatus = "系统权限已关闭"
-                return
+            let existing = await center.notificationSettings()
+            if existing.authorizationStatus != .authorized && existing.authorizationStatus != .provisional {
+                guard try await center.requestAuthorization(options: [.alert, .sound]) else {
+                    storeNotificationStatus = "系统权限已关闭"
+                    return
+                }
             }
         } catch {
             storeNotificationStatus = error.localizedDescription
             return
         }
-        // iOS 27 模拟器点完「允许」后 usernoted 偶尔滞后数秒才把授权写入通知仓库，
-        // 立刻调 add() 会抛 Source is not authorized，这里确认状态并做重试。
-        for _ in 0..<10 {
+        storeNotificationStatus = "已授权，等待排程"
+        // iOS 27 模拟器点完「允许」后 usernoted 偶尔滞后才把授权写入通知仓库，
+        // 立刻调 add() 会抛 Source is not authorized，这里确认状态并做纯重试。
+        for _ in 0..<12 {
             let settings = await center.notificationSettings()
             if settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional {
                 break
             }
-            try? await Task.sleep(for: .milliseconds(400))
+            try? await Task.sleep(for: .milliseconds(350))
         }
         try? await Task.sleep(for: .milliseconds(500))
         let examples: [(GameKey, String, String)] = [
@@ -113,16 +124,15 @@ struct LotteryWalletApp: App {
                 let request = UNNotificationRequest(identifier: "store-" + game.rawValue,
                                                     content: content, trigger: trigger)
                 var lastError: Error?
-                for attempt in 0..<12 {
+                for attempt in 0..<10 {
                     do {
                         try await center.add(request)
                         lastError = nil
                         break
                     } catch {
                         lastError = error
-                        if attempt < 11 {
-                            _ = try? await center.requestAuthorization(options: [.alert, .sound])
-                            try? await Task.sleep(for: .milliseconds(750))
+                        if attempt < 9 {
+                            try? await Task.sleep(for: .milliseconds(600))
                         }
                     }
                 }
