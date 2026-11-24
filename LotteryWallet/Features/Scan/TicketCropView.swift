@@ -50,6 +50,7 @@ struct TicketCropView: View {
             footer
         }
         .background(Color.black)
+        .environment(\.colorScheme, .dark)
         .task {
             // 检测只是给个起点，慢一点也没关系；拿不到就用默认的内缩框
             if let suggestion = await TicketImagePreprocessor.suggestedQuad(in: image) {

@@ -65,6 +65,7 @@ struct TicketLocateView: View {
             footer
         }
         .background(Color.black)
+        .environment(\.colorScheme, .dark)
         .onAppear {
             // 只有一个框的时候直接选中它，四个角马上能拖
             if marks.count == 1 { selected = marks.first?.id }

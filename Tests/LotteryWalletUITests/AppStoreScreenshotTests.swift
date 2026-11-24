@@ -86,6 +86,7 @@ final class AppStoreScreenshotTests: XCTestCase {
         XCTAssertTrue(scan.waitForExistence(timeout: 15))
         scan.tap()
         XCTAssertTrue(app.staticTexts["找到 2 张票"].waitForExistence(timeout: 90))
+        settle(2)
         for title in ["大乐透", "双色球"] {
             let mark = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label ENDSWITH %@", "第 ", "张票，" + title)).firstMatch
             guard mark.waitForExistence(timeout: 90) else {
@@ -116,15 +117,18 @@ final class AppStoreScreenshotTests: XCTestCase {
         let status = app.staticTexts["store.notification.status"]
         let allowAlert = board.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
         let allowButton = board.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
-        let deadline = Date().addingTimeInterval(45)
+        let deadline = Date().addingTimeInterval(60)
         while Date() < deadline {
             if allowAlert.exists { allowAlert.tap() }
             else if allowButton.exists && allowButton.isHittable { allowButton.tap() }
             if status.exists, status.label == "已排程 3 条" { break }
-            settle(0.3)
+            settle(0.4)
         }
         guard status.exists, status.label == "已排程 3 条" else {
-            capture("notification-permission-failure")
+            let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            evidence.name = "notification-permission-failure"
+            evidence.lifetime = .keepAlways
+            add(evidence)
             XCTFail("系统排程状态：" + (status.exists ? status.label : app.debugDescription))
             return
         }
@@ -162,7 +166,6 @@ final class AppStoreScreenshotTests: XCTestCase {
             }
             settle(0.5)
         }
-        capture("notification-visible-failure")
         let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         evidence.name = "notification-center-failure"
         evidence.lifetime = .keepAlways
