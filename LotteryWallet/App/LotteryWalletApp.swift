@@ -74,11 +74,15 @@ struct LotteryWalletApp: App {
             try? await Task.sleep(for: .milliseconds(150))
         }
         try? await Task.sleep(for: .milliseconds(450))
+        let allowProvisional = ProcessInfo.processInfo.arguments.contains("--store-notification-provisional")
+        let authOptions: UNAuthorizationOptions = allowProvisional ? [.alert, .sound, .provisional] : [.alert, .sound]
         let center = UNUserNotificationCenter.current()
         do {
             let existing = await center.notificationSettings()
-            if existing.authorizationStatus != .authorized {
-                guard try await center.requestAuthorization(options: [.alert, .sound]) else {
+            let alreadyAuthorized = existing.authorizationStatus == .authorized
+                || (allowProvisional && existing.authorizationStatus == .provisional)
+            if allowProvisional || !alreadyAuthorized {
+                guard try await center.requestAuthorization(options: authOptions) else {
                     storeNotificationStatus = "系统权限已关闭"
                     return
                 }
@@ -92,7 +96,8 @@ struct LotteryWalletApp: App {
         // 立刻调 add() 会抛 Source is not authorized，这里确认状态并做短暂重试。
         for _ in 0..<8 {
             let settings = await center.notificationSettings()
-            if settings.authorizationStatus == .authorized {
+            if settings.authorizationStatus == .authorized
+                || (allowProvisional && settings.authorizationStatus == .provisional) {
                 break
             }
             try? await Task.sleep(for: .milliseconds(300))
@@ -131,7 +136,7 @@ struct LotteryWalletApp: App {
                     } catch {
                         lastError = error
                         if attempt == 1 {
-                            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+                            _ = try? await center.requestAuthorization(options: authOptions)
                         }
                         if attempt < 4 {
                             try? await Task.sleep(for: .milliseconds(450))
