@@ -27,8 +27,9 @@ final class AccessibilityAuditTests: XCTestCase {
         case "设置": id = "dock.tab.settings"
         default: id = tab
         }
-        let button = app.buttons[id].firstMatch
-        XCTAssertTrue(button.waitForExistence(timeout: 10), "找不到标签：\(tab)")
+        let segmented = app.segmentedControls["dock.tabs"].buttons[tab]
+        let button = segmented.waitForExistence(timeout: 8) ? segmented : app.buttons[id].firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 8), "找不到标签：\(tab)")
         button.tap()
         try app.performAccessibilityAudit()
     }
