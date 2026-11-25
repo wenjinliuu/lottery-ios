@@ -64,17 +64,29 @@ struct HomeView: View {
     @State private var todayDrawTimes: [GameKey: Date] = [:]
     @State private var pendingGames: [GameKey] = []
     @State private var carouselGames: [GameKey] = GameKey.ordered
-    /// 量出来的可用宽度。量到之前用起手值，见 `HomeLayout.fallbackScreenWidth`。
+    /// 量出来的可用宽度与可见高度。量到之前用起手值，见 `HomeLayout.fallbackScreenWidth`。
     @State private var measuredWidth: CGFloat?
+    @State private var measuredHeight: CGFloat?
 
     private var screenWidth: CGFloat { measuredWidth ?? HomeLayout.fallbackScreenWidth }
+
+    /// 按屏幕可见高度自适应玻璃球罐高度，保证默认一屏内「最新开奖」完整卡片、免责提示与轮播状态圆点
+    /// 全部清透露在底部悬浮导航栏之上，既不遮挡又保持球罐充盈主角感。
+    private var adaptiveJarHeight: CGFloat {
+        guard let viewportHeight = measuredHeight, viewportHeight > 0 else {
+            return BallJarView.defaultHeight
+        }
+        // 底部悬浮栏与留白（~74pt）+ 非球罐区内容（收支头、指标、开奖头/卡/免责/状态点 ≈ 436pt）
+        let target = (viewportHeight - 510).rounded(.down)
+        return min(BallJarView.maxHeight, max(BallJarView.minHeight, target))
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 // 外层不再整体加 `.padding(.horizontal, 16)`：
                 // 最新开奖轮播需要整屏宽轨道才能平滑滑到手机物理边缘，不被 16pt 隐形边界截断。
-                VStack(spacing: 22) {
+                VStack(spacing: 14) {
                     heroSection
                         .padding(.horizontal, HomeLayout.pagePadding)
 
@@ -88,7 +100,7 @@ struct HomeView: View {
                             .padding(.horizontal, HomeLayout.pagePadding)
                     }
                 }
-                .padding(.top, 6)
+                .padding(.top, 2)
                 .padding(.bottom, 112)
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
@@ -97,9 +109,14 @@ struct HomeView: View {
             // `GeometryReader` 的贪心尺寸带进内容，也动不到导航栏的行为。
             .background(
                 GeometryReader { proxy in
+                    let usableHeight = proxy.size.height - proxy.safeAreaInsets.bottom
                     Color.clear
-                        .onAppear { measuredWidth = proxy.size.width }
+                        .onAppear {
+                            measuredWidth = proxy.size.width
+                            measuredHeight = usableHeight
+                        }
                         .onChange(of: proxy.size.width) { _, width in measuredWidth = width }
+                        .onChange(of: usableHeight) { _, height in measuredHeight = height }
                 }
             )
             .navigationTitle("首页")
@@ -280,8 +297,8 @@ struct HomeView: View {
     /// 下方承接独立放大的玻璃球罐（或可切换的曲线/方格轻雾卡）。
     private var heroSection: some View {
         let showsSteppers = range == .month || range == .year
-        return VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     HStack(spacing: 4) {
                         Text("累计收支")
@@ -342,8 +359,8 @@ struct HomeView: View {
                 HStack(alignment: .center, spacing: 8) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         Text(MoneyText.grouped(series.netTotal))
-                            .font(.system(size: 48, weight: .bold, design: .rounded))
-                            .tracking(-1.2)
+                            .font(.system(size: 42, weight: .bold, design: .rounded))
+                            .tracking(-1.0)
                             .monospacedDigit()
                             .contentTransition(.numericText())
                         Text("元")
@@ -378,7 +395,7 @@ struct HomeView: View {
 
             Group {
                 if chartStyle == HomeChartStyle.jar.rawValue {
-                    BallJarView(jar: jar, periodLabel: periodLabel)
+                    BallJarView(jar: jar, periodLabel: periodLabel, height: adaptiveJarHeight)
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else if chartStyle == HomeChartStyle.grid.rawValue {
                     VStack(alignment: .leading, spacing: 10) {
@@ -429,7 +446,7 @@ struct HomeView: View {
     }
 
     private var chartTotals: some View {
-        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 6) {
+        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 4) {
             GridRow {
                 metricDotStat("返奖率", returnRateText, dot: Palette.profit,
                               tint: series.prizeTotal > 0 ? Palette.profit : .secondary)
@@ -485,7 +502,7 @@ struct HomeView: View {
     // MARK: - 最新开奖（全宽轨道无裁切 + 彩种微染卡面）
 
     private var latestDrawSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             SectionHeader(
                 title: "最新开奖",
                 subtitle: drawStore.latestUpdatedAt.isEmpty
@@ -505,7 +522,7 @@ struct HomeView: View {
                              opensToday: todayGames.contains(game),
                              drawsAt: todayDrawTimes[game])
                         .padding(.horizontal, HomeLayout.carouselPagePadding)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 2)
                         .tag(page)
                 }
             }
@@ -521,8 +538,8 @@ struct HomeView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .animation(.easeInOut(duration: 0.45), value: pageIndex)
-            // 卡片去掉外层灰影后不再需要 20pt 阴影缓冲，收紧留白让下方彩种投入分布自然露出。
-            .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: screenWidth) + 8)
+            // 卡片去掉外层灰影后不再需要阴影缓冲，收紧留白让免责提示与状态圆点完整露在底栏上方。
+            .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: screenWidth) + 4)
             .accessibilityHint("左右滑动查看其他彩种的最新开奖")
             .task(id: carouselGames.count) { await runAutoScroll() }
 
@@ -994,13 +1011,13 @@ enum DrawCardMetrics {
     static let sectionGap: CGFloat = 0.24
     static let lineGap: CGFloat = 0.22
     static let horizontalPadding: CGFloat = 16
-    static let verticalPadding: CGFloat = 14
+    static let verticalPadding: CGFloat = 12
     static let cornerRadius: CGFloat = 22
     static let k8PerRow = 10
 
     static let headerHeight: CGFloat = 22
     static let prizeRowHeight: CGFloat = 17
-    static let blockSpacing: CGFloat = 8
+    static let blockSpacing: CGFloat = 6
 
     static func layout(for draw: Draw) -> (balls: Int, sections: Int) {
         var balls = 0

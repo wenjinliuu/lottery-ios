@@ -5,6 +5,7 @@ import SwiftUI
 struct BallJarView: View {
     let jar: JarBuilder.Jar
     let periodLabel: String
+    var height: CGFloat = BallJarView.defaultHeight
 
     @State private var scene = JarScene()
     @State private var size = CGSize.zero
@@ -20,18 +21,21 @@ struct BallJarView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
 
-    static let height: CGFloat = 286
-    private static let corner: CGFloat = 30
+    static let height: CGFloat = 220
+    static let defaultHeight: CGFloat = 220
+    static let minHeight: CGFloat = 180
+    static let maxHeight: CGFloat = 236
+    private static let corner: CGFloat = 28
     private static let frameWidth: CGFloat = 7
     private var isActive: Bool { isVisible && scenePhase == .active && jar.hits > 0 }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Self.corner, style: .continuous)
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 7) {
             jarHeaderBar
 
             JarBallLayer(scene: scene)
-                .frame(height: Self.height)
+                .frame(height: height)
                 .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
                 // 罐内完全透明，直接透出 App 主画布，只保留清透玻璃边框与罐口镜面高光。
                 .background(Color.clear)
@@ -197,11 +201,11 @@ struct BallJarView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .frame(minHeight: 36)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .frame(minHeight: 32)
                     .glassPill(interactive: jar.hits > 0)
-                    .contentShape(Rectangle().inset(by: -4))
+                    .contentShape(Rectangle().inset(by: -6))
                 }
                 .buttonStyle(PressableIcon())
                 .disabled(jar.hits == 0)
@@ -224,11 +228,11 @@ struct BallJarView: View {
                     Label("摇一摇", systemImage: "wind")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(jar.hits > 0 ? Color.accentColor : Color.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .frame(minHeight: 36)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .frame(minHeight: 32)
                         .glassPill(tint: jar.hits > 0 ? Color.accentColor : nil, interactive: jar.hits > 0)
-                        .contentShape(Rectangle().inset(by: -4))
+                        .contentShape(Rectangle().inset(by: -6))
                 }
                 .buttonStyle(PressableIcon())
                 .disabled(jar.hits == 0)

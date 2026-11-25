@@ -213,57 +213,23 @@ final class AppStoreScreenshotTests: XCTestCase {
 
     // MARK: - 工具
 
-    /// 通过模拟器系统「设置 → 通知 → 对个号」切换一次「允许通知」，
+    /// 通过 `UIApplication.openNotificationSettingsURLString` 直达「设置 → 对个号 → 通知」并切换一次「允许通知」，
     /// 强制 BBSettingsGateway 写入 usernoted 通知仓库，绕过 iOS 模拟器偶发的 auth=2 授权未落盘竞态。
     private func enableNotificationsInSettings() {
         let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
         settings.terminate()
-        settle(0.5)
-        settings.launch()
-        settle(1.2)
+        settle(0.4)
 
-        let notifPredicate = NSPredicate(format: "label IN %@", ["Notifications", "通知"])
-        func findInSettings(_ predicate: NSPredicate) -> XCUIElement? {
-            let candidates: [XCUIElement] = [
-                settings.buttons.matching(predicate).firstMatch,
-                settings.cells.matching(predicate).firstMatch,
-                settings.staticTexts.matching(predicate).firstMatch
-            ]
-            return candidates.first(where: { $0.exists && $0.isHittable })
-                ?? candidates.first(where: { $0.exists })
-        }
-
-        var notifRow = findInSettings(notifPredicate)
-        for _ in 0..<4 where notifRow == nil {
-            settings.swipeUp()
-            settle(0.4)
-            notifRow = findInSettings(notifPredicate)
-        }
-        guard let notifRow else {
-            settings.terminate()
-            return
-        }
-        notifRow.tap()
+        let jumper = XCUIApplication()
+        jumper.launchArguments = ["--demo-data", "--open-notification-settings"]
+        jumper.launch()
+        _ = settings.wait(for: .runningForeground, timeout: 8)
         settle(1.0)
-
-        let appPredicate = NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "对个号", "LotteryWallet")
-        var appRow = findInSettings(appPredicate)
-        for _ in 0..<14 where appRow == nil || !(appRow?.isHittable ?? false) {
-            settings.swipeUp()
-            settle(0.4)
-            appRow = findInSettings(appPredicate)
-        }
-        guard let appRow else {
-            settings.terminate()
-            return
-        }
-        appRow.tap()
-        settle(0.8)
 
         let allowToggle = settings.switches
             .matching(NSPredicate(format: "label IN %@", ["Allow Notifications", "允许通知"]))
             .firstMatch
-        let toggle = allowToggle.waitForExistence(timeout: 4) ? allowToggle : settings.switches.firstMatch
+        let toggle = allowToggle.waitForExistence(timeout: 5) ? allowToggle : settings.switches.firstMatch
         if toggle.exists || toggle.waitForExistence(timeout: 3) {
             if (toggle.value as? String) == "1" {
                 toggle.tap()
@@ -272,9 +238,10 @@ final class AppStoreScreenshotTests: XCTestCase {
             } else {
                 toggle.tap()
             }
-            settle(1.0)
+            settle(1.2)
         }
         settings.terminate()
+        jumper.terminate()
     }
 
     private func open(tab: String) {

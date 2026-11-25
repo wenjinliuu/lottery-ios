@@ -45,7 +45,15 @@ struct LotteryWalletApp: App {
         WindowGroup {
             Group {
                 #if DEBUG && targetEnvironment(simulator)
-                if DemoData.isEnabled, ProcessInfo.processInfo.arguments.contains("--store-notification") {
+                if DemoData.isEnabled, ProcessInfo.processInfo.arguments.contains("--open-notification-settings") {
+                    Text("跳转系统通知设置")
+                        .task {
+                            try? await Task.sleep(for: .milliseconds(350))
+                            if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+                                await UIApplication.shared.open(url)
+                            }
+                        }
+                } else if DemoData.isEnabled, ProcessInfo.processInfo.arguments.contains("--store-notification") {
                     Text(storeNotificationStatus)
                         .accessibilityIdentifier("store.notification.status")
                         .task { await scheduleStoreNotifications() }
