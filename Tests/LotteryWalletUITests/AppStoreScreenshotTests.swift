@@ -152,8 +152,8 @@ final class AppStoreScreenshotTests: XCTestCase {
         if !scheduled {
             app.terminate()
             enableNotificationsInSettings()
-            settle(1.2)
-            scheduled = runSchedulingPass(timeout: 18)
+            settle(2.0)
+            scheduled = runSchedulingPass(timeout: 22)
         }
         if !scheduled {
             app.terminate()
@@ -229,29 +229,66 @@ final class AppStoreScreenshotTests: XCTestCase {
         let allowToggle = settings.switches
             .matching(NSPredicate(format: "label IN %@", ["Allow Notifications", "允许通知"]))
             .firstMatch
-        if !allowToggle.waitForExistence(timeout: 2) && !settings.switches.firstMatch.exists {
-            // 部分模拟器版本会停在「对个号」应用设置首页，点进里面的「Notifications / 通知」子页再切开关。
+
+        func findListRow(_ predicate: NSPredicate) -> XCUIElement? {
+            let candidates: [XCUIElement] = [
+                settings.cells.matching(predicate).firstMatch,
+                settings.tables.buttons.matching(predicate).firstMatch,
+                settings.collectionViews.buttons.matching(predicate).firstMatch,
+                settings.tables.staticTexts.matching(predicate).firstMatch,
+                settings.collectionViews.staticTexts.matching(predicate).firstMatch
+            ]
+            return candidates.first(where: { $0.exists && $0.isHittable })
+                ?? candidates.first(where: { $0.exists })
+        }
+
+        if !allowToggle.waitForExistence(timeout: 2.5) {
+            // 部分模拟器版本会停在「对个号」应用设置首页（其上已有其它开关）或「设置」根目录，
+            // 不能用 switches.firstMatch 替代判断，必须明确进入「Notifications / 通知」子页。
             let notifPredicate = NSPredicate(format: "label IN %@", ["Notifications", "通知"])
-            let notifRow = [
-                settings.buttons.matching(notifPredicate).firstMatch,
-                settings.cells.matching(notifPredicate).firstMatch,
-                settings.staticTexts.matching(notifPredicate).firstMatch
-            ].first(where: { $0.exists })
+            var notifRow = findListRow(notifPredicate)
+            for _ in 0..<4 where notifRow == nil {
+                settings.swipeUp()
+                settle(0.4)
+                notifRow = findListRow(notifPredicate)
+            }
             if let notifRow {
                 notifRow.tap()
-                settle(1.0)
+                settle(1.2)
             }
         }
-        let toggle = allowToggle.waitForExistence(timeout: 4) ? allowToggle : settings.switches.firstMatch
-        if toggle.exists || toggle.waitForExistence(timeout: 3) {
+
+        if !allowToggle.waitForExistence(timeout: 2.5) {
+            // 若是从「设置」根目录进入了全局「通知」列表，继续找到「对个号 / LotteryWallet」子项。
+            let appPredicate = NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "对个号", "LotteryWallet")
+            var appRow = findListRow(appPredicate)
+            for _ in 0..<14 where appRow == nil || !(appRow?.isHittable ?? false) {
+                settings.swipeUp()
+                settle(0.4)
+                appRow = findListRow(appPredicate)
+            }
+            if let appRow {
+                appRow.tap()
+                settle(1.2)
+            }
+        }
+
+        let inNotificationPage = settings.navigationBars
+            .matching(NSPredicate(format: "identifier IN %@ OR label IN %@", ["Notifications", "通知"], ["Notifications", "通知"]))
+            .firstMatch.exists
+        let toggle: XCUIElement? = allowToggle.waitForExistence(timeout: 4)
+            ? allowToggle
+            : (inNotificationPage && settings.switches.firstMatch.exists ? settings.switches.firstMatch : nil)
+
+        if let toggle {
             if (toggle.value as? String) == "1" {
                 toggle.tap()
-                settle(0.8)
+                settle(1.2)
                 toggle.tap()
             } else {
                 toggle.tap()
             }
-            settle(1.2)
+            settle(2.0)
         }
         settings.terminate()
         jumper.terminate()

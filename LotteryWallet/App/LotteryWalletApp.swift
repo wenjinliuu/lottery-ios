@@ -85,6 +85,7 @@ struct LotteryWalletApp: App {
         let allowProvisional = ProcessInfo.processInfo.arguments.contains("--store-notification-provisional")
         let authOptions: UNAuthorizationOptions = allowProvisional ? [.alert, .sound, .provisional] : [.alert, .sound]
         let center = UNUserNotificationCenter.current()
+        var freshlyAuthorized = false
         do {
             let existing = await center.notificationSettings()
             let alreadyAuthorized = existing.authorizationStatus == .authorized
@@ -94,6 +95,7 @@ struct LotteryWalletApp: App {
                     storeNotificationStatus = "系统权限已关闭"
                     return
                 }
+                freshlyAuthorized = true
             }
         } catch {
             storeNotificationStatus = "排程失败：\(error.localizedDescription)"
@@ -101,7 +103,7 @@ struct LotteryWalletApp: App {
         }
         storeNotificationStatus = "已授权，等待排程"
         // iOS 27 模拟器点完「允许」后 usernoted 偶尔滞后才把授权写入通知仓库，
-        // 立刻调 add() 会抛 Source is not authorized，这里确认状态并做短暂重试。
+        // 立刻调 add() 会抛 Source is not authorized，这里确认状态并给仓库落盘留出缓冲。
         for _ in 0..<8 {
             let settings = await center.notificationSettings()
             if settings.authorizationStatus == .authorized
@@ -109,6 +111,9 @@ struct LotteryWalletApp: App {
                 break
             }
             try? await Task.sleep(for: .milliseconds(300))
+        }
+        if freshlyAuthorized {
+            try? await Task.sleep(for: .milliseconds(1000))
         }
         let examples: [(GameKey, String, String)] = [
             (.pl5, "排列 5 26308 期开奖", "3 6 2 9 1"),
@@ -136,18 +141,18 @@ struct LotteryWalletApp: App {
                 let request = UNNotificationRequest(identifier: "store-" + game.rawValue,
                                                     content: content, trigger: trigger)
                 var lastError: Error?
-                for attempt in 0..<5 {
+                for attempt in 0..<6 {
                     do {
                         try await center.add(request)
                         lastError = nil
                         break
                     } catch {
                         lastError = error
-                        if attempt == 1 {
+                        if attempt == 2 {
                             _ = try? await center.requestAuthorization(options: authOptions)
                         }
-                        if attempt < 4 {
-                            try? await Task.sleep(for: .milliseconds(450))
+                        if attempt < 5 {
+                            try? await Task.sleep(for: .milliseconds(700))
                         }
                     }
                 }
