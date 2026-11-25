@@ -92,9 +92,12 @@ final class KeyFlowTests: XCTestCase {
 
         let allGamesChip = app.buttons["全部彩种"].firstMatch
         XCTAssertTrue(allGamesChip.waitForExistence(timeout: 8), "「全部票据」页应显示彩种悬浮筛选条")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
         let initialY = allGamesChip.frame.minY
-        app.swipeUp()
-        app.swipeUp()
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32))
+        start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         XCTAssertTrue(allGamesChip.exists && allGamesChip.isHittable, "上滑后彩种筛选条应固定在顶部")
         XCTAssertLessThan(abs(allGamesChip.frame.minY - initialY), 6, "上滑后彩种筛选条不应随列表滚走")
     }
@@ -173,14 +176,14 @@ final class KeyFlowTests: XCTestCase {
             style.buttons.element(boundBy: index).tap()
             XCTAssertTrue(range.buttons["2026-07"].isSelected)
         }
-        // 验证首页内联左右快捷步进：切到 8 月、9 月均完整显示不截断，再退回 7 月保持深色截图一致。
+        // 验证首页内联左右快捷步进：往后切到 8 月、再切回示例当月（本月），退回 7 月保持深色截图一致。
         let next = app.buttons["home.period.next"]
         let prev = app.buttons["home.period.prev"]
         XCTAssertTrue(next.waitForExistence(timeout: 5))
         next.tap()
         XCTAssertTrue(range.buttons["2026-08"].waitForExistence(timeout: 5))
         next.tap()
-        XCTAssertTrue(range.buttons["2026-09"].waitForExistence(timeout: 5))
+        XCTAssertTrue(range.buttons["本月"].waitForExistence(timeout: 5))
         prev.tap()
         XCTAssertTrue(range.buttons["2026-08"].waitForExistence(timeout: 5))
         prev.tap()

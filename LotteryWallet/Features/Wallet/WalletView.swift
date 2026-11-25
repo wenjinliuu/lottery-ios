@@ -607,6 +607,7 @@ struct WalletAllTicketsView: View {
                 .padding(.vertical, 2)
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .scrollClipDisabled()
         .animation(.easeOut(duration: 0.2), value: game)
     }
