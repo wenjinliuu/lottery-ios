@@ -23,7 +23,7 @@ struct BallJarView: View {
 
     static let height: CGFloat = 220
     static let defaultHeight: CGFloat = 220
-    static let minHeight: CGFloat = 180
+    static let minHeight: CGFloat = 172
     static let maxHeight: CGFloat = 236
     private static let corner: CGFloat = 28
     private static let frameWidth: CGFloat = 7
@@ -46,7 +46,7 @@ struct BallJarView: View {
                             .fill(
                                 RadialGradient(
                                     colors: [
-                                        Color.accentColor.opacity(colorScheme == .dark ? 0.24 : 0.14),
+                                        Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.08),
                                         .clear
                                     ],
                                     center: .center,
@@ -227,11 +227,11 @@ struct BallJarView: View {
                 } label: {
                     Label("摇一摇", systemImage: "wind")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(jar.hits > 0 ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(jar.hits > 0 ? Color.primary : Color.secondary)
                         .padding(.horizontal, 11)
                         .padding(.vertical, 6)
                         .frame(minHeight: 32)
-                        .glassPill(tint: jar.hits > 0 ? Color.accentColor : nil, interactive: jar.hits > 0)
+                        .glassPill(interactive: jar.hits > 0)
                         .contentShape(Rectangle().inset(by: -6))
                 }
                 .buttonStyle(PressableIcon())

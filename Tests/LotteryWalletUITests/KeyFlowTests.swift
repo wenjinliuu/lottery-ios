@@ -14,18 +14,11 @@ final class KeyFlowTests: XCTestCase {
     }
 
     private func dockTab(_ name: String) -> XCUIElement {
-        let id: String
-        switch name {
-        case "首页": id = "dock.tab.home"
-        case "票夹": id = "dock.tab.wallet"
-        case "设置": id = "dock.tab.settings"
-        default: id = name
-        }
-        let byID = app.buttons[id].firstMatch
-        if byID.exists { return byID }
-        let segmented = app.segmentedControls["dock.tabs"].buttons[name]
-        if segmented.exists { return segmented }
-        return app.buttons[id].firstMatch
+        app.tabBars.buttons[name].firstMatch
+    }
+
+    private var scanButton: XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label IN %@", ["扫描票据", "扫描"])).firstMatch
     }
 
     func testWalletTopEdgeAfterScrolling() throws {
@@ -45,7 +38,7 @@ final class KeyFlowTests: XCTestCase {
         capture("wallet-soft-top")
     }
 
-    /// 三个主页面都能打开，且扫描按钮独立位于底栏胶囊右侧。
+    /// 三个主页面都能打开，且扫描按钮独立位于官方标签栏右侧。
     func testEveryMainTabOpens() {
         for tab in ["票夹", "设置", "首页"] {
             let button = dockTab(tab)
@@ -54,8 +47,8 @@ final class KeyFlowTests: XCTestCase {
             XCTAssertTrue(button.isSelected, "点了「\(tab)」没有切过去")
         }
 
-        let scan = app.buttons["dock.scan"]
-        let settings = app.buttons["dock.tab.settings"].firstMatch
+        let scan = scanButton
+        let settings = dockTab("设置")
         XCTAssertTrue(scan.waitForExistence(timeout: 10), "找不到独立扫描按钮")
         XCTAssertTrue(settings.waitForExistence(timeout: 5), "找不到底栏设置按钮")
         XCTAssertGreaterThan(scan.frame.minX, settings.frame.maxX, "扫描按钮应独立位于底栏胶囊右侧")
@@ -74,21 +67,36 @@ final class KeyFlowTests: XCTestCase {
                 .matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
             XCTAssertTrue(element.waitForExistence(timeout: 10), "首页没有显示 \(text)")
         }
-        // 默认一屏内「最新开奖」卡片及其下方免责提示与轮播状态圆点均应完整露在底部悬浮栏之上。
+        // 默认一屏内「最新开奖」卡片及其下方免责提示与轮播状态圆点均应完整露在官方标签栏之上。
         let disclaimer = app.staticTexts["开奖信息整理自公开信息，仅供核对参考"].firstMatch
-        let dockAnchor = app.buttons["dock.tab.home"].firstMatch
+        let dockAnchor = dockTab("首页")
         XCTAssertTrue(disclaimer.waitForExistence(timeout: 10), "首页缺少最新开奖免责提示")
-        XCTAssertTrue(dockAnchor.waitForExistence(timeout: 5), "首页缺少底栏导航胶囊")
+        XCTAssertTrue(dockAnchor.waitForExistence(timeout: 5), "首页缺少官方底栏标签")
         XCTAssertLessThan(disclaimer.frame.maxY + 10, dockAnchor.frame.minY,
                           "默认一屏下最新开奖卡片与轮播状态圆点不应被底栏遮挡")
     }
 
-    /// 票夹里能看到示例票据的彩种。
+    /// 票夹里能看到示例票据的彩种，进入「查看全部」上滑后彩种悬浮筛选条保持固定。
     func testWalletListsDemoTickets() {
         dockTab("票夹").tap()
         let ticket = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@ OR label CONTAINS %@ OR label CONTAINS %@",
                                                           "双色球", "大乐透", "七乐彩", "七星彩")).firstMatch
         XCTAssertTrue(ticket.waitForExistence(timeout: 10), "票夹里没有示例票据")
+
+        let allButton = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "查看全部")).firstMatch
+        for _ in 0..<8 where !allButton.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(allButton.waitForExistence(timeout: 5), "票夹底部应有「查看全部」入口")
+        allButton.tap()
+
+        let allGamesChip = app.buttons["全部彩种"].firstMatch
+        XCTAssertTrue(allGamesChip.waitForExistence(timeout: 8), "「全部票据」页应显示彩种悬浮筛选条")
+        let initialY = allGamesChip.frame.minY
+        app.swipeUp()
+        app.swipeUp()
+        XCTAssertTrue(allGamesChip.exists && allGamesChip.isHittable, "上滑后彩种筛选条应固定在顶部")
+        XCTAssertLessThan(abs(allGamesChip.frame.minY - initialY), 6, "上滑后彩种筛选条不应随列表滚走")
     }
 
     /// 首页默认展示放大版玻璃球罐：点命中胶囊弹按彩种/球区细分的液态玻璃分布卡，
@@ -165,11 +173,15 @@ final class KeyFlowTests: XCTestCase {
             style.buttons.element(boundBy: index).tap()
             XCTAssertTrue(range.buttons["2026-07"].isSelected)
         }
-        // 验证首页内联左右快捷步进：往后一步切到 8 月，再退回 7 月保持深色截图一致。
+        // 验证首页内联左右快捷步进：切到 8 月、9 月均完整显示不截断，再退回 7 月保持深色截图一致。
         let next = app.buttons["home.period.next"]
         let prev = app.buttons["home.period.prev"]
         XCTAssertTrue(next.waitForExistence(timeout: 5))
         next.tap()
+        XCTAssertTrue(range.buttons["2026-08"].waitForExistence(timeout: 5))
+        next.tap()
+        XCTAssertTrue(range.buttons["2026-09"].waitForExistence(timeout: 5))
+        prev.tap()
         XCTAssertTrue(range.buttons["2026-08"].waitForExistence(timeout: 5))
         prev.tap()
         XCTAssertTrue(range.buttons["2026-07"].waitForExistence(timeout: 5))

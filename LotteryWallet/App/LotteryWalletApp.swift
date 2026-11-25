@@ -69,7 +69,6 @@ struct LotteryWalletApp: App {
                 .environment(storeHealth)
                 .environment(backupCenter)
                 .preferredColorScheme(settings.colorScheme)
-                .tint(Color.accentColor)
         }
         .modelContainer(container)
     }

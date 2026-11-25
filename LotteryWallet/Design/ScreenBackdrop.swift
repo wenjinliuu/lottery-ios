@@ -1,4 +1,42 @@
+import SwiftUI
 import UIKit
+
+/// 点开抽屉那一刻的屏幕快照。
+///
+/// 标签栏右侧独立「扫描」按钮使用系统 `Tab(role:)` 原生分离版式，
+/// 点击瞬间系统会短暂切换到该 Tab 再回到原页；放一张 GPU 图层快照填住空档，
+/// 既保留 100% 官方液态玻璃标签栏与分离圆钮，又消除弹抽屉前的闪烁。
+enum ScreenBackdrop {
+    @MainActor
+    static func capture() -> UIView? {
+        guard let window = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow) else { return nil }
+        return window.snapshotView(afterScreenUpdates: false)
+    }
+}
+
+/// 把 `ScreenBackdrop.capture()` 拿到的快照贴进 SwiftUI。
+struct ScreenBackdropView: UIViewRepresentable {
+    let snapshot: UIView
+
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+        container.clipsToBounds = true
+        container.addSubview(snapshot)
+        snapshot.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            snapshot.topAnchor.constraint(equalTo: container.topAnchor),
+            snapshot.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            snapshot.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            snapshot.trailingAnchor.constraint(equalTo: container.trailingAnchor)
+        ])
+        return container
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
+}
 
 /// 关掉 UIKit 那套「弹出模态时把背后整片染灰」的行为。
 ///

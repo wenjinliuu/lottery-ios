@@ -20,15 +20,7 @@ final class AccessibilityAuditTests: XCTestCase {
     func testAccessibilityAuditSettings() throws { try audit(tab: "设置") }
 
     private func audit(tab: String) throws {
-        let id: String
-        switch tab {
-        case "首页": id = "dock.tab.home"
-        case "票夹": id = "dock.tab.wallet"
-        case "设置": id = "dock.tab.settings"
-        default: id = tab
-        }
-        let byID = app.buttons[id].firstMatch
-        let button = byID.waitForExistence(timeout: 8) ? byID : app.segmentedControls["dock.tabs"].buttons[tab]
+        let button = app.tabBars.buttons[tab].firstMatch
         XCTAssertTrue(button.waitForExistence(timeout: 8), "找不到标签：\(tab)")
         button.tap()
         try app.performAccessibilityAudit()

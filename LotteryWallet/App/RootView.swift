@@ -2,13 +2,11 @@ import SwiftUI
 import SwiftData
 import UIKit
 
-/// 三个主页面（首页、票夹、设置）加底部双体液态玻璃悬浮栏：
-/// 左侧为三项导航玻璃胶囊，右侧为完全独立的球形扫描按钮。
+/// 三个主页面（首页、票夹、设置）+ 系统官方液态玻璃标签栏。
 ///
-/// 不再借用系统 `Tab(role: .search)`：iOS 27 起系统把 `.search` 默认重新合并进
-/// 主胶囊里，且它本质上是一个会触发切页的标签，逼迫代码靠 `ScreenBackdrop` 截屏
-/// 兜底防闪屏。改用 `GlassEffectContainer` 承载真实 Button 后，扫描直接弹出抽屉，
-/// 彻底省掉截屏补丁，同时保持三页各自独立的导航栈与滚动位置。
+/// 直接采用 SwiftUI 原生 `TabView` 与分离式扫描按钮（iOS 27 用 `.prominent`，iOS 26 用 `.search`），
+/// 完整保留官方液态玻璃跳动水滴透镜、官方选中态与系统贴底间距；`.tint(.primary)` 让选中态
+/// 与扫描按钮保持中性黑/白主色，不带蓝色主题色。
 struct RootView: View {
     @Environment(DrawStore.self) private var drawStore
     @Environment(AppSettings.self) private var settings
@@ -28,8 +26,6 @@ struct RootView: View {
     private var unseenCount: Int { Set(unseenRecords.map(\.batchId)).count }
 
     @State private var selection: MainTab = .home
-    /// 访问过的标签页保持挂载，切页不丢滚动位置和导航栈，冷启动也不必预建全部三页。
-    @State private var mountedTabs: Set<MainTab> = [.home]
     /// 当前开着的抽屉，以及关掉它之后要接着开的那张。
     @State private var activeSheet: RootSheet?
     @State private var startupChecksComplete = false
@@ -41,42 +37,59 @@ struct RootView: View {
     @State private var entryReference: EntryReference?
     @State private var toastCenter = ToastCenter()
     @State private var celebration = CelebrationCenter()
+    /// 点开扫描抽屉那一刻的屏幕快照，见 `ScreenBackdrop`。
+    @State private var backdrop: UIView?
+
+    private var scanTabRole: TabRole {
+        if #available(iOS 27.0, *) {
+            return .prominent
+        } else {
+            return .search
+        }
+    }
+
+    private var tabSelection: Binding<MainTab> {
+        Binding(
+            get: { selection },
+            set: { newValue in
+                guard newValue == .scan else {
+                    selection = newValue
+                    return
+                }
+                guard activeSheet == nil else { return }
+                backdrop = ScreenBackdrop.capture()
+                activeSheet = .scan
+            }
+        )
+    }
 
     var body: some View {
-        ZStack {
-            tabLayer(.home) {
+        TabView(selection: tabSelection) {
+            Tab("首页", systemImage: "house", value: MainTab.home) {
                 HomeView()
             }
-            if mountedTabs.contains(.wallet) {
-                tabLayer(.wallet) {
-                    WalletView(isActive: selection == .wallet)
+
+            Tab("票夹", systemImage: "wallet.bifold", value: MainTab.wallet) {
+                WalletView(isActive: selection == .wallet)
+            }
+            .badge(unseenCount)
+
+            Tab("设置", systemImage: "gearshape", value: MainTab.settings) {
+                SettingsView()
+            }
+
+            Tab("扫描", systemImage: "camera.viewfinder", value: MainTab.scan, role: scanTabRole) {
+                if let backdrop {
+                    ScreenBackdropView(snapshot: backdrop)
+                        .ignoresSafeArea()
+                        .accessibilityHidden(true)
+                } else {
+                    Palette.canvas.ignoresSafeArea()
                 }
             }
-            if mountedTabs.contains(.settings) {
-                tabLayer(.settings) {
-                    SettingsView()
-                }
-            }
+            .accessibilityLabel("扫描票据")
         }
-        .background(Palette.canvas.ignoresSafeArea())
-        .overlay(alignment: .bottom) {
-            FloatingGlassDock(
-                selection: Binding(
-                    get: { selection },
-                    set: { next in
-                        mountedTabs.insert(next)
-                        withAnimation(.spring(duration: 0.3, bounce: 0.16)) {
-                            selection = next
-                        }
-                    }
-                ),
-                unseenCount: unseenCount,
-                onScan: {
-                    guard activeSheet == nil else { return }
-                    activeSheet = .scan
-                }
-            )
-        }
+        .tint(.primary)
         .onChange(of: scenePhase) { _, phase in
             guard !DemoData.isEnabled else { return }
             if phase == .background { autoBackup() }
@@ -84,6 +97,7 @@ struct RootView: View {
         }
         .sheet(item: $activeSheet, onDismiss: {
             guard let next = queuedSheet else {
+                backdrop = nil
                 entryReference = nil
                 return
             }
@@ -132,7 +146,6 @@ struct RootView: View {
             .animation(.spring(duration: 0.36, bounce: 0.18), value: toastCenter.current?.id)
         }
         .sensoryFeedback(trigger: toastCenter.current?.id) { _, _ in toastCenter.current?.feedback }
-        .sensoryFeedback(.selection, trigger: selection)
         .onChange(of: drawStore.resultsRevision) { _, _ in
             guard startupChecksComplete, settings.autoCheck, !drawStore.checkingWallet else { return }
             let service = RecordService(context: context, drawStore: drawStore)
@@ -146,16 +159,6 @@ struct RootView: View {
             startupChecksComplete = true
             await pushRegistration
         }
-    }
-
-    @ViewBuilder
-    private func tabLayer<Content: View>(_ tab: MainTab, @ViewBuilder content: () -> Content) -> some View {
-        let isCurrent = selection == tab
-        content()
-            .opacity(isCurrent ? 1 : 0)
-            .allowsHitTesting(isCurrent)
-            .accessibilityHidden(!isCurrent)
-            .zIndex(isCurrent ? 1 : 0)
     }
 
     /// 冷启动拿到开奖数据后：先按官方日历校正预测期号，再自动核对。
@@ -214,184 +217,10 @@ enum RootSheet: String, Identifiable {
     var id: String { rawValue }
 }
 
-enum MainTab: String, Hashable, CaseIterable, Identifiable {
+enum MainTab: Hashable {
     case home, wallet, settings
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .home: "首页"
-        case .wallet: "票夹"
-        case .settings: "设置"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .home: "chart.line.uptrend.xyaxis"
-        case .wallet: "wallet.bifold"
-        case .settings: "gearshape"
-        }
-    }
-
-    var selectedSymbol: String {
-        switch self {
-        case .home: "chart.line.uptrend.xyaxis"
-        case .wallet: "wallet.bifold.fill"
-        case .settings: "gearshape.fill"
-        }
-    }
-}
-
-// MARK: - 底部双体液态玻璃悬浮栏
-
-/// 左侧三项主页面清透液态玻璃悬浮胶囊 + 右侧完全独立的球形清透液态玻璃扫描按钮。
-///
-/// 全程采用纯 SwiftUI `GlassEffectContainer` + `.clear` 高通透液态玻璃，彻底去除
-/// `UISegmentedControl` 自带灰底轨与不透明白块；选中指示器是一枚可随点按和手指左右拖动
-/// 弹性滑移的清透液态玻璃水滴透镜（`matchedGeometryEffect` + `glassEffectID`）。
-struct FloatingGlassDock: View {
-    @Binding var selection: MainTab
-    let unseenCount: Int
-    let onScan: () -> Void
-
-    @Environment(\.colorScheme) private var colorScheme
-    @Namespace private var dockNamespace
-    @State private var scrubTab: MainTab?
-    @State private var barWidth: CGFloat = 0
-
-    private var highlightedTab: MainTab { scrubTab ?? selection }
-
-    var body: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 12) {
-                HStack(spacing: 4) {
-                    ForEach(MainTab.allCases) { tab in
-                        tabButton(tab)
-                    }
-                }
-                .padding(4)
-                .frame(height: 58)
-                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { barWidth = $0 }
-                .clearGlassPill(interactive: true)
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 8)
-                        .onChanged { value in
-                            guard barWidth > 0 else { return }
-                            let count = MainTab.allCases.count
-                            let step = barWidth / CGFloat(count)
-                            let index = min(max(Int(value.location.x / step), 0), count - 1)
-                            let target = MainTab.allCases[index]
-                            if scrubTab != target {
-                                withAnimation(.spring(duration: 0.30, bounce: 0.22)) {
-                                    scrubTab = target
-                                }
-                            }
-                        }
-                        .onEnded { _ in
-                            if let target = scrubTab {
-                                selection = target
-                            }
-                            withAnimation(.spring(duration: 0.30, bounce: 0.18)) {
-                                scrubTab = nil
-                            }
-                        }
-                )
-                .sensoryFeedback(.selection, trigger: highlightedTab)
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("dock.tabs")
-
-                Button(action: onScan) {
-                    Image(systemName: "camera.viewfinder")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 58, height: 58)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(PressableIcon())
-                .clearGlassCircle(tint: Color.accentColor.opacity(colorScheme == .dark ? 0.20 : 0.11),
-                                  interactive: true)
-                .accessibilityLabel("扫描票据")
-                .accessibilityIdentifier("dock.scan")
-            }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 6)
-        }
-    }
-
-    private func tabButton(_ tab: MainTab) -> some View {
-        let isHighlighted = highlightedTab == tab
-        let isScrubbing = scrubTab != nil && isHighlighted
-        return Button {
-            withAnimation(.spring(duration: 0.34, bounce: 0.22)) {
-                selection = tab
-            }
-        } label: {
-            VStack(spacing: 2) {
-                Image(systemName: isHighlighted ? tab.selectedSymbol : tab.symbol)
-                    .font(.system(size: 18, weight: isHighlighted ? .semibold : .medium))
-                    .symbolRenderingMode(.hierarchical)
-                    .overlay(alignment: .topTrailing) {
-                        if tab == .wallet && unseenCount > 0 {
-                            badgePill
-                                .offset(x: 11, y: -5)
-                        }
-                    }
-                Text(tab.label)
-                    .font(.system(size: 10.5, weight: isHighlighted ? .semibold : .medium))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(isHighlighted ? Color.accentColor : Color.primary.opacity(0.76))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Capsule())
-            .background {
-                if isHighlighted {
-                    activeGlassLens(isScrubbing: isScrubbing)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(tab.label)
-        .accessibilityValue(tab == .wallet && unseenCount > 0 ? "\(unseenCount) 个新结果" : "")
-        .accessibilityAddTraits(selection == tab ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier("dock.tab.\(tab.rawValue)")
-    }
-
-    private func activeGlassLens(isScrubbing: Bool) -> some View {
-        Capsule()
-            .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.22 : 0.11))
-            .glassEffect(.clear.interactive(), in: Capsule())
-            .overlay {
-                Capsule()
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(colorScheme == .dark ? 0.42 : 0.90),
-                                Color.accentColor.opacity(colorScheme == .dark ? 0.30 : 0.22)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 0.9
-                    )
-            }
-            .matchedGeometryEffect(id: "dock.lens", in: dockNamespace)
-            .glassEffectID("dock.lens", in: dockNamespace)
-            .scaleEffect(isScrubbing ? 1.10 : 1.0)
-            .animation(.spring(duration: 0.34, bounce: 0.22), value: highlightedTab)
-            .animation(.spring(duration: 0.22, bounce: 0.26), value: isScrubbing)
-    }
-
-    private var badgePill: some View {
-        Text(unseenCount > 99 ? "99+" : "\(unseenCount)")
-            .font(.system(size: 10, weight: .bold, design: .rounded))
-            .monospacedDigit()
-            .foregroundStyle(.white)
-            .padding(.horizontal, 5)
-            .frame(minWidth: 17, minHeight: 17)
-            .background(Palette.profit, in: Capsule())
-    }
+    /// 标签栏右侧独立扫描按钮，不对应实际页面。
+    case scan
 }
 
 // MARK: - 轻提示

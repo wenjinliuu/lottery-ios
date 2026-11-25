@@ -26,6 +26,7 @@ struct SettingsView: View {
                         Toggle(isOn: $settings.autoCheck) {
                             row("checkmark.circle.fill", .green, "开奖后自动核对")
                         }
+                        .tint(.green)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                     }
@@ -43,6 +44,7 @@ struct SettingsView: View {
                                 }
                             }
                         }
+                        .tint(.green)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                     }
@@ -157,6 +159,7 @@ struct SettingsView: View {
                         Toggle(isOn: $settings.debugVision) {
                             row("ruler.fill", .teal, "识别调试图")
                         }
+                        .tint(.green)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                     }
@@ -192,7 +195,7 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
-                .padding(.bottom, 112)
+                .padding(.bottom, 28)
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
             .background(Palette.canvas)
@@ -298,7 +301,7 @@ struct AboutView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
         }
-        .foregroundStyle(Color.accentColor)
+        .foregroundStyle(.primary)
         .padding(.vertical, 4)
         .contentShape(Rectangle())
     }

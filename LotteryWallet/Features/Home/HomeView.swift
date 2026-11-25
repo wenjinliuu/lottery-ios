@@ -71,14 +71,18 @@ struct HomeView: View {
     private var screenWidth: CGFloat { measuredWidth ?? HomeLayout.fallbackScreenWidth }
 
     /// 按屏幕可见高度自适应玻璃球罐高度，保证默认一屏内「最新开奖」完整卡片、免责提示与轮播状态圆点
-    /// 全部清透露在底部悬浮导航栏之上，既不遮挡又保持球罐充盈主角感。
+    /// 全部清透露在官方标签栏之上，既不遮挡又保持球罐充盈主角感。
     private var adaptiveJarHeight: CGFloat {
         guard let viewportHeight = measuredHeight, viewportHeight > 0 else {
             return BallJarView.defaultHeight
         }
-        // 底部悬浮栏与留白（~74pt）+ 非球罐区内容（收支头、指标、开奖头/卡/免责/状态点 ≈ 436pt）
-        let target = (viewportHeight - 510).rounded(.down)
+        // 已扣除顶部导航栏与底部官方 TabView 安全区：非球罐区内容（收支头、指标、开奖头/卡/免责/状态点 ≈ 494pt）
+        let target = (viewportHeight - 494).rounded(.down)
         return min(BallJarView.maxHeight, max(BallJarView.minHeight, target))
+    }
+
+    private var rangePickerWidth: CGFloat {
+        min(216, max(202, screenWidth - 182))
     }
 
     var body: some View {
@@ -101,7 +105,7 @@ struct HomeView: View {
                     }
                 }
                 .padding(.top, 2)
-                .padding(.bottom, 112)
+                .padding(.bottom, 28)
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
             .background { HomeAmbientBackdrop() }
@@ -109,7 +113,7 @@ struct HomeView: View {
             // `GeometryReader` 的贪心尺寸带进内容，也动不到导航栏的行为。
             .background(
                 GeometryReader { proxy in
-                    let usableHeight = proxy.size.height - proxy.safeAreaInsets.bottom
+                    let usableHeight = proxy.size.height - proxy.safeAreaInsets.top - proxy.safeAreaInsets.bottom
                     Color.clear
                         .onAppear {
                             measuredWidth = proxy.size.width
@@ -316,8 +320,8 @@ struct HomeView: View {
                     Spacer(minLength: 4)
 
                     // 选中「全部」时收起左右翻期箭头，让分段条自然贴紧右边缘不留空缺；
-                    // 固定分段条宽度避免「本月」切换到「2026-08」时横向撑跳卡顿。
-                    HStack(spacing: 6) {
+                    // 采用按内容分配宽度的原生分段控件，固定总宽防切期横向跳动，同时彻底避免「2026-09」等月份被截成省略号。
+                    HStack(spacing: 5) {
                         if showsSteppers {
                             periodStepButton("chevron.left",
                                              enabled: canStepPeriod(by: -1),
@@ -328,20 +332,19 @@ struct HomeView: View {
                             .transition(.scale(scale: 0.65).combined(with: .opacity))
                         }
 
-                        Picker("范围", selection: Binding(
-                            get: { range },
-                            set: { next in
-                                historicalEnd = nil
-                                range = next
-                            }
-                        )) {
-                            Text(range == .month ? periodLabel : "本月").tag(ProfitRange.month)
-                            Text(range == .year ? periodLabel : "本年").tag(ProfitRange.year)
-                            Text("全部").tag(ProfitRange.all)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 192)
-                        .accessibilityIdentifier("home.range")
+                        HomeRangeSegmentedControl(
+                            selection: Binding(
+                                get: { range },
+                                set: { next in
+                                    historicalEnd = nil
+                                    range = next
+                                }
+                            ),
+                            monthTitle: range == .month ? periodLabel : "本月",
+                            yearTitle: range == .year ? periodLabel : "本年",
+                            allTitle: "全部"
+                        )
+                        .frame(width: rangePickerWidth, height: 32)
 
                         if showsSteppers {
                             periodStepButton("chevron.right",
@@ -429,9 +432,9 @@ struct HomeView: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .scaledFont(11, weight: .bold)
-                .foregroundStyle(enabled ? Color.accentColor : Color.secondary)
-                .frame(width: 28, height: 28)
-                .glassCircle(tint: enabled ? .accentColor : nil, interactive: enabled)
+                .foregroundStyle(enabled ? Color.primary : Color.secondary)
+                .frame(width: 26, height: 26)
+                .glassCircle(interactive: enabled)
                 .contentShape(Circle().inset(by: -6))
         }
         .buttonStyle(PressableIcon())
@@ -1237,6 +1240,87 @@ enum PrizeRanking {
 
         return ["一等奖", "二等奖"].compactMap { name in
             list.first { $0.prizeName.contains(name) && ($0.winningCount > 0 || $0.amount > 0) }
+        }
+    }
+}
+
+/// 首页「本月 / 本年 / 全部」原生分段控件：
+/// 开启 `apportionsSegmentWidthsByContent`，按文案真实宽度分配三格空间，
+/// 彻底解决 SwiftUI `Picker(.segmented)` 强制等宽导致「2026-09」「2026-08」被截成省略号的问题；
+/// 同时保持固定总宽度与官方 iOS 26/27 液态玻璃滑动跳动透镜。
+private struct HomeRangeSegmentedControl: UIViewRepresentable {
+    @Binding var selection: ProfitRange
+    let monthTitle: String
+    let yearTitle: String
+    let allTitle: String
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private static let ranges: [ProfitRange] = [.month, .year, .all]
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> TallSegmentedControl {
+        let control = TallSegmentedControl(items: [monthTitle, yearTitle, allTitle])
+        control.targetHeight = 32
+        control.apportionsSegmentWidthsByContent = true
+        control.accessibilityIdentifier = "home.range"
+        control.selectedSegmentIndex = Self.ranges.firstIndex(of: selection) ?? 1
+        control.addTarget(context.coordinator, action: #selector(Coordinator.valueChanged(_:)), for: .valueChanged)
+        applyTypography(to: control)
+        return control
+    }
+
+    func updateUIView(_ uiView: TallSegmentedControl, context: Context) {
+        context.coordinator.parent = self
+        let titles = [monthTitle, yearTitle, allTitle]
+        var changed = false
+        for (index, title) in titles.enumerated() where uiView.titleForSegment(at: index) != title {
+            uiView.setTitle(title, forSegmentAt: index)
+            changed = true
+        }
+        let targetIndex = Self.ranges.firstIndex(of: selection) ?? 1
+        if uiView.selectedSegmentIndex != targetIndex {
+            uiView.selectedSegmentIndex = targetIndex
+        }
+        applyTypography(to: uiView)
+        if changed {
+            uiView.setNeedsLayout()
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: TallSegmentedControl, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 206, height: 32)
+    }
+
+    private func applyTypography(to control: TallSegmentedControl) {
+        let traits = UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
+        traits.performAsCurrent {
+            control.selectedSegmentTintColor = nil
+            control.setTitleTextAttributes([
+                .font: UIFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium),
+                .foregroundColor: UIColor.label.withAlphaComponent(0.76)
+            ], for: .normal)
+            control.setTitleTextAttributes([
+                .font: UIFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold),
+                .foregroundColor: UIColor.label
+            ], for: .selected)
+        }
+    }
+
+    final class Coordinator: NSObject {
+        var parent: HomeRangeSegmentedControl
+
+        init(_ parent: HomeRangeSegmentedControl) {
+            self.parent = parent
+        }
+
+        @objc func valueChanged(_ sender: UISegmentedControl) {
+            let index = sender.selectedSegmentIndex
+            guard HomeRangeSegmentedControl.ranges.indices.contains(index) else { return }
+            parent.selection = HomeRangeSegmentedControl.ranges[index]
         }
     }
 }

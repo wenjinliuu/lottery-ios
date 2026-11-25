@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 视觉分层的统一封装。
 ///
@@ -62,25 +63,14 @@ extension View {
         glassEffect(GlassStyle.pill(tint: tint, interactive: interactive), in: Capsule())
     }
 
-    /// 清透液态玻璃胶囊：采用高通透 `.clear` 玻璃材质 + 细高光棱边与柔和悬浮影，
-    /// 避免在浅色纯白画布上发灰发闷，让底部导航栏与悬浮筛选条保持真正通透的折射质感。
-    func clearGlassPill(tint: Color? = nil, interactive: Bool = true) -> some View {
-        modifier(ClearGlassContainerModifier(shape: Capsule(), tint: tint, interactive: interactive))
-    }
-
     /// 饱满着色液态玻璃胶囊：用于主强调或选中态交互按钮。
     func glassProminentPill(tint: Color, interactive: Bool = true) -> some View {
         glassEffect(GlassStyle.prominent(tint: tint, interactive: interactive), in: Capsule())
     }
 
-    /// 圆形玻璃：独立悬浮扫描按钮、翻年箭头等圆形控件。
+    /// 圆形玻璃：独立悬浮翻期箭头等圆形控件。
     func glassCircle(tint: Color? = nil, interactive: Bool = true) -> some View {
         glassEffect(GlassStyle.pill(tint: tint, interactive: interactive), in: Circle())
-    }
-
-    /// 清透圆形液态玻璃：与 `clearGlassPill` 成对使用，保持底栏左侧胶囊与右侧扫描按钮同一套通透材质。
-    func clearGlassCircle(tint: Color? = nil, interactive: Bool = true) -> some View {
-        modifier(ClearGlassContainerModifier(shape: Circle(), tint: tint, interactive: interactive))
     }
 
     /// 让相邻的玻璃元素在动画中融合（形变、聚拢、分离）。
@@ -143,35 +133,18 @@ private struct ContentCardModifier: ViewModifier {
     }
 }
 
-private struct ClearGlassContainerModifier<S: InsettableShape>: ViewModifier {
-    let shape: S
-    let tint: Color?
-    let interactive: Bool
+/// 支持自定义高度的原生 `UISegmentedControl`：直接复用 iOS 26/27 官方液态玻璃滑动跳动透镜，
+/// 同时允许按内容自动分配分段宽度（`apportionsSegmentWidthsByContent`），避免长日期文案被截断。
+final class TallSegmentedControl: UISegmentedControl {
+    var targetHeight: CGFloat = 40
 
-    @Environment(\.colorScheme) private var colorScheme
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: targetHeight)
+    }
 
-    func body(content: Content) -> some View {
-        content
-            .background {
-                // 浅色下叠一层极薄纯净白膜，保持清透无灰感的同时，避免滚到底栏背后的深色字干扰前景图标辨识。
-                shape.fill(colorScheme == .dark ? Color.white.opacity(0.04) : Color.white.opacity(0.24))
-            }
-            .glassEffect(GlassStyle.clear(tint: tint, interactive: interactive), in: shape)
-            .overlay {
-                shape.strokeBorder(
-                    LinearGradient(
-                        colors: colorScheme == .dark
-                            ? [Color.white.opacity(0.24), Color.white.opacity(0.08)]
-                            : [Color.black.opacity(0.07), Color.black.opacity(0.11)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 0.8
-                )
-                .allowsHitTesting(false)
-            }
-            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.34 : 0.08),
-                    radius: 14, x: 0, y: 4)
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        let fitted = super.sizeThatFits(size)
+        return CGSize(width: size.width > 0 ? size.width : fitted.width, height: targetHeight)
     }
 }
 
@@ -225,13 +198,6 @@ enum GlassStyle {
     static func pill(tint: Color?, interactive: Bool) -> Glass {
         var glass = Glass.regular
         if let tint { glass = glass.tint(tint.opacity(0.20)) }
-        if interactive { glass = glass.interactive() }
-        return glass
-    }
-
-    static func clear(tint: Color?, interactive: Bool) -> Glass {
-        var glass = Glass.clear
-        if let tint { glass = glass.tint(tint) }
         if interactive { glass = glass.interactive() }
         return glass
     }

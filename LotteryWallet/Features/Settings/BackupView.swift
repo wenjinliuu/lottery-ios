@@ -47,6 +47,7 @@ struct BackupView: View {
                                          set: { toggleICloud($0) })) {
                         row("icloud.fill", .cyan, "自动备份到 iCloud")
                     }
+                    .tint(.green)
                 } header: {
                     Text("自动备份")
                 } footer: {
@@ -197,7 +198,7 @@ struct BackupView: View {
             HStack(spacing: 12) {
                 Image(systemName: item.kind.symbol)
                     .font(.footnote)
-                    .foregroundStyle(item.kind == .manual ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(item.kind == .manual ? Color.primary : Color.secondary)
                     .frame(width: 28, height: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(DateText.stamp(item.modifiedAt))

@@ -62,12 +62,12 @@ struct PeriodPicker: View {
                                         Text("\(String(item)) 年")
                                             .font(.caption.weight(.semibold))
                                             .monospacedDigit()
-                                            .foregroundStyle(isSelectedYear ? Palette.onAccent : Color.primary)
+                                            .foregroundStyle(isSelectedYear ? Palette.canvas : Color.primary)
                                             .padding(.horizontal, 12)
                                             .padding(.vertical, 6)
                                             .glassEffect(
                                                 isSelectedYear
-                                                    ? GlassStyle.prominent(tint: .accentColor, interactive: true)
+                                                    ? GlassStyle.prominent(tint: .primary, interactive: true)
                                                     : GlassStyle.pill(tint: nil, interactive: true),
                                                 in: Capsule()
                                             )
@@ -135,9 +135,9 @@ struct PeriodPicker: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.subheadline.weight(.bold))
-                .foregroundStyle(enabled ? Color.accentColor : Color.secondary)
+                .foregroundStyle(enabled ? Color.primary : Color.secondary)
                 .frame(width: 38, height: 38)
-                .glassCircle(tint: enabled ? .accentColor : nil, interactive: enabled)
+                .glassCircle(interactive: enabled)
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
@@ -154,12 +154,12 @@ struct PeriodPicker: View {
             Text(title)
                 .font(.subheadline.weight(isOn ? .bold : .medium))
                 .monospacedDigit()
-                .foregroundStyle(isOn ? Palette.onAccent : (disabled ? Color.secondary.opacity(0.45) : Color.primary))
+                .foregroundStyle(isOn ? Palette.canvas : (disabled ? Color.secondary.opacity(0.45) : Color.primary))
                 .frame(maxWidth: .infinity)
                 .frame(height: wide ? 44 : 40)
                 .background {
                     if isOn {
-                        shape.fill(Color.accentColor)
+                        shape.fill(Color.primary)
                     } else {
                         shape.fill(Palette.card)
                             .overlay(shape.strokeBorder(Palette.cardBorder, lineWidth: 1))

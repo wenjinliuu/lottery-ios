@@ -48,7 +48,7 @@ final class AppStoreScreenshotTests: XCTestCase {
         app.launchEnvironment["DEMO_SCAN_IMAGE"] = Self.scanTicket.path
         app.launch()
 
-        let scan = app.buttons["dock.scan"]
+        let scan = scanButton
         XCTAssertTrue(scan.waitForExistence(timeout: 15), "找不到扫描按钮")
         scan.tap()
 
@@ -82,7 +82,7 @@ final class AppStoreScreenshotTests: XCTestCase {
         app.launchEnvironment["DEMO_SCAN_IMAGE"] = pair.path
         app.launchEnvironment["DEMO_SCAN_LOCATE"] = "1"
         app.launch()
-        let scan = app.buttons["dock.scan"]
+        let scan = scanButton
         XCTAssertTrue(scan.waitForExistence(timeout: 15))
         scan.tap()
         XCTAssertTrue(app.staticTexts["找到 2 张票"].waitForExistence(timeout: 90))
@@ -102,7 +102,7 @@ final class AppStoreScreenshotTests: XCTestCase {
             .appendingPathComponent("store-display-pair.jpg").path
         app.launchArguments.append("--store-display-pair")
         app.launch()
-        let scan = app.buttons["dock.scan"]
+        let scan = scanButton
         XCTAssertTrue(scan.waitForExistence(timeout: 15))
         scan.tap()
         XCTAssertTrue(app.staticTexts["找到 3 张票"].waitForExistence(timeout: 15))
@@ -294,16 +294,12 @@ final class AppStoreScreenshotTests: XCTestCase {
         jumper.terminate()
     }
 
+    private var scanButton: XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label IN %@", ["扫描票据", "扫描"])).firstMatch
+    }
+
     private func open(tab: String) {
-        let id: String
-        switch tab {
-        case "首页": id = "dock.tab.home"
-        case "票夹": id = "dock.tab.wallet"
-        case "设置": id = "dock.tab.settings"
-        default: id = tab
-        }
-        let byID = app.buttons[id].firstMatch
-        let button = byID.waitForExistence(timeout: 6) ? byID : app.segmentedControls["dock.tabs"].buttons[tab]
+        let button = app.tabBars.buttons[tab].firstMatch
         XCTAssertTrue(button.waitForExistence(timeout: 6), "找不到标签：\(tab)")
         button.tap()
         settle()
