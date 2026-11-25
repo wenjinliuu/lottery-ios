@@ -512,36 +512,7 @@ struct WalletAllTicketsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                if filtered.isEmpty {
-                    ContentUnavailableView("没有符合条件的票", systemImage: "line.3.horizontal.decrease.circle")
-                        .padding(.top, 40)
-                } else if status == .all {
-                    ForEach(filteredSections) { section in
-                        Section {
-                            ForEach(Array(section.cards.enumerated()), id: \.element.id) { index, item in
-                                let isLast = index == section.cards.count - 1
-                                allTicketRow(item)
-                                    .padding(.top, index == 0 ? 8 : 12)
-                                    .padding(.bottom, isLast ? 14 : 0)
-                            }
-                        } header: {
-                            WalletZoneHeader(zone: section.zone, total: section.total)
-                        }
-                    }
-                } else {
-                    ForEach(Array(filtered.enumerated()), id: \.element.id) { index, item in
-                        allTicketRow(item)
-                            .padding(.top, index == 0 ? 6 : 12)
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            .padding(.bottom, 32)
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
+        VStack(spacing: 0) {
             VStack(spacing: 8) {
                 WalletFilterGlassBar(selection: $status, counts: statusCounts)
                     .padding(.horizontal, 16)
@@ -551,8 +522,40 @@ struct WalletAllTicketsView: View {
             }
             .padding(.top, 6)
             .padding(.bottom, 8)
+            .background(Palette.canvas)
+            .zIndex(1)
+
+            ScrollView {
+                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    if filtered.isEmpty {
+                        ContentUnavailableView("没有符合条件的票", systemImage: "line.3.horizontal.decrease.circle")
+                            .padding(.top, 40)
+                    } else if status == .all {
+                        ForEach(filteredSections) { section in
+                            Section {
+                                ForEach(Array(section.cards.enumerated()), id: \.element.id) { index, item in
+                                    let isLast = index == section.cards.count - 1
+                                    allTicketRow(item)
+                                        .padding(.top, index == 0 ? 8 : 12)
+                                        .padding(.bottom, isLast ? 14 : 0)
+                                }
+                            } header: {
+                                WalletZoneHeader(zone: section.zone, total: section.total)
+                            }
+                        }
+                    } else {
+                        ForEach(Array(filtered.enumerated()), id: \.element.id) { index, item in
+                            allTicketRow(item)
+                                .padding(.top, index == 0 ? 6 : 12)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 32)
+            }
+            .scrollEdgeEffectStyle(.soft, for: .top)
         }
-        .scrollEdgeEffectStyle(.soft, for: .top)
         .background(Palette.canvas)
         .sheet(item: $editTarget) { draft in
             EntryFlowView(draft: draft)
