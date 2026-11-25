@@ -75,7 +75,7 @@ final class KeyFlowTests: XCTestCase {
             XCTAssertTrue(element.waitForExistence(timeout: 10), "首页没有显示 \(text)")
         }
         // 默认一屏内「最新开奖」卡片及其下方免责提示与轮播状态圆点均应完整露在底部悬浮栏之上。
-        let disclaimer = app.staticTexts["开奖信息整理自公开信息，仅供参考核对"].firstMatch
+        let disclaimer = app.staticTexts["开奖信息整理自公开信息，仅供核对参考"].firstMatch
         let dockTabs = app.segmentedControls["dock.tabs"].firstMatch
         XCTAssertTrue(disclaimer.waitForExistence(timeout: 10), "首页缺少最新开奖免责提示")
         XCTAssertTrue(dockTabs.waitForExistence(timeout: 5), "首页缺少底栏导航胶囊")
