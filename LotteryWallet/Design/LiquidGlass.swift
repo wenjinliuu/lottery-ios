@@ -152,13 +152,17 @@ private struct ClearGlassContainerModifier<S: InsettableShape>: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .background {
+                // 浅色下叠一层极薄纯净白膜，保持清透无灰感的同时，避免滚到底栏背后的深色字干扰前景图标辨识。
+                shape.fill(colorScheme == .dark ? Color.white.opacity(0.04) : Color.white.opacity(0.24))
+            }
             .glassEffect(GlassStyle.clear(tint: tint, interactive: interactive), in: shape)
             .overlay {
                 shape.strokeBorder(
                     LinearGradient(
                         colors: colorScheme == .dark
                             ? [Color.white.opacity(0.24), Color.white.opacity(0.08)]
-                            : [Color.white.opacity(0.92), Color.black.opacity(0.07)],
+                            : [Color.black.opacity(0.07), Color.black.opacity(0.11)],
                         startPoint: .top,
                         endPoint: .bottom
                     ),
@@ -166,7 +170,7 @@ private struct ClearGlassContainerModifier<S: InsettableShape>: ViewModifier {
                 )
                 .allowsHitTesting(false)
             }
-            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.34 : 0.085),
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.34 : 0.08),
                     radius: 14, x: 0, y: 4)
     }
 }

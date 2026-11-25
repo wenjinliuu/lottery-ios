@@ -229,7 +229,20 @@ final class AppStoreScreenshotTests: XCTestCase {
         let allowToggle = settings.switches
             .matching(NSPredicate(format: "label IN %@", ["Allow Notifications", "允许通知"]))
             .firstMatch
-        let toggle = allowToggle.waitForExistence(timeout: 5) ? allowToggle : settings.switches.firstMatch
+        if !allowToggle.waitForExistence(timeout: 2) && !settings.switches.firstMatch.exists {
+            // 部分模拟器版本会停在「对个号」应用设置首页，点进里面的「Notifications / 通知」子页再切开关。
+            let notifPredicate = NSPredicate(format: "label IN %@", ["Notifications", "通知"])
+            let notifRow = [
+                settings.buttons.matching(notifPredicate).firstMatch,
+                settings.cells.matching(notifPredicate).firstMatch,
+                settings.staticTexts.matching(notifPredicate).firstMatch
+            ].first(where: { $0.exists })
+            if let notifRow {
+                notifRow.tap()
+                settle(1.0)
+            }
+        }
+        let toggle = allowToggle.waitForExistence(timeout: 4) ? allowToggle : settings.switches.firstMatch
         if toggle.exists || toggle.waitForExistence(timeout: 3) {
             if (toggle.value as? String) == "1" {
                 toggle.tap()
