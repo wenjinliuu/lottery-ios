@@ -151,7 +151,7 @@ struct TicketCropView: View {
 
     private func outline(in frame: CGRect) -> some View {
         quadPath(in: frame)
-            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
+            .stroke(BallColor.blue.deep, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
             .allowsHitTesting(false)
     }
 
@@ -177,7 +177,7 @@ struct TicketCropView: View {
         let center = viewPoint(quad[index], in: frame)
         let isActive = activeCorner == index
         return Circle()
-            .fill(Color.accentColor)
+            .fill(BallColor.blue.deep)
             .overlay(Circle().strokeBorder(.white, lineWidth: 2.5))
             .frame(width: handleRadius * 2, height: handleRadius * 2)
             .scaleEffect(isActive ? 1.4 : 1)

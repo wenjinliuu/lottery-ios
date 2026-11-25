@@ -178,10 +178,10 @@ enum Palette {
     static let profit = Color(light: 0xF5333F, dark: 0xFF6B76)
     /// 亏损 —— 绿。
     static let loss = Color(light: 0x00A651, dark: 0x43DD84)
-    /// 提醒 / 待核对 / 奖金待公布（浅色略加深以兼顾纯白画布文字对比度）。
-    static let warning = Color(light: 0xC86A00, dark: 0xFFB340)
+    /// 提醒 / 待核对 / 奖金待公布。
+    static let warning = Color(light: 0xFF9500, dark: 0xFFB340)
     /// 「今日开奖」这类正向状态标记。
-    static let live = Color(light: 0x008A63, dark: 0x3DE0A6)
+    static let live = Color(light: 0x00B884, dark: 0x3DE0A6)
     /// 危险 / 删除 / 胆码标记。和「盈利红」分开，避免语义打架。
     static let danger = Color(light: 0xE0322F, dark: 0xFF6A64)
     /// 未命中号码球。

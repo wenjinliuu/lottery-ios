@@ -176,7 +176,8 @@ struct TicketLocateView: View {
     // MARK: - 画布
 
     static func color(for game: GameKey?) -> Color {
-        game?.accent.accentColor ?? .white
+        // 预识别页固定深黑底（.colorScheme = .dark），这里取正常饱和的彩种主色而非暗色浅粉字色。
+        game?.accent.deep ?? .white
     }
 
     static func title(number: Int, game: GameKey?) -> String {

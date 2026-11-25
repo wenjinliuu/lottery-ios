@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import UIKit
 
 /// 票夹：一张实体票对应一条票据记录，按录入时间倒序。
 struct WalletView: View {
@@ -95,42 +94,51 @@ struct WalletView: View {
         visibleCards.reduce(into: [:]) { $0[zone(of: $1), default: 0] += 1 }
     }
 
-    /// 首屏要画的东西：卡片，外加分区之间插进去的标题。
-    private var previewRows: [WalletRow] {
-        guard filter == .all else { return previewCards.map { .card($0) } }
+    /// 首屏要画的分组：每个分区作为独立 `Section`，配合 `pinnedViews: [.sectionHeaders]`
+    /// 实现类似 Telegram 的动态吸顶效果（上滑时当前分组固定在筛选条下方，下一组到达时顺滑顶走）。
+    private var previewSections: [WalletSection] {
+        guard filter == .all else { return [] }
         let totals = zoneTotals
-        var rows: [WalletRow] = []
-        var current: TicketCard.Zone?
+        var sections: [WalletSection] = []
         for card in previewCards {
             let here = zone(of: card)
-            if here != current {
-                current = here
-                rows.append(.header(here, totals[here] ?? 0))
+            if sections.last?.zone == here {
+                sections[sections.count - 1].cards.append(card)
+            } else {
+                sections.append(WalletSection(zone: here, total: totals[here] ?? 0, cards: [card]))
             }
-            rows.append(.card(card))
         }
-        return rows
+        return sections
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(spacing: 12) {
+                LazyVStack(spacing: 12, pinnedViews: [.sectionHeaders]) {
                     if visibleCards.isEmpty {
                         emptyState
-                    } else {
-                        ForEach(previewRows) { row in
-                            switch row {
-                            case let .header(zone, total):
-                                zoneHeader(zone, total: total)
-                            case let .card(item):
-                                ticketCard(item)
-                                    // 滚进屏幕 = 用户有机会看到了。先记下来，
-                                    // 离开页面时才真正写库。
-                                    .onAppear {
-                                        if isActive && item.isNewResult { seenThisVisit.insert(item.id) }
-                                    }
+                    } else if filter == .all {
+                        ForEach(previewSections) { section in
+                            Section {
+                                ForEach(section.cards) { item in
+                                    ticketCard(item)
+                                        // 滚进屏幕 = 用户有机会看到了。先记下来，
+                                        // 离开页面时才真正写库。
+                                        .onAppear {
+                                            if isActive && item.isNewResult { seenThisVisit.insert(item.id) }
+                                        }
+                                }
+                            } header: {
+                                WalletZoneHeader(zone: section.zone, total: section.total)
                             }
+                        }
+                        if overflowCount > 0 { moreButton }
+                    } else {
+                        ForEach(previewCards) { item in
+                            ticketCard(item)
+                                .onAppear {
+                                    if isActive && item.isNewResult { seenThisVisit.insert(item.id) }
+                                }
                         }
                         if overflowCount > 0 { moreButton }
                     }
@@ -317,22 +325,6 @@ struct WalletView: View {
         RecordService(context: context, drawStore: drawStore).markResultsSeen(batchIds: batch)
     }
 
-    private func zoneHeader(_ zone: TicketCard.Zone, total: Int) -> some View {
-        HStack(spacing: 6) {
-            Text(zone.title)
-                .font(.subheadline.weight(.semibold))
-            Text("\(total)")
-                .font(.caption.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 4)
-        .padding(.top, 6)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(zone.title)，共 \(total) 张")
-    }
-
     /// 空状态要分清是「一张票都没有」还是「筛选之后没有」。
     /// 原来两种情况都说"票夹是空的 / 添加彩票"，用户会以为记录丢了。
     @ViewBuilder
@@ -421,16 +413,40 @@ struct WalletView: View {
     }
 }
 
-/// 首屏列表里的一行：卡片，或者卡片之间的分区标题。
-enum WalletRow: Identifiable {
-    case header(TicketCard.Zone, Int)
-    case card(TicketCard)
+/// 票夹列表里的一个吸顶分区（等开奖 / 新结果 / 已看过）。
+private struct WalletSection: Identifiable {
+    let zone: TicketCard.Zone
+    let total: Int
+    var cards: [TicketCard]
 
-    var id: String {
-        switch self {
-        case let .header(zone, _): "zone-\(zone.rawValue)"
-        case let .card(card): card.id
+    var id: TicketCard.Zone { zone }
+}
+
+/// Telegram 风格动态吸顶清透玻璃分组角标：上滑时贴在顶部筛选条下方，下一组滑到顶部时将其顺滑顶走。
+private struct WalletZoneHeader: View {
+    let zone: TicketCard.Zone
+    let total: Int
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 5) {
+                Text(zone.title)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text("\(total)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .clearGlassPill(interactive: false)
+            Spacer(minLength: 0)
         }
+        .padding(.top, 4)
+        .padding(.bottom, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(zone.title)，共 \(total) 张")
     }
 }
 
@@ -471,33 +487,39 @@ struct WalletAllTicketsView: View {
         cards.filter { status.matches($0.status) && (game == nil || $0.game == game) }
     }
 
+    private var filteredSections: [WalletSection] {
+        guard status == .all else { return [] }
+        var sections: [WalletSection] = []
+        for card in filtered {
+            if sections.last?.zone == card.zone {
+                sections[sections.count - 1].cards.append(card)
+            } else {
+                sections.append(WalletSection(zone: card.zone, total: 0, cards: [card]))
+            }
+        }
+        return sections.map { WalletSection(zone: $0.zone, total: $0.cards.count, cards: $0.cards) }
+    }
+
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 12) {
+            LazyVStack(spacing: 12, pinnedViews: [.sectionHeaders]) {
                 if games.count > 1 { gameFilterBar }
                 if filtered.isEmpty {
                     ContentUnavailableView("没有符合条件的票", systemImage: "line.3.horizontal.decrease.circle")
                         .padding(.top, 40)
-                }
-                ForEach(filtered) { item in
-                    WalletTicketCard(
-                        card: item,
-                        isExpanded: expandedBatches.contains(item.id),
-                        onToggle: {
-                            withAnimation(.spring(duration: 0.28, bounce: 0)) {
-                                if expandedBatches.contains(item.id) {
-                                    expandedBatches.remove(item.id)
-                                } else {
-                                    expandedBatches.insert(item.id)
-                                }
+                } else if status == .all {
+                    ForEach(filteredSections) { section in
+                        Section {
+                            ForEach(section.cards) { item in
+                                allTicketRow(item)
                             }
-                        },
-                        onDelete: { onDelete(item) },
-                        onEdit: { editTarget = EntryDraft.load(batchId: item.id, context: context) },
-                        draw: drawStore.draw(for: item.game, expect: item.expect)
-                    )
-                    .onAppear {
-                        if item.isNewResult { seenThisVisit.insert(item.id) }
+                        } header: {
+                            WalletZoneHeader(zone: section.zone, total: section.total)
+                        }
+                    }
+                } else {
+                    ForEach(filtered) { item in
+                        allTicketRow(item)
                     }
                 }
             }
@@ -527,15 +549,37 @@ struct WalletAllTicketsView: View {
         }
     }
 
+    private func allTicketRow(_ item: TicketCard) -> some View {
+        WalletTicketCard(
+            card: item,
+            isExpanded: expandedBatches.contains(item.id),
+            onToggle: {
+                withAnimation(.spring(duration: 0.28, bounce: 0)) {
+                    if expandedBatches.contains(item.id) {
+                        expandedBatches.remove(item.id)
+                    } else {
+                        expandedBatches.insert(item.id)
+                    }
+                }
+            },
+            onDelete: { onDelete(item) },
+            onEdit: { editTarget = EntryDraft.load(batchId: item.id, context: context) },
+            draw: drawStore.draw(for: item.game, expect: item.expect)
+        )
+        .onAppear {
+            if item.isNewResult { seenThisVisit.insert(item.id) }
+        }
+    }
+
     private var gameFilterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             GlassGroup(spacing: 8) {
                 HStack(spacing: 8) {
-                    gameChip(title: "全部彩种", isOn: game == nil, tint: .accentColor, foreground: Palette.onAccent) {
+                    gameChip(title: "全部彩种", isOn: game == nil, tint: .accentColor) {
                         game = nil
                     }
                     ForEach(games) { key in
-                        gameChip(title: key.label, isOn: game == key, tint: key.tint, foreground: key.onTint) {
+                        gameChip(title: key.label, isOn: game == key, tint: key.tint) {
                             game = key
                         }
                     }
@@ -544,136 +588,173 @@ struct WalletAllTicketsView: View {
             }
         }
         .scrollClipDisabled()
-        .animation(.easeOut(duration: 0.18), value: game)
+        .animation(.easeOut(duration: 0.2), value: game)
         .padding(.bottom, 2)
     }
 
     private func gameChip(title: String,
                           isOn: Bool,
                           tint: Color,
-                          foreground: Color,
                           action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.footnote.weight(.semibold))
                 .monospacedDigit()
-                .foregroundStyle(isOn ? foreground : Color.primary)
+                .foregroundStyle(isOn ? tint : Color.primary.opacity(0.84))
                 .padding(.horizontal, 13)
                 .padding(.vertical, 7)
-                .glassEffect(
-                    isOn
-                        ? GlassStyle.prominent(tint: tint, interactive: true)
-                        : GlassStyle.pill(tint: nil, interactive: true),
-                    in: Capsule()
+                .background(
+                    Capsule().fill(isOn ? tint.opacity(0.16) : Color.clear)
                 )
+                .clearGlassPill(interactive: true)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
     }
 }
 
-/// 票夹顶部悬浮液态玻璃四合一筛选条：由原生 `UISegmentedControl`（`TallSegmentedControl`）驱动，
-/// 完整保留 iOS 26/27 官方液态玻璃水滴放大跳动与跟手拖动，同时随当前状态切换选中玻璃着色。
+/// 票夹顶部清透液态玻璃四合一筛选条：
+/// 外层与选中滑块均采用高通透 `.clear` 液态玻璃，彻底消除灰底轨和磨砂闷感；
+/// 选中透镜保持恒定玻璃图层身份，仅对内部淡彩填充与描边做平滑插值，切色全程零闪烁。
 struct WalletFilterGlassBar: View {
     @Binding var selection: WalletFilter
     let counts: [WalletFilter: Int]
 
     @Environment(\.colorScheme) private var colorScheme
+    @Namespace private var filterNamespace
+    @State private var scrubFilter: WalletFilter?
+    @State private var barWidth: CGFloat = 0
+
+    private var highlighted: WalletFilter { scrubFilter ?? selection }
 
     var body: some View {
-        WalletFilterSegmentedControl(
-            selection: $selection,
-            counts: counts,
-            colorScheme: colorScheme
-        )
-        .frame(height: 40)
-        .glassPill(interactive: false)
-        .sensoryFeedback(.selection, trigger: selection)
+        GlassEffectContainer(spacing: 6) {
+            HStack(spacing: 3) {
+                ForEach(WalletFilter.allCases) { item in
+                    segmentButton(item)
+                }
+            }
+            .padding(4)
+            .frame(height: 42)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { barWidth = $0 }
+            .clearGlassPill(interactive: true)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 8)
+                    .onChanged { value in
+                        guard barWidth > 0 else { return }
+                        let count = WalletFilter.allCases.count
+                        let step = barWidth / CGFloat(count)
+                        let index = min(max(Int(value.location.x / step), 0), count - 1)
+                        let target = WalletFilter.allCases[index]
+                        if scrubFilter != target {
+                            withAnimation(.spring(duration: 0.30, bounce: 0.18)) {
+                                scrubFilter = target
+                            }
+                        }
+                    }
+                    .onEnded { _ in
+                        if let target = scrubFilter {
+                            withAnimation(.spring(duration: 0.30, bounce: 0.16)) {
+                                selection = target
+                            }
+                        }
+                        withAnimation(.spring(duration: 0.26, bounce: 0.14)) {
+                            scrubFilter = nil
+                        }
+                    }
+            )
+            .sensoryFeedback(.selection, trigger: highlighted)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("wallet.filter.bar")
+        }
     }
-}
 
-private struct WalletFilterSegmentedControl: UIViewRepresentable {
-    @Binding var selection: WalletFilter
-    let counts: [WalletFilter: Int]
-    let colorScheme: ColorScheme
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    func makeUIView(context: Context) -> TallSegmentedControl {
-        let titles = WalletFilter.allCases.map { "\($0.label) \(counts[$0] ?? 0)" }
-        let control = TallSegmentedControl(items: titles)
-        control.targetHeight = 40
-        control.apportionsSegmentWidthsByContent = true
-        control.backgroundColor = .clear
-        control.accessibilityIdentifier = "wallet.filter.bar"
-        control.selectedSegmentIndex = WalletFilter.allCases.firstIndex(of: selection) ?? 0
-        control.addTarget(context.coordinator, action: #selector(Coordinator.valueChanged(_:)), for: .valueChanged)
-        applyStyle(to: control)
-        return control
-    }
-
-    func updateUIView(_ uiView: TallSegmentedControl, context: Context) {
-        context.coordinator.parent = self
-        for (index, item) in WalletFilter.allCases.enumerated() {
-            let title = "\(item.label) \(counts[item] ?? 0)"
-            if uiView.titleForSegment(at: index) != title {
-                uiView.setTitle(title, forSegmentAt: index)
+    private func segmentButton(_ item: WalletFilter) -> some View {
+        let isOn = highlighted == item
+        let isScrubbing = scrubFilter != nil && isOn
+        return Button {
+            withAnimation(.spring(duration: 0.32, bounce: 0.18)) {
+                selection = item
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(item.label)
+                Text("\(counts[item] ?? 0)")
+                    .monospacedDigit()
+            }
+            .font(.system(size: 12, weight: isOn ? .bold : .semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .foregroundStyle(foregroundColor(for: item, isOn: isOn))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Capsule())
+            .background {
+                if isOn {
+                    activeGlassLens(for: item, isScrubbing: isScrubbing)
+                }
             }
         }
-        let targetIndex = WalletFilter.allCases.firstIndex(of: selection) ?? 0
-        if uiView.selectedSegmentIndex != targetIndex {
-            uiView.selectedSegmentIndex = targetIndex
-        }
-        applyStyle(to: uiView)
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(item.label) \(counts[item] ?? 0)")
+        .accessibilityAddTraits(selection == item ? [.isButton, .isSelected] : .isButton)
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: TallSegmentedControl, context: Context) -> CGSize? {
-        CGSize(width: proposal.width ?? 340, height: 40)
-    }
-
-    private func applyStyle(to control: TallSegmentedControl) {
+    private func activeGlassLens(for item: WalletFilter, isScrubbing: Bool) -> some View {
         let isDark = colorScheme == .dark
-        let traits = UITraitCollection(userInterfaceStyle: isDark ? .dark : .light)
-        traits.performAsCurrent {
-            let accent = UIColor(named: "AccentColor", in: .main, compatibleWith: traits) ?? UIColor(Color.accentColor)
-            let tintColor: UIColor = switch selection {
-            case .all: accent
-            case .pending: UIColor(Palette.warning)
-            case .won: UIColor(Palette.profit)
-            case .lost: isDark ? UIColor(hex: 0xB8C0CE) : UIColor(hex: 0x5E6778)
+        return Capsule()
+            .fill(lensFill(for: item, isDark: isDark))
+            .glassEffect(.clear.interactive(), in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(isDark ? 0.36 : 0.88),
+                                lensBorderAccent(for: item, isDark: isDark)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.9
+                    )
             }
-            control.selectedSegmentTintColor = tintColor
+            .matchedGeometryEffect(id: "wallet.filter.lens", in: filterNamespace)
+            .glassEffectID("wallet.filter.lens", in: filterNamespace)
+            .scaleEffect(isScrubbing ? 1.06 : 1.0)
+            .animation(.spring(duration: 0.32, bounce: 0.18), value: highlighted)
+            .animation(.spring(duration: 0.22, bounce: 0.22), value: isScrubbing)
+    }
 
-            let normalFont = UIFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
-            let selectedFont = UIFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold)
-            let selectedTextColor: UIColor = isDark ? UIColor(hex: 0x101014) : .white
+    private func foregroundColor(for item: WalletFilter, isOn: Bool) -> Color {
+        if isOn {
+            switch item {
+            case .all: return .accentColor
+            case .pending: return Palette.warning
+            case .won: return Palette.profit
+            case .lost: return .primary
+            }
+        }
+        if item == .pending && (counts[.pending] ?? 0) > 0 {
+            return Palette.warning
+        }
+        return Color.primary.opacity(0.76)
+    }
 
-            control.setTitleTextAttributes([
-                .font: normalFont,
-                .foregroundColor: UIColor.label.withAlphaComponent(0.84)
-            ], for: .normal)
-            control.setTitleTextAttributes([
-                .font: selectedFont,
-                .foregroundColor: selectedTextColor
-            ], for: .selected)
+    private func lensFill(for item: WalletFilter, isDark: Bool) -> Color {
+        switch item {
+        case .all: Color.accentColor.opacity(isDark ? 0.26 : 0.14)
+        case .pending: Palette.warning.opacity(isDark ? 0.26 : 0.16)
+        case .won: Palette.profit.opacity(isDark ? 0.26 : 0.14)
+        case .lost: Color.primary.opacity(isDark ? 0.16 : 0.08)
         }
     }
 
-    final class Coordinator: NSObject {
-        var parent: WalletFilterSegmentedControl
-
-        init(_ parent: WalletFilterSegmentedControl) {
-            self.parent = parent
-        }
-
-        @objc func valueChanged(_ sender: UISegmentedControl) {
-            let index = sender.selectedSegmentIndex
-            guard WalletFilter.allCases.indices.contains(index) else { return }
-            withAnimation(.spring(duration: 0.32, bounce: 0.16)) {
-                parent.selection = WalletFilter.allCases[index]
-            }
+    private func lensBorderAccent(for item: WalletFilter, isDark: Bool) -> Color {
+        switch item {
+        case .all: Color.accentColor.opacity(isDark ? 0.38 : 0.26)
+        case .pending: Palette.warning.opacity(isDark ? 0.40 : 0.30)
+        case .won: Palette.profit.opacity(isDark ? 0.38 : 0.26)
+        case .lost: Color.primary.opacity(isDark ? 0.22 : 0.14)
         }
     }
 }

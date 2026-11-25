@@ -128,11 +128,11 @@ struct HomeView: View {
                 // 最新开奖先显示；日历按年缓存，拿到后再显示准确的今日标记。
                 await drawStore.loadCalendar(year: ChinaClock.year())
             }
-            // 换范围或左右翻期时数字、球罐和彩种分布同步柔和过渡，避免生硬瞬切
+            // 换范围或左右翻期时数字和统计柔和滚动，球罐物理重排移出布局动画事务以免主线程卡顿
             .onChange(of: periodLabel) { _, _ in
-                withAnimation(.spring(duration: 0.42, bounce: 0.14)) {
+                recomputeJar()
+                withAnimation(.easeOut(duration: 0.22)) {
                     recomputeSeries()
-                    recomputeJar()
                     recomputePeriodStats()
                 }
             }
@@ -194,16 +194,12 @@ struct HomeView: View {
             guard let currentStart = cal.dateInterval(of: .month, for: periodEnd)?.start,
                   let targetStart = cal.date(byAdding: .month, value: delta, to: currentStart),
                   let interval = cal.dateInterval(of: .month, for: targetStart) else { return }
-            withAnimation(.spring(duration: 0.42, bounce: 0.14)) {
-                historicalEnd = interval.contains(now) ? nil : interval.end.addingTimeInterval(-1)
-            }
+            historicalEnd = interval.contains(now) ? nil : interval.end.addingTimeInterval(-1)
         } else if range == .year {
             let targetYear = cal.component(.year, from: periodEnd) + delta
             guard let first = cal.date(from: DateComponents(year: targetYear, month: 1, day: 1)),
                   let interval = cal.dateInterval(of: .year, for: first) else { return }
-            withAnimation(.spring(duration: 0.42, bounce: 0.14)) {
-                historicalEnd = interval.contains(now) ? nil : interval.end.addingTimeInterval(-1)
-            }
+            historicalEnd = interval.contains(now) ? nil : interval.end.addingTimeInterval(-1)
         }
     }
 
@@ -319,42 +315,46 @@ struct HomeView: View {
 
                     Spacer(minLength: 4)
 
-                    // 左右步进按钮常驻占位并做柔和缩放淡入淡出，切换「全部」时中间分段条不再左右猛跳。
-                    periodStepButton("chevron.left",
-                                     visible: showsSteppers,
-                                     enabled: canStepPeriod(by: -1),
-                                     id: "home.period.prev",
-                                     label: range == .month ? "上个月" : "上一年") {
-                        stepPeriod(by: -1)
-                    }
+                    // 选中「全部」时收起左右翻期箭头，让分段条自然贴紧右边缘不留空缺；
+                    // 固定分段条宽度避免「本月」切换到「2026-08」时横向撑跳卡顿。
+                    HStack(spacing: 6) {
+                        if showsSteppers {
+                            periodStepButton("chevron.left",
+                                             enabled: canStepPeriod(by: -1),
+                                             id: "home.period.prev",
+                                             label: range == .month ? "上个月" : "上一年") {
+                                stepPeriod(by: -1)
+                            }
+                            .transition(.scale(scale: 0.65).combined(with: .opacity))
+                        }
 
-                    Picker("范围", selection: Binding(
-                        get: { range },
-                        set: { next in
-                            withAnimation(.spring(duration: 0.42, bounce: 0.14)) {
+                        Picker("范围", selection: Binding(
+                            get: { range },
+                            set: { next in
                                 historicalEnd = nil
                                 range = next
                             }
+                        )) {
+                            Text(range == .month ? periodLabel : "本月").tag(ProfitRange.month)
+                            Text(range == .year ? periodLabel : "本年").tag(ProfitRange.year)
+                            Text("全部").tag(ProfitRange.all)
                         }
-                    )) {
-                        Text(range == .month ? periodLabel : "本月").tag(ProfitRange.month)
-                        Text(range == .year ? periodLabel : "本年").tag(ProfitRange.year)
-                        Text("全部").tag(ProfitRange.all)
-                    }
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                    .accessibilityIdentifier("home.range")
+                        .pickerStyle(.segmented)
+                        .frame(width: 192)
+                        .accessibilityIdentifier("home.range")
 
-                    periodStepButton("chevron.right",
-                                     visible: showsSteppers,
-                                     enabled: canStepPeriod(by: 1),
-                                     id: "home.period.next",
-                                     label: range == .month ? "下个月" : "下一年") {
-                        stepPeriod(by: 1)
+                        if showsSteppers {
+                            periodStepButton("chevron.right",
+                                             enabled: canStepPeriod(by: 1),
+                                             id: "home.period.next",
+                                             label: range == .month ? "下个月" : "下一年") {
+                                stepPeriod(by: 1)
+                            }
+                            .transition(.scale(scale: 0.65).combined(with: .opacity))
+                        }
                     }
+                    .animation(.spring(duration: 0.34, bounce: 0.08), value: showsSteppers)
                 }
-                .animation(.spring(duration: 0.42, bounce: 0.14), value: range)
-                .animation(.spring(duration: 0.42, bounce: 0.14), value: periodLabel)
 
                 HStack(alignment: .center, spacing: 8) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -422,7 +422,6 @@ struct HomeView: View {
     }
 
     private func periodStepButton(_ symbol: String,
-                                  visible: Bool,
                                   enabled: Bool,
                                   id: String,
                                   label: String,
@@ -432,15 +431,12 @@ struct HomeView: View {
                 .scaledFont(11, weight: .bold)
                 .foregroundStyle(enabled ? Color.accentColor : Color.secondary)
                 .frame(width: 28, height: 28)
-                .glassCircle(tint: enabled ? .accentColor : nil, interactive: visible && enabled)
+                .glassCircle(tint: enabled ? .accentColor : nil, interactive: enabled)
                 .contentShape(Circle().inset(by: -6))
         }
         .buttonStyle(PressableIcon())
-        .disabled(!visible || !enabled)
-        .opacity(visible ? (enabled ? 1 : 0.28) : 0)
-        .scaleEffect(visible ? 1 : 0.72)
-        .allowsHitTesting(visible && enabled)
-        .accessibilityHidden(!visible)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.28)
         .accessibilityLabel(label)
         .accessibilityIdentifier(id)
     }

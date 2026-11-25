@@ -507,7 +507,7 @@ struct TicketScanView: View {
                     // 复核页是保存前的最后一道关口，提示摆在号码**上面**，
                     // 不能放页脚 —— 人是从上往下核对的，看完才提醒就晚了。
                     DisclaimerBanner(text: Disclaimer.review,
-                                     icon: "checklist.unchecked")
+                                     icon: "exclamationmark.circle.fill")
                     ForEach(globalWarnings, id: \.self) { warning in
                         warningRow(warning)
                     }

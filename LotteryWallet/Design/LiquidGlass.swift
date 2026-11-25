@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 /// 视觉分层的统一封装。
 ///
@@ -63,6 +62,12 @@ extension View {
         glassEffect(GlassStyle.pill(tint: tint, interactive: interactive), in: Capsule())
     }
 
+    /// 清透液态玻璃胶囊：采用高通透 `.clear` 玻璃材质 + 细高光棱边与柔和悬浮影，
+    /// 避免在浅色纯白画布上发灰发闷，让底部导航栏与悬浮筛选条保持真正通透的折射质感。
+    func clearGlassPill(tint: Color? = nil, interactive: Bool = true) -> some View {
+        modifier(ClearGlassContainerModifier(shape: Capsule(), tint: tint, interactive: interactive))
+    }
+
     /// 饱满着色液态玻璃胶囊：用于主强调或选中态交互按钮。
     func glassProminentPill(tint: Color, interactive: Bool = true) -> some View {
         glassEffect(GlassStyle.prominent(tint: tint, interactive: interactive), in: Capsule())
@@ -71,6 +76,11 @@ extension View {
     /// 圆形玻璃：独立悬浮扫描按钮、翻年箭头等圆形控件。
     func glassCircle(tint: Color? = nil, interactive: Bool = true) -> some View {
         glassEffect(GlassStyle.pill(tint: tint, interactive: interactive), in: Circle())
+    }
+
+    /// 清透圆形液态玻璃：与 `clearGlassPill` 成对使用，保持底栏左侧胶囊与右侧扫描按钮同一套通透材质。
+    func clearGlassCircle(tint: Color? = nil, interactive: Bool = true) -> some View {
+        modifier(ClearGlassContainerModifier(shape: Circle(), tint: tint, interactive: interactive))
     }
 
     /// 让相邻的玻璃元素在动画中融合（形变、聚拢、分离）。
@@ -133,19 +143,31 @@ private struct ContentCardModifier: ViewModifier {
     }
 }
 
-/// 可定制固有高度的原生 `UISegmentedControl`。
-///
-/// 不覆写 `setBackgroundImage` / `setDividerImage`，完整保留 iOS 26/27 系统内置的
-/// Liquid Glass 光学放大水滴透镜（点击弹性跳动与手指拖动折射），供底部导航胶囊与票夹悬浮筛选条共用。
-final class TallSegmentedControl: UISegmentedControl {
-    var targetHeight: CGFloat = 40
+private struct ClearGlassContainerModifier<S: InsettableShape>: ViewModifier {
+    let shape: S
+    let tint: Color?
+    let interactive: Bool
 
-    override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: targetHeight)
-    }
+    @Environment(\.colorScheme) private var colorScheme
 
-    override func sizeThatFits(_ size: CGSize) -> CGSize {
-        CGSize(width: size.width, height: targetHeight)
+    func body(content: Content) -> some View {
+        content
+            .glassEffect(GlassStyle.clear(tint: tint, interactive: interactive), in: shape)
+            .overlay {
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: colorScheme == .dark
+                            ? [Color.white.opacity(0.24), Color.white.opacity(0.08)]
+                            : [Color.white.opacity(0.92), Color.black.opacity(0.07)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 0.8
+                )
+                .allowsHitTesting(false)
+            }
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.34 : 0.085),
+                    radius: 14, x: 0, y: 4)
     }
 }
 
@@ -199,6 +221,13 @@ enum GlassStyle {
     static func pill(tint: Color?, interactive: Bool) -> Glass {
         var glass = Glass.regular
         if let tint { glass = glass.tint(tint.opacity(0.20)) }
+        if interactive { glass = glass.interactive() }
+        return glass
+    }
+
+    static func clear(tint: Color?, interactive: Bool) -> Glass {
+        var glass = Glass.clear
+        if let tint { glass = glass.tint(tint) }
         if interactive { glass = glass.interactive() }
         return glass
     }

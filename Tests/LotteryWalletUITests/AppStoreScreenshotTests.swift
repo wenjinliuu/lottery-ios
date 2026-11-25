@@ -252,8 +252,8 @@ final class AppStoreScreenshotTests: XCTestCase {
         case "设置": id = "dock.tab.settings"
         default: id = tab
         }
-        let segmented = app.segmentedControls["dock.tabs"].buttons[tab]
-        let button = segmented.waitForExistence(timeout: 6) ? segmented : app.buttons[id].firstMatch
+        let byID = app.buttons[id].firstMatch
+        let button = byID.waitForExistence(timeout: 6) ? byID : app.segmentedControls["dock.tabs"].buttons[tab]
         XCTAssertTrue(button.waitForExistence(timeout: 6), "找不到标签：\(tab)")
         button.tap()
         settle()

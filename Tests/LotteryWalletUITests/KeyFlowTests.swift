@@ -21,11 +21,11 @@ final class KeyFlowTests: XCTestCase {
         case "设置": id = "dock.tab.settings"
         default: id = name
         }
-        let segmented = app.segmentedControls["dock.tabs"].buttons[name]
-        if segmented.exists { return segmented }
         let byID = app.buttons[id].firstMatch
         if byID.exists { return byID }
-        return app.segmentedControls["dock.tabs"].buttons[name]
+        let segmented = app.segmentedControls["dock.tabs"].buttons[name]
+        if segmented.exists { return segmented }
+        return app.buttons[id].firstMatch
     }
 
     func testWalletTopEdgeAfterScrolling() throws {
@@ -55,10 +55,10 @@ final class KeyFlowTests: XCTestCase {
         }
 
         let scan = app.buttons["dock.scan"]
-        let dockTabs = app.segmentedControls["dock.tabs"].firstMatch
+        let settings = app.buttons["dock.tab.settings"].firstMatch
         XCTAssertTrue(scan.waitForExistence(timeout: 10), "找不到独立扫描按钮")
-        XCTAssertTrue(dockTabs.waitForExistence(timeout: 5), "找不到底栏导航胶囊")
-        XCTAssertGreaterThan(scan.frame.minX, dockTabs.frame.maxX, "扫描按钮应独立位于底栏胶囊右侧")
+        XCTAssertTrue(settings.waitForExistence(timeout: 5), "找不到底栏设置按钮")
+        XCTAssertGreaterThan(scan.frame.minX, settings.frame.maxX, "扫描按钮应独立位于底栏胶囊右侧")
         scan.tap()
         let close = app.buttons["关闭"].firstMatch
         XCTAssertTrue(close.waitForExistence(timeout: 10), "点扫描按钮没有弹出扫描抽屉")
@@ -76,10 +76,10 @@ final class KeyFlowTests: XCTestCase {
         }
         // 默认一屏内「最新开奖」卡片及其下方免责提示与轮播状态圆点均应完整露在底部悬浮栏之上。
         let disclaimer = app.staticTexts["开奖信息整理自公开信息，仅供核对参考"].firstMatch
-        let dockTabs = app.segmentedControls["dock.tabs"].firstMatch
+        let dockAnchor = app.buttons["dock.tab.home"].firstMatch
         XCTAssertTrue(disclaimer.waitForExistence(timeout: 10), "首页缺少最新开奖免责提示")
-        XCTAssertTrue(dockTabs.waitForExistence(timeout: 5), "首页缺少底栏导航胶囊")
-        XCTAssertLessThan(disclaimer.frame.maxY + 10, dockTabs.frame.minY,
+        XCTAssertTrue(dockAnchor.waitForExistence(timeout: 5), "首页缺少底栏导航胶囊")
+        XCTAssertLessThan(disclaimer.frame.maxY + 10, dockAnchor.frame.minY,
                           "默认一屏下最新开奖卡片与轮播状态圆点不应被底栏遮挡")
     }
 

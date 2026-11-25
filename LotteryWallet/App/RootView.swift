@@ -246,28 +246,61 @@ enum MainTab: String, Hashable, CaseIterable, Identifiable {
 
 // MARK: - 底部双体液态玻璃悬浮栏
 
-/// 左侧三项主页面悬浮液态玻璃胶囊 + 右侧完全独立的球形液态玻璃扫描按钮。
+/// 左侧三项主页面清透液态玻璃悬浮胶囊 + 右侧完全独立的球形清透液态玻璃扫描按钮。
 ///
-/// 左侧由原生 `UISegmentedControl`（`TallSegmentedControl`）驱动，不覆写背景/分隔图，
-/// 直接调用 iOS 26/27 系统内置的液态玻璃光学放大水滴透镜（点击弹性跳动与手指拖动折射）；
-/// 外层叠加 `.glassPill` 承接下方滚动内容折射，右侧保留独立圆形扫描按钮，兼得官方手感与分离布局。
+/// 全程采用纯 SwiftUI `GlassEffectContainer` + `.clear` 高通透液态玻璃，彻底去除
+/// `UISegmentedControl` 自带灰底轨与不透明白块；选中指示器是一枚可随点按和手指左右拖动
+/// 弹性滑移的清透液态玻璃水滴透镜（`matchedGeometryEffect` + `glassEffectID`）。
 struct FloatingGlassDock: View {
     @Binding var selection: MainTab
     let unseenCount: Int
     let onScan: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @Namespace private var dockNamespace
+    @State private var scrubTab: MainTab?
+    @State private var barWidth: CGFloat = 0
+
+    private var highlightedTab: MainTab { scrubTab ?? selection }
 
     var body: some View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 12) {
-                NativeGlassDockControl(
-                    selection: $selection,
-                    unseenCount: unseenCount,
-                    colorScheme: colorScheme
-                )
+                HStack(spacing: 4) {
+                    ForEach(MainTab.allCases) { tab in
+                        tabButton(tab)
+                    }
+                }
+                .padding(4)
                 .frame(height: 58)
-                .glassPill(interactive: false)
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { barWidth = $0 }
+                .clearGlassPill(interactive: true)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 8)
+                        .onChanged { value in
+                            guard barWidth > 0 else { return }
+                            let count = MainTab.allCases.count
+                            let step = barWidth / CGFloat(count)
+                            let index = min(max(Int(value.location.x / step), 0), count - 1)
+                            let target = MainTab.allCases[index]
+                            if scrubTab != target {
+                                withAnimation(.spring(duration: 0.30, bounce: 0.22)) {
+                                    scrubTab = target
+                                }
+                            }
+                        }
+                        .onEnded { _ in
+                            if let target = scrubTab {
+                                selection = target
+                            }
+                            withAnimation(.spring(duration: 0.30, bounce: 0.18)) {
+                                scrubTab = nil
+                            }
+                        }
+                )
+                .sensoryFeedback(.selection, trigger: highlightedTab)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("dock.tabs")
 
                 Button(action: onScan) {
                     Image(systemName: "camera.viewfinder")
@@ -276,8 +309,9 @@ struct FloatingGlassDock: View {
                         .frame(width: 58, height: 58)
                         .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
-                .glassCircle(tint: .accentColor)
+                .buttonStyle(PressableIcon())
+                .clearGlassCircle(tint: Color.accentColor.opacity(colorScheme == .dark ? 0.20 : 0.11),
+                                  interactive: true)
                 .accessibilityLabel("扫描票据")
                 .accessibilityIdentifier("dock.scan")
             }
@@ -285,146 +319,78 @@ struct FloatingGlassDock: View {
             .padding(.bottom, 6)
         }
     }
-}
 
-/// 承载系统原生液态水滴透镜的三项导航控件。
-private struct NativeGlassDockControl: UIViewRepresentable {
-    @Binding var selection: MainTab
-    let unseenCount: Int
-    let colorScheme: ColorScheme
-
-    struct RenderKey: Equatable {
-        let selection: MainTab
-        let unseenCount: Int
-        let colorScheme: ColorScheme
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    func makeUIView(context: Context) -> TallSegmentedControl {
-        let control = TallSegmentedControl(items: MainTab.allCases.map(\.label))
-        control.targetHeight = 58
-        control.backgroundColor = .clear
-        control.selectedSegmentTintColor = nil
-        control.apportionsSegmentWidthsByContent = false
-        control.accessibilityIdentifier = "dock.tabs"
-        control.selectedSegmentIndex = MainTab.allCases.firstIndex(of: selection) ?? 0
-        control.addTarget(context.coordinator, action: #selector(Coordinator.valueChanged(_:)), for: .valueChanged)
-        updateSegments(on: control, coordinator: context.coordinator, force: true)
-        return control
-    }
-
-    func updateUIView(_ uiView: TallSegmentedControl, context: Context) {
-        context.coordinator.parent = self
-        let targetIndex = MainTab.allCases.firstIndex(of: selection) ?? 0
-        if uiView.selectedSegmentIndex != targetIndex {
-            uiView.selectedSegmentIndex = targetIndex
-        }
-        updateSegments(on: uiView, coordinator: context.coordinator, force: false)
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: TallSegmentedControl, context: Context) -> CGSize? {
-        CGSize(width: proposal.width ?? 270, height: 58)
-    }
-
-    private func updateSegments(on control: TallSegmentedControl, coordinator: Coordinator, force: Bool) {
-        let key = RenderKey(selection: selection, unseenCount: unseenCount, colorScheme: colorScheme)
-        guard force || coordinator.lastRenderKey != key else { return }
-        coordinator.lastRenderKey = key
-
-        let traits = UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
-        for (index, tab) in MainTab.allCases.enumerated() {
-            let image = renderTabImage(tab: tab,
-                                       isSelected: selection == tab,
-                                       badge: tab == .wallet ? unseenCount : 0,
-                                       traits: traits)
-            control.setImage(image, forSegmentAt: index)
-        }
-    }
-
-    private func renderTabImage(tab: MainTab, isSelected: Bool, badge: Int, traits: UITraitCollection) -> UIImage {
-        let size = CGSize(width: 78, height: 46)
-        let format = UIGraphicsImageRendererFormat()
-        format.opaque = false
-        format.scale = max(traits.displayScale, 3)
-
-        var rendered = UIImage()
-        traits.performAsCurrent {
-            let accent = UIColor(named: "AccentColor", in: .main, compatibleWith: traits) ?? UIColor(Color.accentColor)
-            let inactive = UIColor.label.withAlphaComponent(0.78)
-            let tint = isSelected ? accent : inactive
-
-            rendered = UIGraphicsImageRenderer(size: size, format: format).image { _ in
-                let symbolConfig = UIImage.SymbolConfiguration(pointSize: 18, weight: isSelected ? .semibold : .medium)
-                let symbolName = isSelected ? tab.selectedSymbol : tab.symbol
-                if let symbol = UIImage(systemName: symbolName, withConfiguration: symbolConfig)?
-                    .withTintColor(tint, renderingMode: .alwaysOriginal) {
-                    let s = symbol.size
-                    let origin = CGPoint(x: (size.width - s.width) / 2, y: 4 + (22 - s.height) / 2)
-                    symbol.draw(in: CGRect(origin: origin, size: s))
-                }
-
-                let titleAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 10.5, weight: isSelected ? .semibold : .medium),
-                    .foregroundColor: tint
-                ]
-                let title = NSString(string: tab.label)
-                let textSize = title.size(withAttributes: titleAttrs)
-                let textRect = CGRect(
-                    x: (size.width - textSize.width) / 2,
-                    y: 28.5,
-                    width: textSize.width,
-                    height: textSize.height
-                )
-                title.draw(in: textRect, withAttributes: titleAttrs)
-
-                if badge > 0 {
-                    let badgeText = NSString(string: badge > 99 ? "99+" : "\(badge)")
-                    let baseFont = UIFont.systemFont(ofSize: 10, weight: .bold)
-                    let badgeFont = baseFont.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: 10) } ?? baseFont
-                    let badgeAttrs: [NSAttributedString.Key: Any] = [
-                        .font: badgeFont,
-                        .foregroundColor: UIColor.white
-                    ]
-                    let bSize = badgeText.size(withAttributes: badgeAttrs)
-                    let pillW = max(17, bSize.width + 9)
-                    let pillH: CGFloat = 17
-                    let pillRect = CGRect(x: size.width / 2 + 5, y: 1, width: pillW, height: pillH)
-                    UIColor(Palette.profit).setFill()
-                    UIBezierPath(roundedRect: pillRect, cornerRadius: pillH / 2).fill()
-                    let textOrigin = CGPoint(
-                        x: pillRect.minX + (pillW - bSize.width) / 2,
-                        y: pillRect.minY + (pillH - bSize.height) / 2
-                    )
-                    badgeText.draw(at: textOrigin, withAttributes: badgeAttrs)
+    private func tabButton(_ tab: MainTab) -> some View {
+        let isHighlighted = highlightedTab == tab
+        let isScrubbing = scrubTab != nil && isHighlighted
+        return Button {
+            withAnimation(.spring(duration: 0.34, bounce: 0.22)) {
+                selection = tab
+            }
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: isHighlighted ? tab.selectedSymbol : tab.symbol)
+                    .font(.system(size: 18, weight: isHighlighted ? .semibold : .medium))
+                    .symbolRenderingMode(.hierarchical)
+                    .overlay(alignment: .topTrailing) {
+                        if tab == .wallet && unseenCount > 0 {
+                            badgePill
+                                .offset(x: 11, y: -5)
+                        }
+                    }
+                Text(tab.label)
+                    .font(.system(size: 10.5, weight: isHighlighted ? .semibold : .medium))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(isHighlighted ? Color.accentColor : Color.primary.opacity(0.76))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Capsule())
+            .background {
+                if isHighlighted {
+                    activeGlassLens(isScrubbing: isScrubbing)
                 }
             }
         }
-
-        let finalImage = rendered.withRenderingMode(.alwaysOriginal)
-        finalImage.accessibilityLabel = tab.label
-        finalImage.accessibilityIdentifier = "dock.tab.\(tab.rawValue)"
-        if badge > 0 {
-            finalImage.accessibilityValue = "\(badge) 个新结果"
-        }
-        return finalImage
+        .buttonStyle(.plain)
+        .accessibilityLabel(tab.label)
+        .accessibilityValue(tab == .wallet && unseenCount > 0 ? "\(unseenCount) 个新结果" : "")
+        .accessibilityAddTraits(selection == tab ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier("dock.tab.\(tab.rawValue)")
     }
 
-    final class Coordinator: NSObject {
-        var parent: NativeGlassDockControl
-        var lastRenderKey: RenderKey?
+    private func activeGlassLens(isScrubbing: Bool) -> some View {
+        Capsule()
+            .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.22 : 0.11))
+            .glassEffect(.clear.interactive(), in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.42 : 0.90),
+                                Color.accentColor.opacity(colorScheme == .dark ? 0.30 : 0.22)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.9
+                    )
+            }
+            .matchedGeometryEffect(id: "dock.lens", in: dockNamespace)
+            .glassEffectID("dock.lens", in: dockNamespace)
+            .scaleEffect(isScrubbing ? 1.10 : 1.0)
+            .animation(.spring(duration: 0.34, bounce: 0.22), value: highlightedTab)
+            .animation(.spring(duration: 0.22, bounce: 0.26), value: isScrubbing)
+    }
 
-        init(_ parent: NativeGlassDockControl) {
-            self.parent = parent
-        }
-
-        @objc func valueChanged(_ sender: UISegmentedControl) {
-            let index = sender.selectedSegmentIndex
-            guard MainTab.allCases.indices.contains(index) else { return }
-            parent.selection = MainTab.allCases[index]
-        }
+    private var badgePill: some View {
+        Text(unseenCount > 99 ? "99+" : "\(unseenCount)")
+            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 17, minHeight: 17)
+            .background(Palette.profit, in: Capsule())
     }
 }
 

@@ -63,13 +63,14 @@ struct DisclaimerNote: View {
 /// 录入流程里那种需要被看见的提示块 —— 比一行小字重，但不抢主操作。
 struct DisclaimerBanner: View {
     let text: String
-    var icon: String = "exclamationmark.circle"
+    var icon: String = "exclamationmark.circle.fill"
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon)
-                .scaledFont(12, weight: .semibold)
+                .scaledFont(14, weight: .semibold)
                 .foregroundStyle(Palette.warning)
+                .padding(.top, 1)
             Text(text)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -78,8 +79,8 @@ struct DisclaimerBanner: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.warning.opacity(0.10),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Palette.warning.opacity(0.11),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }
