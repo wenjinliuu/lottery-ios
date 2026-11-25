@@ -293,7 +293,7 @@ private struct NativeGlassDockControl: UIViewRepresentable {
     let unseenCount: Int
     let colorScheme: ColorScheme
 
-    private struct RenderKey: Equatable {
+    struct RenderKey: Equatable {
         let selection: MainTab
         let unseenCount: Int
         let colorScheme: ColorScheme
