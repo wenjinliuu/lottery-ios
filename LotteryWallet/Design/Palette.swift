@@ -109,6 +109,38 @@ extension BallColor {
         isBright ? Color(light: deepHex, dark: 0x000000).opacity(0.28) : .clear
     }
 
+    /// 卡片与票面左上角极淡微染透明度（浅色模式）。
+    /// 按人眼感知明度与彩度校准，以排列 5 的轻盈通透感为基准，
+    /// 压低大乐透蓝、七星彩靛、福彩 3D 青等冷高彩度颜色的占比，避免肉眼看起来深浅不一。
+    var paperTintLightOpacity: Double {
+        switch self {
+        case .blue: 0.017
+        case .indigo: 0.018
+        case .fc3d: 0.019
+        case .red: 0.021
+        case .k8orange: 0.022
+        case .plum: 0.024
+        case .yellow, .amber: 0.032
+        }
+    }
+
+    var paperTintDarkOpacity: Double {
+        switch self {
+        case .blue, .indigo, .fc3d: 0.065
+        case .red, .k8orange, .plum: 0.075
+        case .yellow, .amber: 0.090
+        }
+    }
+
+    /// 卡片与票面描边透明度（浅色模式），同步按彩度校准让八个彩种轮廓轻重一致。
+    var paperBorderLightOpacity: Double {
+        switch self {
+        case .blue, .indigo, .fc3d: 0.16
+        case .red, .k8orange, .plum: 0.18
+        case .yellow, .amber: 0.24
+        }
+    }
+
     /// 庆祝烟花用的一整套亮色，比球面色更跳。
     static let festive: [Color] = [
         Color(hex: 0xFF3B5C), Color(hex: 0xFFB020), Color(hex: 0x22D3A7),
@@ -123,6 +155,16 @@ extension GameKey {
     /// 压在 `tint` 实心底上的前景色。凡是「彩种色打底 + 文字」都必须成对使用。
     var onTint: Color { accent.onAccentColor }
     var gradient: LinearGradient { accent.gradient }
+
+    /// 按感知明度校准后的卡片极淡微染色。
+    func paperTint(for colorScheme: ColorScheme) -> Color {
+        tint.opacity(colorScheme == .dark ? accent.paperTintDarkOpacity : accent.paperTintLightOpacity)
+    }
+
+    /// 按彩度校准后的卡片细描边色。
+    func paperBorder(for colorScheme: ColorScheme) -> Color {
+        tint.opacity(colorScheme == .dark ? 0.26 : accent.paperBorderLightOpacity)
+    }
 }
 
 /// 语义色。
@@ -136,10 +178,10 @@ enum Palette {
     static let profit = Color(light: 0xF5333F, dark: 0xFF6B76)
     /// 亏损 —— 绿。
     static let loss = Color(light: 0x00A651, dark: 0x43DD84)
-    /// 提醒 / 待核对 / 奖金待公布。
-    static let warning = Color(light: 0xFF9500, dark: 0xFFB340)
+    /// 提醒 / 待核对 / 奖金待公布（浅色略加深以兼顾纯白画布文字对比度）。
+    static let warning = Color(light: 0xC86A00, dark: 0xFFB340)
     /// 「今日开奖」这类正向状态标记。
-    static let live = Color(light: 0x00B884, dark: 0x3DE0A6)
+    static let live = Color(light: 0x008A63, dark: 0x3DE0A6)
     /// 危险 / 删除 / 胆码标记。和「盈利红」分开，避免语义打架。
     static let danger = Color(light: 0xE0322F, dark: 0xFF6A64)
     /// 未命中号码球。
@@ -173,8 +215,8 @@ enum Palette {
     static let card = Color(light: 0xFFFFFF, dark: 0x17191F)
     /// 卡片细描边。给纯白悬浮卡片一条克制利落的轮廓线。
     static let cardBorder = Color(light: 0xE8ECF4, dark: 0x282E3A)
-    /// 实体票据纸面底色。略暖的象牙白配柔和纸影，在纯白画布上呈现立体纸感。
-    static let paper = Color(light: 0xFCFDFE, dark: 0x181B22)
+    /// 实体票据纸面底色。浅色回归纯净白底，消除偏冷灰底感，靠极淡彩种微染与细描边界定票面。
+    static let paper = Color(light: 0xFFFFFF, dark: 0x181B22)
     /// 静态辅助胶囊底色。
     static let surfaceChip = Color(light: 0xF1F4F9, dark: 0x232734)
     /// 分隔线。

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 视觉分层的统一封装。
 ///
@@ -11,9 +12,14 @@ import SwiftUI
 /// 页面代码一律走下面这些语义化修饰符。
 extension View {
 
-    /// 内容卡片：纯净白底悬浮卡片 + 克制细描边 + 柔和中性纸影；可选附带与票夹一致的极轻彩种微染。
+    /// 内容卡片：纯净白底悬浮卡片 + 克制细描边 + 极轻中性纸影；可选附带极淡微染。
     func contentCard(cornerRadius: CGFloat = 22, padding: CGFloat = 16, tint: Color? = nil) -> some View {
-        modifier(ContentCardModifier(cornerRadius: cornerRadius, padding: padding, tint: tint))
+        modifier(ContentCardModifier(cornerRadius: cornerRadius, padding: padding, game: nil, tint: tint))
+    }
+
+    /// 彩种内容卡片：按人眼明度校准的极淡彩种微染与描边，与票夹、首页开奖卡保持统一清透度。
+    func contentCard(cornerRadius: CGFloat = 22, padding: CGFloat = 16, game: GameKey) -> some View {
+        modifier(ContentCardModifier(cornerRadius: cornerRadius, padding: padding, game: game, tint: nil))
     }
 
     /// 系统表单配色：极浅瓷白分组底 + 纯白行块，避免闷灰感。
@@ -76,22 +82,41 @@ extension View {
 private struct ContentCardModifier: ViewModifier {
     let cornerRadius: CGFloat
     let padding: CGFloat
+    let game: GameKey?
     let tint: Color?
 
     @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let washColor: Color? = if let game {
+            game.paperTint(for: colorScheme)
+        } else if let tint {
+            tint.opacity(colorScheme == .dark ? 0.07 : 0.022)
+        } else {
+            nil
+        }
+        let borderColor: Color = if let game {
+            game.paperBorder(for: colorScheme)
+        } else if let tint {
+            tint.opacity(colorScheme == .dark ? 0.26 : 0.18)
+        } else {
+            Palette.cardBorder
+        }
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 ZStack {
                     shape.fill(Palette.card)
-                    if let tint {
+                    if let washColor {
                         shape.fill(
                             LinearGradient(
-                                colors: [tint.opacity(colorScheme == .dark ? 0.08 : 0.035), .clear],
+                                stops: [
+                                    .init(color: washColor, location: 0.0),
+                                    .init(color: washColor.opacity(0.35), location: 0.38),
+                                    .init(color: .clear, location: 0.72)
+                                ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
@@ -99,15 +124,28 @@ private struct ContentCardModifier: ViewModifier {
                     }
                 }
                 .clipShape(shape)
-                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.055),
-                        radius: 10, x: 0, y: 3)
+                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.24 : 0.038),
+                        radius: 8, x: 0, y: 2)
             }
             .overlay {
-                shape.strokeBorder(
-                    tint.map { $0.opacity(colorScheme == .dark ? 0.28 : 0.22) } ?? Palette.cardBorder,
-                    lineWidth: 1
-                )
+                shape.strokeBorder(borderColor, lineWidth: 1)
             }
+    }
+}
+
+/// 可定制固有高度的原生 `UISegmentedControl`。
+///
+/// 不覆写 `setBackgroundImage` / `setDividerImage`，完整保留 iOS 26/27 系统内置的
+/// Liquid Glass 光学放大水滴透镜（点击弹性跳动与手指拖动折射），供底部导航胶囊与票夹悬浮筛选条共用。
+final class TallSegmentedControl: UISegmentedControl {
+    var targetHeight: CGFloat = 40
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: targetHeight)
+    }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        CGSize(width: size.width, height: targetHeight)
     }
 }
 

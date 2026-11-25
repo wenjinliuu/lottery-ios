@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 /// 票夹：一张实体票对应一条票据记录，按录入时间倒序。
 struct WalletView: View {
@@ -51,7 +52,6 @@ struct WalletView: View {
     @State private var seenThisVisit: Set<String> = []
 
     @Environment(\.scenePhase) private var scenePhase
-    @Namespace private var filterNamespace
 
     /// 首屏一共画这么多张。一张票据是一整块带号码球的卡片，
     /// 几十上百张一次性铺开，进票夹那一下明显要卡。
@@ -140,9 +140,7 @@ struct WalletView: View {
                 .padding(.bottom, 120)
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                WalletFilterGlassBar(selection: $filter,
-                                     counts: counts,
-                                     namespace: filterNamespace)
+                WalletFilterGlassBar(selection: $filter, counts: counts)
                     .padding(.horizontal, 16)
                     .padding(.top, 6)
                     .padding(.bottom, 8)
@@ -455,7 +453,6 @@ struct WalletAllTicketsView: View {
     @State private var game: GameKey?
     /// 和首屏一样：滚到过就算看过，离开这一页时统一写库。
     @State private var seenThisVisit: Set<String> = []
-    @Namespace private var filterNamespace
 
     /// 出现过的彩种。没买过的彩种不该占着筛选条。
     private var games: [GameKey] {
@@ -509,9 +506,7 @@ struct WalletAllTicketsView: View {
             .padding(.bottom, 40)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            WalletFilterGlassBar(selection: $status,
-                                 counts: statusCounts,
-                                 namespace: filterNamespace)
+            WalletFilterGlassBar(selection: $status, counts: statusCounts)
                 .padding(.horizontal, 16)
                 .padding(.top, 6)
                 .padding(.bottom, 8)
@@ -577,73 +572,109 @@ struct WalletAllTicketsView: View {
     }
 }
 
-/// 票夹顶部悬浮液态玻璃四合一筛选条：全部、待核对、已中奖、未中奖合并在一整条
-/// 悬浮液态玻璃胶囊内，下方票据列表滚动时透过玻璃平滑折射。
+/// 票夹顶部悬浮液态玻璃四合一筛选条：由原生 `UISegmentedControl`（`TallSegmentedControl`）驱动，
+/// 完整保留 iOS 26/27 官方液态玻璃水滴放大跳动与跟手拖动，同时随当前状态切换选中玻璃着色。
 struct WalletFilterGlassBar: View {
     @Binding var selection: WalletFilter
     let counts: [WalletFilter: Int]
-    let namespace: Namespace.ID
 
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        GlassGroup(spacing: 8) {
-            HStack(spacing: 2) {
-                ForEach(WalletFilter.allCases) { item in
-                    let isOn = selection == item
-                    Button {
-                        withAnimation(.spring(duration: 0.3, bounce: 0.16)) {
-                            selection = item
-                        }
-                    } label: {
-                        Text("\(item.label) \(counts[item] ?? 0)")
-                            .font(.caption.weight(isOn ? .bold : .semibold))
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.72)
-                            .foregroundStyle(foreground(item, isOn: isOn))
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 8)
-                            .background {
-                                if isOn {
-                                    activeCapsule(for: item)
-                                        .matchedGeometryEffect(id: "wallet.filter.pill", in: namespace)
-                                }
-                            }
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
-                }
-            }
-            .padding(4)
-            .glassPill(interactive: true)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("wallet.filter.bar")
+        WalletFilterSegmentedControl(
+            selection: $selection,
+            counts: counts,
+            colorScheme: colorScheme
+        )
+        .frame(height: 40)
+        .glassPill(interactive: false)
+        .sensoryFeedback(.selection, trigger: selection)
+    }
+}
+
+private struct WalletFilterSegmentedControl: UIViewRepresentable {
+    @Binding var selection: WalletFilter
+    let counts: [WalletFilter: Int]
+    let colorScheme: ColorScheme
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
     }
 
-    private func foreground(_ item: WalletFilter, isOn: Bool) -> Color {
-        if isOn {
-            return item == .lost
-                ? Color(light: 0xFFFFFF, dark: 0x101014)
-                : Palette.onAccent
-        }
-        return item == .pending && (counts[.pending] ?? 0) > 0 ? Palette.warning : Color.primary.opacity(0.82)
+    func makeUIView(context: Context) -> TallSegmentedControl {
+        let titles = WalletFilter.allCases.map { "\($0.label) \(counts[$0] ?? 0)" }
+        let control = TallSegmentedControl(items: titles)
+        control.targetHeight = 40
+        control.apportionsSegmentWidthsByContent = true
+        control.backgroundColor = .clear
+        control.accessibilityIdentifier = "wallet.filter.bar"
+        control.selectedSegmentIndex = WalletFilter.allCases.firstIndex(of: selection) ?? 0
+        control.addTarget(context.coordinator, action: #selector(Coordinator.valueChanged(_:)), for: .valueChanged)
+        applyStyle(to: control)
+        return control
     }
 
-    private func activeCapsule(for item: WalletFilter) -> some View {
-        let fill: Color = item == .lost
-            ? Color(light: 0x5E6778, dark: 0xB8C0CE)
-            : item.tint
-        return Capsule()
-            .fill(fill)
-            .overlay {
-                Capsule()
-                    .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.22 : 0.32), lineWidth: 0.8)
+    func updateUIView(_ uiView: TallSegmentedControl, context: Context) {
+        context.coordinator.parent = self
+        for (index, item) in WalletFilter.allCases.enumerated() {
+            let title = "\(item.label) \(counts[item] ?? 0)"
+            if uiView.titleForSegment(at: index) != title {
+                uiView.setTitle(title, forSegmentAt: index)
             }
-            .shadow(color: fill.opacity(colorScheme == .dark ? 0.24 : 0.22), radius: 5, y: 2)
+        }
+        let targetIndex = WalletFilter.allCases.firstIndex(of: selection) ?? 0
+        if uiView.selectedSegmentIndex != targetIndex {
+            uiView.selectedSegmentIndex = targetIndex
+        }
+        applyStyle(to: uiView)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: TallSegmentedControl, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 340, height: 40)
+    }
+
+    private func applyStyle(to control: TallSegmentedControl) {
+        let isDark = colorScheme == .dark
+        let traits = UITraitCollection(userInterfaceStyle: isDark ? .dark : .light)
+        traits.performAsCurrent {
+            let accent = UIColor(named: "AccentColor", in: .main, compatibleWith: traits) ?? UIColor(Color.accentColor)
+            let tintColor: UIColor = switch selection {
+            case .all: accent
+            case .pending: UIColor(Palette.warning)
+            case .won: UIColor(Palette.profit)
+            case .lost: isDark ? UIColor(hex: 0xB8C0CE) : UIColor(hex: 0x5E6778)
+            }
+            control.selectedSegmentTintColor = tintColor
+
+            let normalFont = UIFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+            let selectedFont = UIFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold)
+            let selectedTextColor: UIColor = isDark ? UIColor(hex: 0x101014) : .white
+
+            control.setTitleTextAttributes([
+                .font: normalFont,
+                .foregroundColor: UIColor.label.withAlphaComponent(0.84)
+            ], for: .normal)
+            control.setTitleTextAttributes([
+                .font: selectedFont,
+                .foregroundColor: selectedTextColor
+            ], for: .selected)
+        }
+    }
+
+    final class Coordinator: NSObject {
+        var parent: WalletFilterSegmentedControl
+
+        init(_ parent: WalletFilterSegmentedControl) {
+            self.parent = parent
+        }
+
+        @objc func valueChanged(_ sender: UISegmentedControl) {
+            let index = sender.selectedSegmentIndex
+            guard WalletFilter.allCases.indices.contains(index) else { return }
+            withAnimation(.spring(duration: 0.32, bounce: 0.16)) {
+                parent.selection = WalletFilter.allCases[index]
+            }
+        }
     }
 }
 

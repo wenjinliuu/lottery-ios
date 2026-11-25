@@ -104,21 +104,6 @@ struct HomeView: View {
             )
             .navigationTitle("首页")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: openProfitPicker) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "calendar")
-                                .font(.footnote.weight(.semibold))
-                            Text(toolbarPeriodText)
-                                .font(.caption.weight(.semibold))
-                                .monospacedDigit()
-                        }
-                    }
-                    .accessibilityLabel("选择统计区间，当前 \(periodLabel)")
-                    .accessibilityIdentifier("home.profit.period")
-                }
-            }
             .refreshable { await drawStore.refresh() }
             .task(id: RecordsToken(records)) { recompute() }
             .task(id: drawStore.scheduleToken) { refreshSchedule() }
@@ -126,9 +111,9 @@ struct HomeView: View {
                 // 最新开奖先显示；日历按年缓存，拿到后再显示准确的今日标记。
                 await drawStore.loadCalendar(year: ChinaClock.year())
             }
-            // 换范围时数字、球罐和彩种分布一起过渡，不是啪地一下换掉
+            // 换范围或左右翻期时数字、球罐和彩种分布同步柔和过渡，避免生硬瞬切
             .onChange(of: periodLabel) { _, _ in
-                withAnimation(.snappy(duration: 0.35)) {
+                withAnimation(.spring(duration: 0.42, bounce: 0.14)) {
                     recomputeSeries()
                     recomputeJar()
                     recomputePeriodStats()
@@ -167,14 +152,6 @@ struct HomeView: View {
         return min(availableYears.min() ?? nowYear, nowYear - 2)
     }
 
-    private var toolbarPeriodText: String {
-        if range == .all { return "全部" }
-        let cal = Calendar.chinaCalendar
-        let y = cal.component(.year, from: periodEnd)
-        let m = cal.component(.month, from: periodEnd)
-        return range == .month ? "\(y)-\(String(format: "%02d", m))" : "\(y)年"
-    }
-
     private func canStepPeriod(by delta: Int) -> Bool {
         guard range == .month || range == .year else { return false }
         let cal = Calendar.chinaCalendar
@@ -200,12 +177,16 @@ struct HomeView: View {
             guard let currentStart = cal.dateInterval(of: .month, for: periodEnd)?.start,
                   let targetStart = cal.date(byAdding: .month, value: delta, to: currentStart),
                   let interval = cal.dateInterval(of: .month, for: targetStart) else { return }
-            historicalEnd = interval.contains(now) ? nil : interval.end.addingTimeInterval(-1)
+            withAnimation(.spring(duration: 0.42, bounce: 0.14)) {
+                historicalEnd = interval.contains(now) ? nil : interval.end.addingTimeInterval(-1)
+            }
         } else if range == .year {
             let targetYear = cal.component(.year, from: periodEnd) + delta
             guard let first = cal.date(from: DateComponents(year: targetYear, month: 1, day: 1)),
                   let interval = cal.dateInterval(of: .year, for: first) else { return }
-            historicalEnd = interval.contains(now) ? nil : interval.end.addingTimeInterval(-1)
+            withAnimation(.spring(duration: 0.42, bounce: 0.14)) {
+                historicalEnd = interval.contains(now) ? nil : interval.end.addingTimeInterval(-1)
+            }
         }
     }
 
@@ -298,22 +279,47 @@ struct HomeView: View {
     /// 取消顶部白卡片外壳：累计收支与彩点指标直接写在清透白底微光画布上，
     /// 下方承接独立放大的玻璃球罐（或可切换的曲线/方格轻雾卡）。
     private var heroSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let showsSteppers = range == .month || range == .year
+        return VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
-                    Text("累计收支")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 4)
-                    if range == .month || range == .year {
-                        periodStepButton("chevron.left",
-                                         enabled: canStepPeriod(by: -1),
-                                         id: "home.period.prev",
-                                         label: range == .month ? "上个月" : "上一年") {
-                            stepPeriod(by: -1)
+                    HStack(spacing: 4) {
+                        Text("累计收支")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .onTapGesture(perform: openProfitPicker)
+                        Button(action: openProfitPicker) {
+                            Image(systemName: "calendar")
+                                .scaledFont(11, weight: .medium)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24, height: 24)
+                                .contentShape(Rectangle().inset(by: -8))
                         }
+                        .buttonStyle(PressableIcon())
+                        .accessibilityLabel("选择统计区间，当前 \(periodLabel)")
+                        .accessibilityIdentifier("home.profit.period")
                     }
-                    Picker("范围", selection: Binding(get: { range }, set: { historicalEnd = nil; range = $0 })) {
+
+                    Spacer(minLength: 4)
+
+                    // 左右步进按钮常驻占位并做柔和缩放淡入淡出，切换「全部」时中间分段条不再左右猛跳。
+                    periodStepButton("chevron.left",
+                                     visible: showsSteppers,
+                                     enabled: canStepPeriod(by: -1),
+                                     id: "home.period.prev",
+                                     label: range == .month ? "上个月" : "上一年") {
+                        stepPeriod(by: -1)
+                    }
+
+                    Picker("范围", selection: Binding(
+                        get: { range },
+                        set: { next in
+                            withAnimation(.spring(duration: 0.42, bounce: 0.14)) {
+                                historicalEnd = nil
+                                range = next
+                            }
+                        }
+                    )) {
                         Text(range == .month ? periodLabel : "本月").tag(ProfitRange.month)
                         Text(range == .year ? periodLabel : "本年").tag(ProfitRange.year)
                         Text("全部").tag(ProfitRange.all)
@@ -321,15 +327,17 @@ struct HomeView: View {
                     .pickerStyle(.segmented)
                     .fixedSize()
                     .accessibilityIdentifier("home.range")
-                    if range == .month || range == .year {
-                        periodStepButton("chevron.right",
-                                         enabled: canStepPeriod(by: 1),
-                                         id: "home.period.next",
-                                         label: range == .month ? "下个月" : "下一年") {
-                            stepPeriod(by: 1)
-                        }
+
+                    periodStepButton("chevron.right",
+                                     visible: showsSteppers,
+                                     enabled: canStepPeriod(by: 1),
+                                     id: "home.period.next",
+                                     label: range == .month ? "下个月" : "下一年") {
+                        stepPeriod(by: 1)
                     }
                 }
+                .animation(.spring(duration: 0.42, bounce: 0.14), value: range)
+                .animation(.spring(duration: 0.42, bounce: 0.14), value: periodLabel)
 
                 HStack(alignment: .center, spacing: 8) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -397,6 +405,7 @@ struct HomeView: View {
     }
 
     private func periodStepButton(_ symbol: String,
+                                  visible: Bool,
                                   enabled: Bool,
                                   id: String,
                                   label: String,
@@ -406,12 +415,15 @@ struct HomeView: View {
                 .scaledFont(11, weight: .bold)
                 .foregroundStyle(enabled ? Color.accentColor : Color.secondary)
                 .frame(width: 28, height: 28)
-                .glassCircle(tint: enabled ? .accentColor : nil, interactive: enabled)
+                .glassCircle(tint: enabled ? .accentColor : nil, interactive: visible && enabled)
                 .contentShape(Circle().inset(by: -6))
         }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.32)
+        .buttonStyle(PressableIcon())
+        .disabled(!visible || !enabled)
+        .opacity(visible ? (enabled ? 1 : 0.28) : 0)
+        .scaleEffect(visible ? 1 : 0.72)
+        .allowsHitTesting(visible && enabled)
+        .accessibilityHidden(!visible)
         .accessibilityLabel(label)
         .accessibilityIdentifier(id)
     }
@@ -493,7 +505,7 @@ struct HomeView: View {
                              opensToday: todayGames.contains(game),
                              drawsAt: todayDrawTimes[game])
                         .padding(.horizontal, HomeLayout.carouselPagePadding)
-                        .padding(.vertical, 10)
+                        .padding(.vertical, 4)
                         .tag(page)
                 }
             }
@@ -509,14 +521,14 @@ struct HomeView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .animation(.easeInOut(duration: 0.45), value: pageIndex)
-            // 留出 20pt 上下空间给柔和中性纸影呼吸，避免被分页容器裁边。
-            .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: screenWidth) + 20)
+            // 卡片去掉外层灰影后不再需要 20pt 阴影缓冲，收紧留白让下方彩种投入分布自然露出。
+            .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: screenWidth) + 8)
             .accessibilityHint("左右滑动查看其他彩种的最新开奖")
             .task(id: carouselGames.count) { await runAutoScroll() }
 
             Text(Disclaimer.draw)
                 .scaledFont(10)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, HomeLayout.pagePadding)
 
@@ -614,19 +626,18 @@ struct HomeView: View {
                 }
                 Spacer(minLength: 8)
                 if periodStats.ticketCount > 0 {
-                    HStack(spacing: 4) {
+                    VStack(alignment: .trailing, spacing: 1) {
                         Text("中奖率")
+                            .scaledFont(10, weight: .medium)
                             .foregroundStyle(.secondary)
                         Text(String(format: "%.0f%%", periodStats.winRate))
-                            .fontWeight(.bold)
+                            .font(.system(.title3, design: .rounded, weight: .bold))
                             .monospacedDigit()
+                            .contentTransition(.numericText())
                             .foregroundStyle(periodStats.winRate > 0 ? Palette.profit : .primary)
                     }
-                    .font(.caption)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Palette.surfaceChip, in: Capsule())
-                    .overlay(Capsule().strokeBorder(Palette.cardBorder, lineWidth: 1))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("中奖率 \(String(format: "%.0f%%", periodStats.winRate))")
                 }
             }
 
@@ -1051,8 +1062,8 @@ enum DrawCardMetrics {
     }
 }
 
-/// 首页轮播里的一张开奖卡：与票夹 `TicketPaper` 保持同一套极轻彩种微染与纯净中性纸影，
-/// 填充严格裁在描边圆角内，不向外溢出彩色光晕。
+/// 首页轮播里的一张开奖卡：与票夹 `TicketPaper` 共用按感知明度校准的极淡彩种微染，
+/// 浅色下直接落在纯白画布上、不加外层灰影，让卡片通透融入应用背景。
 struct DrawCard: View {
     @Environment(\.screenWidth) private var screenWidth
     @Environment(\.colorScheme) private var colorScheme
@@ -1064,6 +1075,7 @@ struct DrawCard: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: DrawCardMetrics.cornerRadius, style: .continuous)
+        let wash = game.paperTint(for: colorScheme)
         VStack(alignment: .leading, spacing: DrawCardMetrics.blockSpacing) {
             header
             Spacer(minLength: 0)
@@ -1077,12 +1089,13 @@ struct DrawCard: View {
         .frame(height: DrawCardMetrics.unifiedHeight(screenWidth: screenWidth))
         .background {
             ZStack {
-                shape.fill(colorScheme == .dark ? Palette.card : Palette.paper)
+                shape.fill(Palette.card)
                 shape.fill(
                     LinearGradient(
-                        colors: [
-                            game.tint.opacity(colorScheme == .dark ? 0.08 : 0.035),
-                            .clear
+                        stops: [
+                            .init(color: wash, location: 0.0),
+                            .init(color: wash.opacity(0.35), location: 0.38),
+                            .init(color: .clear, location: 0.72)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -1090,14 +1103,9 @@ struct DrawCard: View {
                 )
             }
             .clipShape(shape)
-            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.065),
-                    radius: 11, x: 0, y: 4)
         }
         .overlay {
-            shape.strokeBorder(
-                game.tint.opacity(colorScheme == .dark ? 0.28 : 0.22),
-                lineWidth: 1
-            )
+            shape.strokeBorder(game.paperBorder(for: colorScheme), lineWidth: 1)
         }
     }
 

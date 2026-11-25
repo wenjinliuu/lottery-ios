@@ -12,6 +12,8 @@ struct BallJarView: View {
     @State private var shakes = 0
     @State private var touches = 0
     @State private var fingerPoint: CGPoint?
+    @State private var dragStart: CGPoint?
+    @State private var hasDragged = false
     @State private var lastDragSample: (point: CGPoint, time: Date)?
     @State private var isBreakdownPresented = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -95,48 +97,46 @@ struct BallJarView: View {
                         .accessibilityHidden(true)
                 }
                 .contentShape(shape)
-                // 轻点立刻激起波纹弹跳；轻按（0.14s）后拖动即可用手指拨动小球跟随流动，
-                // 不拦截正常的上下滑动滚动首页。
-                .gesture(
-                    SpatialTapGesture()
-                        .onEnded { value in
+                // 无需长按等待：手指轻点立刻激起波纹弹跳，手指滑入罐内直接 0 延迟跟手拨动小球。
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
                             guard jar.hits > 0 else { return }
-                            scene.poke(at: value.location)
-                            touches += 1
-                        }
-                )
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.14)
-                        .sequenced(before: DragGesture(minimumDistance: 0))
-                        .onChanged { phase in
-                            guard jar.hits > 0 else { return }
-                            switch phase {
-                            case .first(true):
-                                break
-                            case .second(true, let drag):
-                                guard let drag else { return }
-                                let now = Date()
-                                let location = drag.location
-                                if fingerPoint == nil {
-                                    touches += 1
-                                    scene.poke(at: location)
-                                }
-                                fingerPoint = location
-                                if let previous = lastDragSample {
-                                    let dt = max(now.timeIntervalSince(previous.time), 1.0 / 120.0)
-                                    let vx = (location.x - previous.point.x) / dt
-                                    let vy = (location.y - previous.point.y) / dt
-                                    scene.stir(at: location, velocity: CGSize(width: vx, height: vy))
-                                }
+                            let now = Date()
+                            let location = value.location
+                            if dragStart == nil {
+                                dragStart = location
+                                hasDragged = false
                                 lastDragSample = (location, now)
-                            default:
-                                break
+                                fingerPoint = location
+                                return
                             }
+                            fingerPoint = location
+                            if let start = dragStart, !hasDragged {
+                                let distance = hypot(location.x - start.x, location.y - start.y)
+                                if distance > 4 {
+                                    hasDragged = true
+                                    touches += 1
+                                }
+                            }
+                            if hasDragged, let previous = lastDragSample {
+                                let dt = max(now.timeIntervalSince(previous.time), 1.0 / 120.0)
+                                let vx = (location.x - previous.point.x) / dt
+                                let vy = (location.y - previous.point.y) / dt
+                                scene.stir(at: location, velocity: CGSize(width: vx, height: vy))
+                            }
+                            lastDragSample = (location, now)
                         }
-                        .onEnded { _ in
-                            withAnimation(.easeOut(duration: 0.2)) {
+                        .onEnded { value in
+                            if jar.hits > 0 && !hasDragged {
+                                scene.poke(at: value.location)
+                                touches += 1
+                            }
+                            withAnimation(.easeOut(duration: 0.18)) {
                                 fingerPoint = nil
                             }
+                            dragStart = nil
+                            hasDragged = false
                             lastDragSample = nil
                         }
                 )
@@ -203,7 +203,7 @@ struct BallJarView: View {
                     .glassPill(interactive: jar.hits > 0)
                     .contentShape(Rectangle().inset(by: -4))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressableIcon())
                 .disabled(jar.hits == 0)
                 .accessibilityIdentifier("home.jar.total")
                 .accessibilityLabel(totalCaption)
@@ -230,7 +230,7 @@ struct BallJarView: View {
                         .glassPill(tint: jar.hits > 0 ? Color.accentColor : nil, interactive: jar.hits > 0)
                         .contentShape(Rectangle().inset(by: -4))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressableIcon())
                 .disabled(jar.hits == 0)
                 .accessibilityIdentifier("home.jar.shake")
             }
@@ -254,11 +254,8 @@ struct BallJarView: View {
 
     private var summary: String { "命中 \(jar.hits.formatted()) 个号码" }
 
-    private var totalCaption: String {
-        visibleCount > 0 && visibleCount < jar.hits
-            ? "\(summary) · 示意 \(visibleCount.formatted()) 颗"
-            : summary
-    }
+    /// 胶囊只显示真实命中总数，保持整洁不拥挤；超过 1,000 颗的按比例示意说明收进点击弹出的分布明细卡中。
+    private var totalCaption: String { summary }
 
     private var visibleCount: Int { min(jar.hits, JarBuilder.capacity(width: size.width, height: size.height)) }
 

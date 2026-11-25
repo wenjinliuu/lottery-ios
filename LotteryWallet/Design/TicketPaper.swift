@@ -22,21 +22,26 @@ struct TicketPaper<Content: View>: View {
             .padding(.bottom, 13)
             // 阴影只画在背景矢量路径上，不让里面的号码球和文字触发离屏渲染。
             .background {
+                let wash = game.paperTint(for: colorScheme)
                 ZStack {
                     shape.fill(Palette.paper)
                     shape.fill(
                         LinearGradient(
-                            colors: [game.tint.opacity(colorScheme == .dark ? 0.08 : 0.035), .clear],
+                            stops: [
+                                .init(color: wash, location: 0.0),
+                                .init(color: wash.opacity(0.35), location: 0.38),
+                                .init(color: .clear, location: 0.72)
+                            ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
                 }
-                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.065),
-                        radius: 12, x: 0, y: 4)
+                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.24 : 0.035),
+                        radius: 7, x: 0, y: 2)
             }
             .overlay {
-                shape.stroke(game.tint.opacity(colorScheme == .dark ? 0.28 : 0.22), lineWidth: 1)
+                shape.stroke(game.paperBorder(for: colorScheme), lineWidth: 1)
             }
             // 长按弹菜单时，预览按卡片自己的圆角裁，不再闪一块深色的方角
             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))

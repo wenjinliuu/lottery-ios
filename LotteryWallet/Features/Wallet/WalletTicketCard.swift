@@ -339,10 +339,15 @@ struct WalletTicketCard: View {
     ///
     /// 正确的做法是把右边那列 `fixedSize` 掉：它先拿走自己真正需要的宽度，
     /// 剩下的**全部**给号码列，号码列再在这个确定的宽度里排版。
+    private var footerDrawTitle: String {
+        if draw != nil { return "开奖号码" }
+        return card.status == .pending ? "等待开奖" : "已开奖"
+    }
+
     private var footer: some View {
         HStack(alignment: .bottom, spacing: 10) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(draw == nil ? "等待开奖" : "开奖号码")
+                Text(footerDrawTitle)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 if let draw {
@@ -372,7 +377,6 @@ struct WalletTicketCard: View {
     /// 时候，这句话都得跟着那张票 —— 兑奖依据是他手里那张纸，不是这里的记录。
     private var disclaimer: some View {
         DisclaimerNote(text: Disclaimer.card)
-            .opacity(0.75)
             .padding(.top, 6)
     }
 }

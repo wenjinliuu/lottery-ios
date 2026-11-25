@@ -206,7 +206,7 @@ struct DrawHistoryRow: View {
             // 翻到往期会以为信息丢了。
             DrawPrizeLines(game: game, draw: draw)
         }
-        // 与首页开奖卡、票夹共用同一套极轻彩种微染与纯净白底细边。
-        .contentCard(cornerRadius: 20, tint: game.tint)
+        // 与首页开奖卡、票夹共用同一套按感知明度校准的极轻彩种微染与纯净白底细边。
+        .contentCard(cornerRadius: 20, game: game)
     }
 }

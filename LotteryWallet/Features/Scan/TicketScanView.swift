@@ -763,7 +763,7 @@ struct TicketScanView: View {
 
             costRow(value)
         }
-        .contentCard(cornerRadius: 22, padding: 16, tint: game.tint)
+        .contentCard(cornerRadius: 22, padding: 16, game: game)
     }
 
     /// 算出来的金额，旁边永远摆着**票面上印的那个合计**。

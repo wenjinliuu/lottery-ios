@@ -233,7 +233,7 @@ struct SettingsView: View {
     private var chevron: some View {
         Image(systemName: "chevron.right")
             .font(.caption.weight(.semibold))
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary.opacity(0.85))
     }
 
     /// 设置页那一行的状态文案。

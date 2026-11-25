@@ -21,14 +21,21 @@ final class KeyFlowTests: XCTestCase {
         case "设置": id = "dock.tab.settings"
         default: id = name
         }
-        return app.buttons[id].firstMatch
+        let segmented = app.segmentedControls["dock.tabs"].buttons[name]
+        if segmented.exists { return segmented }
+        let byID = app.buttons[id].firstMatch
+        if byID.exists { return byID }
+        return app.segmentedControls["dock.tabs"].buttons[name]
     }
 
     func testWalletTopEdgeAfterScrolling() throws {
-        dockTab("票夹").tap()
+        let walletTab = dockTab("票夹")
+        XCTAssertTrue(walletTab.waitForExistence(timeout: 10))
+        walletTab.tap()
         let title = app.navigationBars["票夹"]
         XCTAssertTrue(title.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.otherElements["wallet.filter.bar"].waitForExistence(timeout: 5)
+        XCTAssertTrue(app.segmentedControls["wallet.filter.bar"].waitForExistence(timeout: 5)
+                      || app.otherElements["wallet.filter.bar"].exists
                       || app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "全部")).firstMatch.exists,
                       "票夹顶部应显示悬浮四合一筛选条")
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.71))
@@ -48,9 +55,10 @@ final class KeyFlowTests: XCTestCase {
         }
 
         let scan = app.buttons["dock.scan"]
-        let settings = app.buttons["dock.tab.settings"]
+        let dockTabs = app.segmentedControls["dock.tabs"].firstMatch
         XCTAssertTrue(scan.waitForExistence(timeout: 10), "找不到独立扫描按钮")
-        XCTAssertGreaterThan(scan.frame.minX, settings.frame.maxX, "扫描按钮应独立位于底栏胶囊右侧")
+        XCTAssertTrue(dockTabs.waitForExistence(timeout: 5), "找不到底栏导航胶囊")
+        XCTAssertGreaterThan(scan.frame.minX, dockTabs.frame.maxX, "扫描按钮应独立位于底栏胶囊右侧")
         scan.tap()
         let close = app.buttons["关闭"].firstMatch
         XCTAssertTrue(close.waitForExistence(timeout: 10), "点扫描按钮没有弹出扫描抽屉")
@@ -173,7 +181,16 @@ final class KeyFlowTests: XCTestCase {
             let shake = app.buttons["home.jar.shake"]
             RunLoop.current.run(until: Date().addingTimeInterval(1))
             let digits = total.label.filter(\.isNumber)
-            XCTAssertEqual(digits, hits == shown ? String(hits) : "\(hits)\(shown)")
+            XCTAssertEqual(digits, String(hits))
+            if hits > shown {
+                total.tap()
+                let scaledNote = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "示意 \(shown.formatted()) 颗")).firstMatch
+                XCTAssertTrue(scaledNote.waitForExistence(timeout: 5), "分布弹窗应显示示意颗数说明")
+                let closeBreakdown = app.buttons["关闭分布"].firstMatch
+                XCTAssertTrue(closeBreakdown.waitForExistence(timeout: 5))
+                closeBreakdown.tap()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+            }
             let frame = app.descendants(matching: .any)["home.jar.frame"].firstMatch.frame
             print("JAR_PREVIEW_COUNT=\(shown) FRAME=\(frame)")
             capture("balls-\(shown)-rest")

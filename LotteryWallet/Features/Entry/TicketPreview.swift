@@ -147,7 +147,7 @@ struct TicketPreviewCard: View {
             TicketDivider(tint: game.tint).padding(.vertical, 10)
             footer
         }
-        .contentCard(cornerRadius: 22, padding: 16, tint: game.tint)
+        .contentCard(cornerRadius: 22, padding: 16, game: game)
     }
 
     private var header: some View {
