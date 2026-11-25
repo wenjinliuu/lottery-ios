@@ -11,33 +11,20 @@
   ],
   "groups" : [
     {
-      "blur-material" : 0.08,
+      "blur-material" : 0.58,
       "hidden" : false,
       "layers" : [
         {
-          "blend-mode-specializations" : [
-            {
-              "value" : "multiply"
-            },
-            {
-              "appearance" : "dark",
-              "value" : "screen"
-            },
-            {
-              "appearance" : "tinted",
-              "value" : "normal"
-            }
-          ],
           "fill-specializations" : [
             {
               "value" : {
-                "automatic-gradient" : "display-p3:0.15686,0.46275,0.97255,1.00000"
+                "automatic-gradient" : "display-p3:0.15686,0.50196,1.00000,1.00000"
               }
             },
             {
               "appearance" : "dark",
               "value" : {
-                "automatic-gradient" : "display-p3:0.32157,0.62745,1.00000,1.00000"
+                "automatic-gradient" : "display-p3:0.27843,0.61961,1.00000,1.00000"
               }
             }
           ],
@@ -45,7 +32,7 @@
           "hidden" : false,
           "image-name" : "FrontTicket.svg",
           "name" : "FrontTicket",
-          "opacity" : 0.85
+          "opacity" : 0.62
         }
       ],
       "lighting" : "individual",
@@ -53,58 +40,45 @@
         {
           "value" : {
             "kind" : "layer-color",
-            "opacity" : 0.38
+            "opacity" : 0.44
           }
         },
         {
           "appearance" : "dark",
           "value" : {
             "kind" : "neutral",
-            "opacity" : 0.45
+            "opacity" : 0.48
           }
         },
         {
           "appearance" : "tinted",
           "value" : {
             "kind" : "neutral",
-            "opacity" : 0.45
+            "opacity" : 0.48
           }
         }
       ],
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.56
+        "value" : 0.78
       }
     },
     {
-      "blur-material" : 0.06,
+      "blur-material" : 0.42,
       "hidden" : false,
       "layers" : [
         {
-          "blend-mode-specializations" : [
-            {
-              "value" : "multiply"
-            },
-            {
-              "appearance" : "dark",
-              "value" : "screen"
-            },
-            {
-              "appearance" : "tinted",
-              "value" : "normal"
-            }
-          ],
           "fill-specializations" : [
             {
               "value" : {
-                "automatic-gradient" : "display-p3:0.94902,0.23137,0.25098,1.00000"
+                "automatic-gradient" : "display-p3:0.98039,0.23922,0.28235,1.00000"
               }
             },
             {
               "appearance" : "dark",
               "value" : {
-                "automatic-gradient" : "display-p3:1.00000,0.35294,0.38824,1.00000"
+                "automatic-gradient" : "display-p3:1.00000,0.34118,0.38039,1.00000"
               }
             }
           ],
@@ -112,7 +86,61 @@
           "hidden" : false,
           "image-name" : "MiddleTicket.svg",
           "name" : "MiddleTicket",
-          "opacity" : 0.86
+          "opacity" : 0.72
+        }
+      ],
+      "lighting" : "individual",
+      "shadow-specializations" : [
+        {
+          "value" : {
+            "kind" : "layer-color",
+            "opacity" : 0.42
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.46
+          }
+        },
+        {
+          "appearance" : "tinted",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.46
+          }
+        }
+      ],
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.72
+      }
+    },
+    {
+      "blur-material" : 0.12,
+      "hidden" : false,
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "automatic-gradient" : "display-p3:1.00000,0.60000,0.12157,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "automatic-gradient" : "display-p3:1.00000,0.68235,0.23922,1.00000"
+              }
+            }
+          ],
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "BackTicket.svg",
+          "name" : "BackTicket",
+          "opacity" : 0.96
         }
       ],
       "lighting" : "individual",
@@ -127,81 +155,14 @@
           "appearance" : "dark",
           "value" : {
             "kind" : "neutral",
-            "opacity" : 0.45
+            "opacity" : 0.42
           }
         },
         {
           "appearance" : "tinted",
           "value" : {
             "kind" : "neutral",
-            "opacity" : 0.45
-          }
-        }
-      ],
-      "specular" : true,
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.52
-      }
-    },
-    {
-      "blur-material" : 0.03,
-      "hidden" : false,
-      "layers" : [
-        {
-          "blend-mode-specializations" : [
-            {
-              "value" : "multiply"
-            },
-            {
-              "appearance" : "dark",
-              "value" : "screen"
-            },
-            {
-              "appearance" : "tinted",
-              "value" : "normal"
-            }
-          ],
-          "fill-specializations" : [
-            {
-              "value" : {
-                "automatic-gradient" : "display-p3:1.00000,0.58039,0.14118,1.00000"
-              }
-            },
-            {
-              "appearance" : "dark",
-              "value" : {
-                "automatic-gradient" : "display-p3:1.00000,0.66667,0.26275,1.00000"
-              }
-            }
-          ],
-          "glass" : true,
-          "hidden" : false,
-          "image-name" : "BackTicket.svg",
-          "name" : "BackTicket",
-          "opacity" : 0.90
-        }
-      ],
-      "lighting" : "individual",
-      "shadow-specializations" : [
-        {
-          "value" : {
-            "kind" : "layer-color",
-            "opacity" : 0.40
-          }
-        },
-        {
-          "appearance" : "dark",
-          "value" : {
-            "kind" : "neutral",
-            "opacity" : 0.45
-          }
-        },
-        {
-          "appearance" : "tinted",
-          "value" : {
-            "kind" : "neutral",
-            "opacity" : 0.45
+            "opacity" : 0.42
           }
         }
       ],
