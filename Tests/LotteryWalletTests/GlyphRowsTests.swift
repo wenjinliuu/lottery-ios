@@ -146,4 +146,27 @@ final class GlyphRowsTests: XCTestCase {
         let line = GlyphRows.readLine(readRows[0], count: 14)
         XCTAssertEqual(line?.map { String($0.digit) }.joined(), "05122330350211")
     }
+
+    /// 体彩号码区最右侧常带竖排「☆中国体育彩票」边条（x ≈ 920–1000），
+    /// 找行投影算进全宽时会把多行粘成一块；截到 `ModelRowReader.sportsRowColumns`（0.85）后各行清晰分开。
+    func testSportsRowColumnsIgnoresRightMarginRibbon() throws {
+        let (fixture, original) = try fixture()
+        let classifier = try XCTUnwrap(DigitClassifier.shared)
+        var bordered = original
+        for y in 0..<fixture.height {
+            for x in 920..<990 {
+                bordered[y * fixture.width + x] = 60
+            }
+        }
+        let fullWidthRows = GlyphRows.rows(bordered, width: fixture.width, height: fixture.height, rowColumns: 1.0)
+        XCTAssertLessThan(fullWidthRows.count, fixture.rows.count, "全宽投影会被右侧竖条粘成一整块")
+
+        let trimmedRows = GlyphRows.rows(bordered, width: fixture.width, height: fixture.height,
+                                         rowColumns: ModelRowReader.sportsRowColumns)
+        XCTAssertEqual(trimmedRows.count, fixture.rows.count)
+        let readRows = GlyphRows.read(bordered, width: fixture.width, height: fixture.height,
+                                      rowColumns: ModelRowReader.sportsRowColumns, classifier: classifier)
+        let line = GlyphRows.readLine(readRows[0], count: 14)
+        XCTAssertEqual(line?.map { String($0.digit) }.joined(), "05122330350211")
+    }
 }

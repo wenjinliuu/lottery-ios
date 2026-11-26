@@ -14,6 +14,11 @@ enum ModelRowReader {
         var zone: CGRect
     }
 
+    /// 找行投影只看左侧这么多列：福彩排除行尾顶天立地的 `(1)` 括号（60%），
+    /// 体彩排除最右侧竖排「☆中国体育彩票」边条与纸边（85%），避免把多行粘成一整块。
+    static let sportsRowColumns: Double = 0.85
+    static let welfareRowColumns: Double = 0.6
+
     static func read(image: UIImage, fragments: [TicketVisionScanner.TextFragment],
                      game: GameKey, classifier: DigitClassifier) -> Reading? {
         guard let cgImage = image.cgImage, cgImage.width > 0 else { return nil }
@@ -32,7 +37,8 @@ enum ModelRowReader {
         let slope = TicketVisionScanner.textTilt(fragments, size: CGSize(width: width, height: height)) ?? 0
         guard let zone = NumberZone.sample(red, width: width, height: height, bounds: bounds, slope: slope) else { return nil }
         let rows = GlyphRows.read(zone.pixels, width: zone.width, height: zone.height,
-                                  rowColumns: sports ? 1 : 0.6, classifier: classifier)
+                                  rowColumns: sports ? sportsRowColumns : welfareRowColumns,
+                                  classifier: classifier)
         let rect = CGRect(x: bounds.left / Double(width), y: bounds.top / Double(height),
                           width: (bounds.right - bounds.left) / Double(width),
                           height: (bounds.bottom - bounds.top) / Double(height))
