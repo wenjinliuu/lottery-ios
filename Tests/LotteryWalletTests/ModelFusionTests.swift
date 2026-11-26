@@ -500,7 +500,7 @@ final class ModelFusionTests: XCTestCase {
         var qlc = TicketVisionScanner.shellTicket(for: .qlc, text: qlcText)
         let qlcReport = ModelFusion.fuse(&qlc, rows: ["x 02 07 11 15 21 26 29 x1x"].map(row))
         XCTAssertTrue(qlcReport.rebuilt)
-        XCTAssertEqual(qlc.lines.map { $0[.nums] }, [[2, 7, 11, 15, 21, 26, 29]])
+        XCTAssertEqual(qlc.lines.map { $0[.nums7] }, [[2, 7, 11, 15, 21, 26, 29]])
         XCTAssertTrue(TicketVisionScanner.modelRecoverableGames.contains(.k8))
         XCTAssertTrue(TicketVisionScanner.modelRecoverableGames.contains(.ssq))
         XCTAssertTrue(TicketVisionScanner.modelRecoverableGames.contains(.dlt))
