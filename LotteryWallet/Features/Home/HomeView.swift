@@ -76,9 +76,7 @@ struct HomeView: View {
         guard let viewportHeight = measuredHeight, viewportHeight > 0 else {
             return BallJarView.defaultHeight
         }
-        // 已扣除顶部导航栏与底部官方 TabView 安全区：非球罐区内容（收支头、指标、开奖头/卡/免责/状态点 ≈ 494pt）
-        let target = (viewportHeight - 494).rounded(.down)
-        return min(BallJarView.maxHeight, max(BallJarView.minHeight, target))
+        return BallJarView.adaptiveHeight(viewportHeight: viewportHeight, screenWidth: screenWidth)
     }
 
     private var rangePickerWidth: CGFloat {
@@ -109,11 +107,13 @@ struct HomeView: View {
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
             .background { HomeAmbientBackdrop() }
-            // 量宽度放在 `background` 里：背景不参与布局，量它不会把
+            // 量尺寸放在 `background` 里：背景不参与布局，量它不会把
             // `GeometryReader` 的贪心尺寸带进内容，也动不到导航栏的行为。
+            // 注意这里不带 `.ignoresSafeArea()`，`proxy.size.height` 本身已经是扣除顶部导航栏和
+            // 底部官方 TabView 安全区之后的可见高度；再减 `safeAreaInsets` 会双重扣减导致球罐被压到最小高度。
             .background(
                 GeometryReader { proxy in
-                    let usableHeight = proxy.size.height - proxy.safeAreaInsets.top - proxy.safeAreaInsets.bottom
+                    let usableHeight = proxy.size.height
                     Color.clear
                         .onAppear {
                             measuredWidth = proxy.size.width

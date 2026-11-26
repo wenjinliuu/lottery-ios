@@ -116,4 +116,26 @@ final class JarModelTests: XCTestCase {
         XCTAssertEqual(scaled.values.reduce(0, +), JarBuilder.displayLimit)
         XCTAssertEqual(scaled["ssq.red"], 550)
     }
+
+    /// 回归：之前在 `ScrollView.background` 的 `GeometryReader` 里重复减了一次 `safeAreaInsets`，
+    /// 连 6.9 英寸大屏都被压到最小高度 172pt。修完后大屏回升到 280pt，各机型都不遮挡底栏。
+    func testBallJarAdaptiveHeightFitsAcrossScreenSizes() {
+        // 6.9 英寸 Pro Max（440×956pt，扣除顶/底安全区后可见高度约 766pt）
+        let proMax = BallJarView.adaptiveHeight(viewportHeight: 766, screenWidth: 440)
+        XCTAssertEqual(proMax, 280)
+        XCTAssertLessThan(proMax + 283 + DrawCardMetrics.unifiedHeight(screenWidth: 440), 766)
+
+        // 6.3 英寸 Pro（402×874pt，可见高度约 684pt）
+        let pro = BallJarView.adaptiveHeight(viewportHeight: 684, screenWidth: 402)
+        XCTAssertGreaterThanOrEqual(pro, 230)
+        XCTAssertLessThan(pro + 283 + DrawCardMetrics.unifiedHeight(screenWidth: 402), 684)
+
+        // 6.1 英寸标准屏（393×852pt，可见高度约 662pt）
+        let standard = BallJarView.adaptiveHeight(viewportHeight: 662, screenWidth: 393)
+        XCTAssertGreaterThanOrEqual(standard, BallJarView.minHeight)
+        XCTAssertLessThan(standard + 283 + DrawCardMetrics.unifiedHeight(screenWidth: 393), 662)
+
+        // 极矮屏幕仍兜底在最小高度
+        XCTAssertEqual(BallJarView.adaptiveHeight(viewportHeight: 500, screenWidth: 375), BallJarView.minHeight)
+    }
 }

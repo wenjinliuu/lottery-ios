@@ -433,18 +433,29 @@ enum TicketTextParser {
     ///
     /// 抽出来是为了让「这一行读成了一注」和「这一行看着像一注但没读成」
     /// 用的是**同一套**摘除规则 —— 两边不一致的话，警告就会报在不该报的行上。
-    static func betBody(_ line: String) -> String? {
-        // 行尾那个倍数括号 OCR 经常只认出半边 —— 真实结果里有
-        // `... 63 72 1 )`（丢了左括号）和 `... 23 25(1`（丢了右括号）。
-        // 括号必须写成可选，否则那个残缺的 `1` 会被当成一个号码，
-        // 号码个数多出一个，整注就被判掉了 —— 用户看到的是「少了一注」。
-        //
-        // **至少要有一边括号在**。两边都写成可选的话，
-        // `A.11 13 14 27 31 33-04` 结尾的 `-04` 会被当成倍数削掉 ——
-        // 每一张双色球单式票都要少一个蓝球。
+    ///
+    /// - Parameter stripOrphanToken: 为 `true` 时，行尾只有孤立右括号 `)`（没有左括号）也会连同
+    ///   前面那一个空白分隔的 token 一起摘掉（应对 `... 45 52 10 )` 这种丢了左括号的两位倍数，
+    ///   或 3D `1 8 9 1 )`）。默认 `false` 只摘孤立右括号本身，避免把 `A.09 17 24 45 52 )`
+    ///   这种左括号和倍数一起丢掉的行误删成 4 个号。
+    static func betBody(_ line: String, stripOrphanToken: Bool = false) -> String? {
+        // 1. 有左括号的倍数括号（完整 `(1)` 或丢右括号 `(1`）确定不是号码，一律摘掉。
         var body = line.replacingOccurrences(
-            of: "(?:[(（]\\s*[-—0-9OQDIloq|!]{1,3}\\s*[)）]?|[-—0-9OQDIloq|!]{1,3}\\s*[)）])\\s*$",
+            of: "[(（]\\s*[-—0-9OQDIloq|!]{1,3}\\s*[)）]?\\s*$",
             with: "", options: .regularExpression)
+        if stripOrphanToken {
+            // 2a. 兜底分支：丢了左括号但留着倍数字（`... 63 72 1 )`、`... 45 52 10 )`）。
+            body = body.replacingOccurrences(
+                of: "(?:^|\\s)[-—0-9OQDIloq|!]{1,3}\\s*[)）]\\s*$",
+                with: "", options: .regularExpression)
+        } else {
+            // 2b. 默认只摘孤立右括号（以及空注残余 `- )`），绝不吃掉括号前面真正的两位数号码。
+            //     如果左括号丢了但倍数是一位数字（`... 63 72 1 )`），摘完 `)` 后的单个 `1` 会由
+            //     `dropTrailingMultiple` 安全剥离；两位倍数或数字型则走 `singleLine` 的兜底重试。
+            body = body.replacingOccurrences(
+                of: "(?:[-—]{1,3}\\s*)?[)）]\\s*$",
+                with: "", options: .regularExpression)
+        }
         body = body.replacingOccurrences(of: lineIndexPrefix, with: "", options: .regularExpression)
         // 3D 每一注行首印着自己的玩法：`组六: 1 8 9`。摘掉它，
         // 剩下的才是号码 —— 玩法由 `perLineModes` 单独去读。
@@ -455,25 +466,43 @@ enum TicketTextParser {
         return body
     }
 
-    private static func singleLine(_ line: String, game: GameKey) -> (numbers: NumberSet, multiple: Int?)? {
+    private static func hasOrphanClosingParen(_ line: String) -> Bool {
+        guard line.range(of: "[(（]\\s*[-—0-9OQDIloq|!]{1,3}\\s*[)）]?\\s*$", options: .regularExpression) == nil else {
+            return false
+        }
+        return line.range(of: "(?:^|\\s)[-—0-9OQDIloq|!]{1,3}\\s*[)）]\\s*$", options: .regularExpression) != nil
+    }
+
+    private static func singleLine(_ line: String,
+                                   game: GameKey,
+                                   expectedK8Count: Int? = nil) -> (numbers: NumberSet, multiple: Int?)? {
         // 行尾括号里的倍数和行首的注序号都不是号码，先摘掉
         let multiple = lineMultiple(line)
-        // 行尾那个倍数括号 OCR 经常只认出半边 —— 真实结果里有
-        // `... 63 72 1 )`（丢了左括号）和 `... 23 25(1`（丢了右括号）。
-        // 括号必须写成可选，否则那个残缺的 `1` 会被当成一个号码，
-        // 号码个数多出一个，整注就被判掉了 —— 用户看到的是「少了一注」。
-        //
-        // **至少要有一边括号在**。两边都写成可选的话，
-        // `A.11 13 14 27 31 33-04` 结尾的 `-04` 会被当成倍数削掉 ——
-        // 每一张双色球单式票都要少一个蓝球。
-        guard var body = betBody(line) else { return nil }
+        if let body = betBody(line),
+           let parsed = parseSingleBody(body, game: game, multiple: multiple, expectedK8Count: expectedK8Count) {
+            return parsed
+        }
+        // 行尾只有孤立右括号且上面没读成：再试把右括号前的残缺倍数字一起摘掉
+        // （例如 `A.09 17 24 45 52 10 )` 或 3D `组六: 1 8 9 1 )`）。
+        if hasOrphanClosingParen(line),
+           let body = betBody(line, stripOrphanToken: true) {
+            return parseSingleBody(body, game: game, multiple: multiple, expectedK8Count: expectedK8Count)
+        }
+        return nil
+    }
 
+    private static func parseSingleBody(_ rawBody: String,
+                                        game: GameKey,
+                                        multiple: Int?,
+                                        expectedK8Count: Int?) -> (numbers: NumberSet, multiple: Int?)? {
+        var body = rawBody
         let sections = game.sections
         // 行尾的倍数「(1)」两个括号都没认出来，只剩一个孤零零的 1：号码都是两位数，
         // 所以最后那个单个的数字不是号码（真机上快乐8 的一注因此多出一个号被丢）。
         if let first = sections.first, first.range.upperBound > 9 { body = dropTrailingMultiple(body) }
         if sections.count == 1 {
-            return singleZoneLine(body, game: game, section: sections[0], multiple: multiple)
+            return singleZoneLine(body, game: game, section: sections[0],
+                                  multiple: multiple, expectedK8Count: expectedK8Count)
         }
         guard sections.count == 2 else { return nil }
         if sections[0].range.lowerBound > 0 { return twoZoneLine(dropStrayIndex(body), game: game, multiple: multiple) }
@@ -608,7 +637,8 @@ enum TicketTextParser {
     private static func singleZoneLine(_ body: String,
                                        game: GameKey,
                                        section: GameSection,
-                                       multiple: Int?) -> (numbers: NumberSet, multiple: Int?)? {
+                                       multiple: Int?,
+                                       expectedK8Count: Int? = nil) -> (numbers: NumberSet, multiple: Int?)? {
         // 排列3 / 排列5 / 3D：一位一个号，可以重复，顺序就是票面顺序，
         // 而且可能带着 `?`（那一位没认出来）——所以要走位置那条路，
         // 不能走"按 token 读出一堆号码再数个数"。
@@ -625,14 +655,13 @@ enum TicketTextParser {
         let values = numbers(in: body, range: section.range)
         guard !values.isEmpty else { return nil }
 
-        // 七乐彩固定 7 个；快乐8 的个数由玩法决定，这里先不卡死 ——
-        // 调用方拿到玩法之后会再校一次，卡死了「选八」这种票一注都读不出来。
+        // 七乐彩固定 7 个；快乐8 的个数由玩法决定，已知玩法时当场校验个数
+        // （这样行尾丢左括号的两位倍数如 `... 45 52 60 )` 能触发兜底剥离）。
         let trimmed = trimStray(values, to: section)
-        // 快乐8 一注选几个由玩法说了算（选一到选十），这里卡死的话
-        // 一张「选八」的票一注都读不出来 —— 调用方拿到玩法之后会再校一次。
         if game == .k8 {
+            let validCount = expectedK8Count.map { trimmed.count == $0 } ?? (1...10).contains(trimmed.count)
             guard isAscendingUnique(trimmed), trimmed.allSatisfy(section.range.contains),
-                  (1...10).contains(trimmed.count) else { return nil }
+                  validCount else { return nil }
             return (NumberSet([section.key: trimmed]), multiple)
         }
         guard let filled = fill(trimmed, to: section) else { return nil }
@@ -809,6 +838,7 @@ enum TicketTextParser {
         let playText = lines.filter { !isSlogan($0) }.joined(separator: "\n")
         var ticket = ScannedTicket(game: game)
         ticket.play = detectPlay(playText)
+        let expectedK8Count = game == .k8 ? Int(detectPlayMode(game: game, text: block)) : nil
 
         var selections: [SectionKey: SectionSelection] = [:]
         var singleLines: [NumberSet] = []
@@ -877,7 +907,7 @@ enum TicketTextParser {
 
             // 没有标签的票是单式票，按一行一注读
             if ticket.play == .single {
-                if let parsed = singleLine(line, game: game) {
+                if let parsed = singleLine(line, game: game, expectedK8Count: expectedK8Count) {
                     singleLines.append(parsed.numbers)
                     if let multiple = parsed.multiple { lineMultiples.append(multiple) }
                 } else if looksLikeOverfullBet(line, game: game) {

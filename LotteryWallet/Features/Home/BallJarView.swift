@@ -21,10 +21,20 @@ struct BallJarView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
 
-    static let height: CGFloat = 220
-    static let defaultHeight: CGFloat = 220
-    static let minHeight: CGFloat = 172
-    static let maxHeight: CGFloat = 236
+    static let height: CGFloat = 264
+    static let defaultHeight: CGFloat = 264
+    static let minHeight: CGFloat = 212
+    static let maxHeight: CGFloat = 280
+
+    /// 按扣除顶部导航栏与底部官方标签栏后的可见视口高度计算玻璃球罐高度。
+    /// 非球罐首屏内容（收支头/指标/球罐顶条 + 最新开奖头/卡/免责/状态圆点）实测 ≈ 283pt + 开奖卡高度，
+    /// 再预留 10pt 呼吸间距确保底栏绝不遮挡。
+    nonisolated static func adaptiveHeight(viewportHeight: CGFloat, screenWidth: CGFloat) -> CGFloat {
+        guard viewportHeight > 0 else { return defaultHeight }
+        let nonJarChrome = 293 + DrawCardMetrics.unifiedHeight(screenWidth: screenWidth)
+        let target = (viewportHeight - nonJarChrome).rounded(.down)
+        return min(maxHeight, max(minHeight, target))
+    }
     private static let corner: CGFloat = 28
     private static let frameWidth: CGFloat = 7
     private var isActive: Bool { isVisible && scenePhase == .active && jar.hits > 0 }

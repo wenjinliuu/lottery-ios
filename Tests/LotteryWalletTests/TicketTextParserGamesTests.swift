@@ -627,4 +627,59 @@ final class WholeTicketDerivationTests: XCTestCase {
         XCTAssertEqual(ticket.game, .pl5)
         XCTAssertEqual(ticket.lines.map { $0[.nums5] }, [[1, 4, 1, 9, 6], [3, 7, 7, 1, 6]])
     }
+
+    /// 真机实测（2026-11-26 快乐8 选五单式）：Vision 把 A 注行尾 `(1)` 的左括号和 `1` 都漏掉了，
+    /// 原文变成 `A.09 17 24 45 52 )`。上一版 `betBody` 把 `52 )` 当成残缺倍数整个削掉，
+    /// A 注只剩 4 个号被过滤，复核页少了一注且合计 2 元对不上 4 元。
+    func testOrphanClosingParenDoesNotEatLastLotteryNumber() throws {
+        let text = """
+        wEn CD 四国福利料票
+        玩法:快乐8-选五单式湘时a WEE税号:39736822
+        4D5D-F4F3-3CA7-E587-C218/99696024/26C0B
+        A.09 17 24 45 52 )
+        B.01 03 16 26 30
+        C.--
+        D.
+        E. --
+        开奖期:2026316 26-11-26 合计4元
+        销售期:2026316-1 26-11-26 10:08:19
+        """
+        let ticket = try XCTUnwrap(TicketTextParser.parseTickets(text).first)
+        XCTAssertEqual(ticket.game, .k8)
+        XCTAssertEqual(ticket.playMode, "5")
+        XCTAssertEqual(ticket.count, 2)
+        XCTAssertEqual(ticket.lines.map { $0[.nums] }, [[9, 17, 24, 45, 52], [1, 3, 16, 26, 30]])
+        XCTAssertEqual(ticket.totalCost, 4, accuracy: 0.001)
+    }
+
+    /// 孤立右括号前确实是残缺倍数（两位倍数如 `10 )` / 升序的 `60 )`，或 3D 的 `1 )`），
+    /// 以及双色球 / 3D 同样只剩孤立 `)` 时，两边都要能读全。
+    func testOrphanClosingParenHandlesBothMissingMultipleAndBrokenTwoDigitMultiple() throws {
+        let k8TwoDigitMult = """
+        玩法: 快乐8-选五单式
+        A.09 17 24 45 52 10 )
+        B.01 03 16 26 30 60 )
+        开奖期:2026316 26-11-26 合计40元
+        """
+        let k8 = try XCTUnwrap(TicketTextParser.parseTickets(k8TwoDigitMult).first)
+        XCTAssertEqual(k8.lines.map { $0[.nums] }, [[9, 17, 24, 45, 52], [1, 3, 16, 26, 30]])
+
+        let ssqOrphan = """
+        玩法: 双色球-单式
+        A.04 08 14 24 26 29-03 )
+        开奖期:2026136 26-11-26 合计2元
+        """
+        let ssq = try XCTUnwrap(TicketTextParser.parseTickets(ssqOrphan).first)
+        XCTAssertEqual(ssq.lines.first?[.red], [4, 8, 14, 24, 26, 29])
+        XCTAssertEqual(ssq.lines.first?[.blue], [3])
+
+        let fc3dOrphan = """
+        玩法:3D-单式
+        组六: 1 8 9 )
+        组三: 0 9 9 1 )
+        开奖期:2026091 26-04-11 合计4元
+        """
+        let fc3d = try XCTUnwrap(TicketTextParser.parseTickets(fc3dOrphan).first)
+        XCTAssertEqual(fc3d.lines.map { $0[.nums3] }, [[1, 8, 9], [0, 9, 9]])
+    }
 }

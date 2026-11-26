@@ -103,11 +103,8 @@ enum GlyphRows {
 
     // MARK: - 行和段
 
-    /// - Parameter rowColumns: 找行的时候只看左边这么大比例的列。福彩行尾的「(1)」
-    ///   括号比数字高，上下两行的括号几乎挨着，算进去的话几行会连成一行。
-    static func rows(_ gray: [UInt8], width: Int, height: Int, rowColumns: Double = 1) -> [Row] {
-        guard width > 0, height > 0, gray.count == width * height else { return [] }
-        let ink = inkMask(gray, width: width, height: height)
+    /// 找出号码区里每一行的纵坐标区间（已经去掉虚线/噪点并切开粘连的两行）。
+    private static func rowBands(_ ink: [Bool], width: Int, height: Int, rowColumns: Double) -> [(top: Int, bottom: Int)] {
         let limit = Int(Double(width) * rowColumns)
         var profile = [Int](repeating: 0, count: height)
         for y in 0..<height {
@@ -119,37 +116,91 @@ enum GlyphRows {
         guard !rough.isEmpty else { return [] }
         let heights = rough.map { $0.1 - $0.0 }.sorted()
         let tall = heights[heights.count / 2]
-        let found = splitTall(rough, profile: profile, tall: tall)
+        return splitTall(rough, profile: profile, tall: tall).filter { ($0.1 - $0.0) * 100 >= tall * 55 }
+    }
+
+    private static func inkVerticalSpan(x0: Int, x1: Int, top: Int, bottom: Int,
+                                        ink: [Bool], width: Int) -> (y0: Int, y1: Int)? {
+        var first = -1, last = -1
+        for y in top..<bottom {
+            var any = false
+            for x in x0..<x1 where ink[y * width + x] { any = true; break }
+            guard any else { continue }
+            if first < 0 { first = y }
+            last = y
+        }
+        return first >= 0 ? (first, last + 1) : nil
+    }
+
+    /// - Parameter rowColumns: 找行的时候只看左边这么大比例的列。福彩行尾的「(1)」
+    ///   括号比数字高，上下两行的括号几乎挨着，算进去的话几行会连成一行。
+    static func rows(_ gray: [UInt8], width: Int, height: Int, rowColumns: Double = 1) -> [Row] {
+        guard width > 0, height > 0, gray.count == width * height else { return [] }
+        let ink = inkMask(gray, width: width, height: height)
         var out: [Row] = []
-        for (top, bottom) in found {
+        for (top, bottom) in rowBands(ink, width: width, height: height, rowColumns: rowColumns) {
             let rowHeight = bottom - top
-            guard rowHeight * 100 >= tall * 55 else { continue }        // 虚线、噪点
             var columns = [Int](repeating: 0, count: width)
             for y in top..<bottom {
                 for x in 0..<width where ink[y * width + x] { columns[x] += 1 }
             }
             var segments: [Segment] = []
             for (x0, x1) in bands(columns, floor: 0) {
-                var first = -1, last = -1
-                for y in top..<bottom {
-                    var any = false
-                    for x in x0..<x1 where ink[y * width + x] { any = true; break }
-                    guard any else { continue }
-                    if first < 0 { first = y }
-                    last = y
+                guard let span = inkVerticalSpan(x0: x0, x1: x1, top: top, bottom: bottom, ink: ink, width: width) else {
+                    continue
                 }
-                guard first >= 0 else { continue }
-                let segmentHeight = last + 1 - first, segmentWidth = x1 - x0
+                let segmentHeight = span.y1 - span.y0, segmentWidth = x1 - x0
                 // 长得像数字：差不多和这一行一样高，不太宽也不太窄。
                 // 冒号、小数点、加号、减号太矮；圈码和汉字太宽。
                 guard segmentHeight * 100 >= rowHeight * 72,
                       rowHeight * 16 <= segmentWidth * 100,
                       segmentWidth * 100 <= rowHeight * 90 else { continue }
-                segments.append(Segment(x0: x0, x1: x1, y0: first, y1: last + 1))
+                segments.append(Segment(x0: x0, x1: x1, y0: span.y0, y1: span.y1))
             }
             out.append(Row(top: top, bottom: bottom, segments: segments))
         }
         return out
+    }
+
+    /// 两位数字挨得太近、在墨迹图里粘成一段（宽在行高的 90%–175% 之间）时，按列投影波谷试切一刀。
+    ///
+    /// 福彩热敏票一个两位数里两位只隔 1–2px（如快乐8 的 `03`、`78`、双色球的 `22`、`25`），
+    /// 经 3×3 模糊和局部阈值后常在中间粘出几个墨点，直接超宽被整块丢掉。
+    /// 这里只做几何切分候选；最终由 `read` 用 `DigitClassifier` 验明**两半都是高把握数字**才采纳，
+    /// 圈码 `①–⑤` 或汉字拆出来的半边必为 `reject`，不会被误收。
+    static func splitWidePair(x0: Int, x1: Int, top: Int, bottom: Int,
+                              columns: [Int], ink: [Bool], width: Int) -> (left: Segment, right: Segment, cut: Int)? {
+        let rowHeight = bottom - top
+        let bandWidth = x1 - x0
+        guard bandWidth * 100 > rowHeight * 90, bandWidth * 100 <= rowHeight * 175 else { return nil }
+        let low = x0 + bandWidth * 30 / 100
+        let high = x1 - bandWidth * 30 / 100
+        guard high > low else { return nil }
+        var cut = low
+        for x in low..<high where columns[x] < columns[cut] { cut = x }
+        guard cut > x0, cut + 1 < x1 else { return nil }
+        let leftPeak = columns[x0..<cut].max() ?? 0
+        let rightPeak = columns[(cut + 1)..<x1].max() ?? 0
+        let peak = min(leftPeak, rightPeak)
+        guard peak > 0, columns[cut] * 100 <= peak * 45 else { return nil }
+
+        func trimmed(_ sx0: Int, _ sx1: Int) -> Segment? {
+            var left = -1, right = -1
+            for x in sx0..<sx1 where columns[x] > 0 {
+                if left < 0 { left = x }
+                right = x + 1
+            }
+            guard left >= 0, right > left,
+                  let span = inkVerticalSpan(x0: left, x1: right, top: top, bottom: bottom, ink: ink, width: width)
+            else { return nil }
+            let sh = span.y1 - span.y0, sw = right - left
+            guard sh * 100 >= rowHeight * 72,
+                  rowHeight * 16 <= sw * 100,
+                  sw * 100 <= rowHeight * 90 else { return nil }
+            return Segment(x0: left, x1: right, y0: span.y0, y1: span.y1)
+        }
+        guard let left = trimmed(x0, cut), let right = trimmed(cut + 1, x1) else { return nil }
+        return (left, right, cut)
     }
 
     /// 比一般的行高出将近一半的行，多半是两行粘在了一起（表头的下半截贴着第一注 ——
@@ -181,10 +232,13 @@ enum GlyphRows {
     }
 
     /// 一段四周各让 3 个像素裁出来，交给模型。
+    /// 粘连切开的字用 `minX` / `maxX` 卡在切缝处，不把紧挨着的邻居墨迹带进小图。
     static func crop(_ gray: [UInt8], width: Int, height: Int,
-                     segment: Segment) -> (pixels: [UInt8], width: Int, height: Int) {
-        let x0 = max(segment.x0 - 3, 0), x1 = min(segment.x1 + 3, width)
+                     segment: Segment, minX: Int = 0, maxX: Int? = nil) -> (pixels: [UInt8], width: Int, height: Int) {
+        let rightLimit = min(maxX ?? width, width)
+        let x0 = max(segment.x0 - 3, max(minX, 0)), x1 = min(segment.x1 + 3, rightLimit)
         let y0 = max(segment.y0 - 3, 0), y1 = min(segment.y1 + 3, height)
+        guard x1 > x0, y1 > y0 else { return ([], 0, 0) }
         var pixels = [UInt8](repeating: 0, count: (x1 - x0) * (y1 - y0))
         for y in y0..<y1 {
             for x in x0..<x1 { pixels[(y - y0) * (x1 - x0) + x - x0] = gray[y * width + x] }
@@ -192,16 +246,49 @@ enum GlyphRows {
         return (pixels, x1 - x0, y1 - y0)
     }
 
+    /// 粘连两位数字切开后，两半各自都必须达到这个把握才采纳（挡住圈码、汉字被误拆）。
+    static let splitPairConfidence: Float = 0.80
+
     /// 号码区里每一行的每一段，都让模型认一遍。
     static func read(_ gray: [UInt8], width: Int, height: Int, rowColumns: Double = 1,
                      classifier: DigitClassifier) -> [[Token]] {
-        rows(gray, width: width, height: height, rowColumns: rowColumns).map { row in
-            row.segments.map { segment in
-                let piece = crop(gray, width: width, height: height, segment: segment)
-                let verdict = classifier.classify(pixels: piece.pixels, width: piece.width, height: piece.height)
-                return Token(digit: verdict.digit, confidence: verdict.confidence, segment: segment)
+        guard width > 0, height > 0, gray.count == width * height else { return [] }
+        let ink = inkMask(gray, width: width, height: height)
+        var out: [[Token]] = []
+        for (top, bottom) in rowBands(ink, width: width, height: height, rowColumns: rowColumns) {
+            let rowHeight = bottom - top
+            var columns = [Int](repeating: 0, count: width)
+            for y in top..<bottom {
+                for x in 0..<width where ink[y * width + x] { columns[x] += 1 }
             }
+            var tokens: [Token] = []
+            for (x0, x1) in bands(columns, floor: 0) {
+                guard let span = inkVerticalSpan(x0: x0, x1: x1, top: top, bottom: bottom, ink: ink, width: width) else {
+                    continue
+                }
+                let segmentHeight = span.y1 - span.y0, segmentWidth = x1 - x0
+                guard segmentHeight * 100 >= rowHeight * 72 else { continue }
+                if rowHeight * 16 <= segmentWidth * 100, segmentWidth * 100 <= rowHeight * 90 {
+                    let segment = Segment(x0: x0, x1: x1, y0: span.y0, y1: span.y1)
+                    let piece = crop(gray, width: width, height: height, segment: segment)
+                    let verdict = classifier.classify(pixels: piece.pixels, width: piece.width, height: piece.height)
+                    tokens.append(Token(digit: verdict.digit, confidence: verdict.confidence, segment: segment))
+                } else if let pair = splitWidePair(x0: x0, x1: x1, top: top, bottom: bottom,
+                                                   columns: columns, ink: ink, width: width) {
+                    let leftPiece = crop(gray, width: width, height: height, segment: pair.left, maxX: pair.cut)
+                    let rightPiece = crop(gray, width: width, height: height, segment: pair.right, minX: pair.cut + 1)
+                    let leftVerdict = classifier.classify(pixels: leftPiece.pixels, width: leftPiece.width, height: leftPiece.height)
+                    let rightVerdict = classifier.classify(pixels: rightPiece.pixels, width: rightPiece.width, height: rightPiece.height)
+                    if leftVerdict.digit != DigitClassifier.reject, leftVerdict.confidence >= splitPairConfidence,
+                       rightVerdict.digit != DigitClassifier.reject, rightVerdict.confidence >= splitPairConfidence {
+                        tokens.append(Token(digit: leftVerdict.digit, confidence: leftVerdict.confidence, segment: pair.left))
+                        tokens.append(Token(digit: rightVerdict.digit, confidence: rightVerdict.confidence, segment: pair.right))
+                    }
+                }
+            }
+            out.append(tokens)
         }
+        return out
     }
 
     // MARK: - 一行里的那一串号码

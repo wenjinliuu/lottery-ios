@@ -96,4 +96,54 @@ final class GlyphRowsTests: XCTestCase {
         let read = GlyphRows.readLine(tokens("x 05 12 23 30 35 02 11      1"), count: 14)
         XCTAssertEqual(read?.map { String($0.digit) }.joined(), "05122330350211")
     }
+
+    // MARK: - 粘连两位数字切分
+
+    /// 福彩热敏票上同一个两位数的两位只隔 1–2px（如快乐8 的 `03`、双色球的 `22`/`25`），
+    /// 经模糊和局部阈值后常粘成一段超宽墨迹被整块丢掉。`read` 按列投影波谷切开、裁字卡在切缝不串墨，
+    /// 并要求两半都被模型以 ≥ 0.80 把握认成数字，才采纳。
+    func testSplitsTouchingDigitPairAndPreservesFullRowRead() throws {
+        let (fixture, original) = try fixture()
+        let classifier = try XCTUnwrap(DigitClassifier.shared)
+        var bridged = original
+        // 第 0 行里 `0`（x 106..131）和 `5`（x 137..162）之间画一条 4px 高的墨桥让两者粘成一段
+        for y in 40..<44 {
+            for x in 129..<140 {
+                bridged[y * fixture.width + x] = 40
+            }
+        }
+        // 纯几何 `rows` 会丢掉粘连超宽的 `05`，少两段
+        let rawRows = GlyphRows.rows(bridged, width: fixture.width, height: fixture.height)
+        XCTAssertEqual(rawRows[0].segments.count, fixture.rows[0].segments.count - 2)
+
+        // `read` 切开 `05`、裁字边界卡在切缝，两半均以高把握认出，整行照常读成 14 位
+        let readRows = GlyphRows.read(bridged, width: fixture.width, height: fixture.height, classifier: classifier)
+        let line = GlyphRows.readLine(readRows[0], count: 14)
+        XCTAssertEqual(line?.map { String($0.digit) }.joined(), "05122330350211")
+        XCTAssertGreaterThanOrEqual(line?[0].confidence ?? 0, 0.9)
+        XCTAssertGreaterThanOrEqual(line?[1].confidence ?? 0, 0.9)
+    }
+
+    /// 宽的非数字（圈码 `①–⑤`、汉字或两个粘连字母 `AA`）即使几何上有波谷，
+    /// 拆开后达不到「两半都是高把握数字」这道闸，一律不采纳 —— 避免给数字行凭空多塞一位。
+    func testDoesNotEmitSplitTokensForWideNonDigits() throws {
+        let (fixture, original) = try fixture()
+        let classifier = try XCTUnwrap(DigitClassifier.shared)
+        var bridged = original
+        // 把第 0 行开头的 `A`（x 40..71）复制一份紧挨着放到 x 73..104 并桥接成一段宽非数字
+        for y in 21..<63 {
+            for dx in 0..<31 {
+                bridged[y * fixture.width + 73 + dx] = original[y * fixture.width + 40 + dx]
+            }
+        }
+        for y in 40..<44 {
+            for x in 69..<76 {
+                bridged[y * fixture.width + x] = 40
+            }
+        }
+        let readRows = GlyphRows.read(bridged, width: fixture.width, height: fixture.height, classifier: classifier)
+        // `AA` 整块被跳过，不会往行首多塞假数字，后面 14 个数字照常读成
+        let line = GlyphRows.readLine(readRows[0], count: 14)
+        XCTAssertEqual(line?.map { String($0.digit) }.joined(), "05122330350211")
+    }
 }
