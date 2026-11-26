@@ -350,4 +350,161 @@ final class ModelFusionTests: XCTestCase {
         XCTAssertEqual(ticket.totalCost, 12)
         XCTAssertEqual(ModelFusion.trailingMultiple(row("x 05 06 08 10 11 30 01")), nil)
     }
+
+    // MARK: - 复式重建、双源互补合并、全彩种空壳恢复
+
+    /// 真机 batch05 双色球 7+2 复式：标签前面不是 `x` 而是低把握 `1?` / `6?1?`，合计 28 元对得上。
+    /// Vision 漏号甚至一行没读出时，模型都能把整张复式票重建出来。
+    func testSystemTicketIsRebuiltFromModelWhenTotalAgrees() {
+        var ticket = ScannedTicket(game: .ssq)
+        ticket.play = .system
+        ticket.totalAmount = 28
+        ticket.selections[.red] = SectionSelection(selected: [2, 5, 12, 13, 17, 25]) // Vision 漏掉 30
+        let model = ["l 02 05 12 13 17 25 30", "xl 06 12", "x 1"].map(row)
+        let report = ModelFusion.fuse(&ticket, rows: model)
+        XCTAssertTrue(report.rebuilt)
+        XCTAssertEqual(ticket.selections[.red]?.selected, [2, 5, 12, 13, 17, 25, 30])
+        XCTAssertEqual(ticket.selections[.blue]?.selected, [6, 12])
+        XCTAssertEqual(ticket.totalCost, 28)
+        XCTAssertTrue(ticket.warnings.isEmpty)
+    }
+
+    /// 复式票两个读数个数相同但号码有冲突：金额分不出谁对，以模型为准，同时明确提示两种读法不一致。
+    func testSystemTicketRebuildMarksDisagreementWhenCountsMatch() {
+        var ticket = ScannedTicket(game: .ssq)
+        ticket.play = .system
+        ticket.totalAmount = 28
+        ticket.selections[.red] = SectionSelection(selected: [2, 5, 12, 13, 17, 26, 30]) // Vision 把 25 读成 26
+        ticket.selections[.blue] = SectionSelection(selected: [6, 12])
+        let model = ["l 02 05 12 13 17 25 30", "xl 06 12", "x 1"].map(row)
+        let report = ModelFusion.fuse(&ticket, rows: model)
+        XCTAssertTrue(report.rebuilt)
+        XCTAssertEqual(report.disputed, 1)
+        XCTAssertEqual(ticket.selections[.red]?.selected, [2, 5, 12, 13, 17, 25, 30])
+        XCTAssertTrue(ticket.warnings.contains { $0.contains("两种读法不一致") && $0.contains("26") })
+    }
+
+    /// 复式票模型有没把握的位或合计对不上：绝不重建。
+    func testSystemTicketRebuildSkipsLowConfidenceOrWrongTotal() {
+        var unsure = ScannedTicket(game: .ssq)
+        unsure.play = .system
+        unsure.totalAmount = 28
+        unsure.selections[.red] = SectionSelection(selected: [2, 5, 12, 13, 17, 25])
+        let unsureReport = ModelFusion.fuse(&unsure, rows: ["x 02 05 l2 13 17 25 30", "x 06 12"].map(row))
+        XCTAssertFalse(unsureReport.rebuilt)
+        XCTAssertEqual(unsure.selections[.red]?.selected, [2, 5, 12, 13, 17, 25])
+
+        var mismatch = ScannedTicket(game: .ssq)
+        mismatch.play = .system
+        mismatch.totalAmount = 14
+        let mismatchReport = ModelFusion.fuse(&mismatch, rows: ["x 02 05 12 13 17 25 30", "x 06 12"].map(row))
+        XCTAssertFalse(mismatchReport.rebuilt)
+        XCTAssertTrue(mismatch.selections.isEmpty)
+    }
+
+    /// 大乐透折行 8+2 复式：Vision 一行没读出（空壳票），模型折行拼接后 112 元对得上，整张重建。
+    func testSystemTicketWrappedDltRebuildFromEmptyShell() {
+        var ticket = TicketVisionScanner.shellTicket(for: .dlt, text: "体彩 超级大乐透\n第26120期\n复式票 1倍 合计112元")
+        XCTAssertEqual(ticket.play, .system)
+        XCTAssertEqual(ticket.totalAmount, 112)
+        let report = ModelFusion.fuse(&ticket, rows: ["lxxxxxx", "xx 03 08 11 18 19 30 33", "35", "01 04"].map(row))
+        XCTAssertTrue(report.rebuilt)
+        XCTAssertEqual(ticket.selections[.front]?.selected, [3, 8, 11, 18, 19, 30, 33, 35])
+        XCTAssertEqual(ticket.selections[.back]?.selected, [1, 4])
+        XCTAssertEqual(ticket.totalCost, 112)
+    }
+
+    /// 双源互补：快乐8 选五 Vision 只读出 B 注，模型只读出 A 注（B 注切字失败），合计 4 元正好 2 注 → 互补合并。
+    func testComplementaryMergeCombinesDisjointModelAndVisionRows() {
+        var ticket = ScannedTicket(game: .k8)
+        ticket.playMode = "5"
+        ticket.lines = [NumberSet([.nums: [1, 3, 16, 26, 30]])]
+        ticket.totalAmount = 4
+        let model = ["x 09 17 24 45 52      x1x", "x 01 16 26 30 x1x", "xxx"].map(row)
+        let report = ModelFusion.fuse(&ticket, rows: model)
+        XCTAssertTrue(report.rebuilt)
+        XCTAssertEqual(report.expected, 2)
+        XCTAssertEqual(report.read, 1)
+        XCTAssertEqual(ticket.lines.count, 2)
+        XCTAssertEqual(Set(ticket.lines.map { $0[.nums] }), [[1, 3, 16, 26, 30], [9, 17, 24, 45, 52]])
+        XCTAssertEqual(ticket.totalCost, 4)
+        XCTAssertTrue(report.note.contains("互补拼成 2 行"))
+    }
+
+    /// 双源互补 + 交叉核对：3 注 6 元，Vision 读出第 1 注（错 1 个号）和第 3 注，模型读出第 1 注和第 2 注。
+    /// 合并后 3 注齐全、第 1 注冲突位仍标问号。
+    func testComplementaryMergeCrossChecksAnchoredRowAndAddsMissingModelRow() {
+        var ticket = ScannedTicket(game: .k8)
+        ticket.playMode = "5"
+        ticket.lines = [
+            NumberSet([.nums: [9, 17, 24, 45, 53]]), // 52 误读成 53
+            NumberSet([.nums: [2, 11, 22, 33, 44]])
+        ]
+        ticket.totalAmount = 6
+        let model = [
+            "x 09 17 24 45 52      x1x",
+            "x 01 03 16 26 30      x1x",
+            "x 02 11 22 x 44       x1x"
+        ].map(row)
+        let report = ModelFusion.fuse(&ticket, rows: model)
+        XCTAssertTrue(report.rebuilt)
+        XCTAssertEqual(report.disputed, 1)
+        XCTAssertEqual(ticket.lines.count, 3)
+        XCTAssertEqual(ticket.lines[0][.nums], [9, 17, 24, 45, -1])
+        XCTAssertEqual(Set(ticket.lines.dropFirst().map { $0[.nums] }),
+                       Set([[1, 3, 16, 26, 30], [2, 11, 22, 33, 44]]))
+    }
+
+    /// 双源互补的负面护栏：模型独有行有没把握的字、或合并注数与合计不符、或未对齐 Vision 行含问号时，一律不合并。
+    func testComplementaryMergeRejectsUnsureModelRowOrWrongTotalOrUnknownVisionRow() {
+        // 1. 模型独有行含低把握数字 `l7`
+        var unsure = ScannedTicket(game: .k8)
+        unsure.playMode = "5"
+        unsure.lines = [NumberSet([.nums: [1, 3, 16, 26, 30]])]
+        unsure.totalAmount = 4
+        let unsureReport = ModelFusion.fuse(&unsure, rows: ["x 09 l7 24 45 52 x1x", "x 01 16 26 30 x1x"].map(row))
+        XCTAssertFalse(unsureReport.rebuilt)
+        XCTAssertEqual(unsure.lines.count, 1)
+
+        // 2. 合并后是 2 注（4 元），但票面合计是 6 元
+        var mismatch = ScannedTicket(game: .k8)
+        mismatch.playMode = "5"
+        mismatch.lines = [NumberSet([.nums: [1, 3, 16, 26, 30]])]
+        mismatch.totalAmount = 6
+        let mismatchReport = ModelFusion.fuse(&mismatch, rows: ["x 09 17 24 45 52 x1x"].map(row))
+        XCTAssertFalse(mismatchReport.rebuilt)
+        XCTAssertEqual(mismatch.lines.count, 1)
+
+        // 3. 未对齐的 Vision 行带问号（避免数字型残缺行与模型行重复计数）
+        var unknownVision = qxc([[3, -1, -1, -1, -1, -1, -1]])
+        unknownVision.totalAmount = 4
+        let unknownReport = ModelFusion.fuse(&unknownVision, rows: ["x 2 4 7 3 1 1   11"].map(row))
+        XCTAssertFalse(unknownReport.rebuilt)
+        XCTAssertEqual(unknownVision.lines.count, 1)
+    }
+
+    /// 空壳恢复：Vision 一行号码都没解析出时，各类支持彩种仍可凭票头元数据和模型整票重建。
+    func testShellTicketRebuildsK8AndQlcWithoutVisionLines() {
+        let k8Text = "中国福利彩票\n玩法:快乐8-选五单式\n开奖期:2026316 26-11-26 合计4元"
+        var k8 = TicketVisionScanner.shellTicket(for: .k8, text: k8Text)
+        XCTAssertEqual(k8.play, .single)
+        XCTAssertEqual(k8.playMode, "5")
+        XCTAssertEqual(k8.issue, "2026316")
+        XCTAssertEqual(k8.drawDate, "2026-11-26")
+        XCTAssertEqual(k8.totalAmount, 4)
+        let k8Report = ModelFusion.fuse(&k8, rows: ["x 09 17 24 45 52 x1x", "x 01 03 16 26 30 x1x"].map(row))
+        XCTAssertTrue(k8Report.rebuilt)
+        XCTAssertEqual(k8.lines.map { $0[.nums] }, [[9, 17, 24, 45, 52], [1, 3, 16, 26, 30]])
+
+        let qlcText = "中国福利彩票\n玩法:七乐彩-单式\n开奖期:2026088 26-08-01 合计2元"
+        var qlc = TicketVisionScanner.shellTicket(for: .qlc, text: qlcText)
+        let qlcReport = ModelFusion.fuse(&qlc, rows: ["x 02 07 11 15 21 26 29 x1x"].map(row))
+        XCTAssertTrue(qlcReport.rebuilt)
+        XCTAssertEqual(qlc.lines.map { $0[.nums] }, [[2, 7, 11, 15, 21, 26, 29]])
+        XCTAssertTrue(TicketVisionScanner.modelRecoverableGames.contains(.k8))
+        XCTAssertTrue(TicketVisionScanner.modelRecoverableGames.contains(.ssq))
+        XCTAssertTrue(TicketVisionScanner.modelRecoverableGames.contains(.dlt))
+        XCTAssertTrue(TicketVisionScanner.modelRecoverableGames.contains(.qlc))
+        XCTAssertFalse(TicketVisionScanner.modelRecoverableGames.contains(.fc3d))
+    }
 }

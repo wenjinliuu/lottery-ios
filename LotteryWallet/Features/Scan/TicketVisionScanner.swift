@@ -118,19 +118,14 @@ enum TicketVisionScanner {
                 if !second.tickets.isEmpty { result = second }
             }
         }
-        // **第二个读数**：自己训练的模型把号码区一行一行读一遍，和上面的结果逐个号码对。
-        // 一致的留下、不一致的标问号、Vision 没认出来而模型有把握的补上 —— 见 `ModelFusion`。
-        // 号码区夹不出来、模型没加载、照片里不止一张票时整段跳过，结果和没有这一步时一样。
-        // 手选的数字票即使文字层没读出一行，也保留在复核页，让模型有机会重建。
+        // **模型优先重建与交叉复核**：自己训练的模型把号码区一行一行读一遍，和 Vision 的结果逐个号码对。
+        // 即使 Vision 文字层一行号码都没解析出来，只要彩种确定、且属于模型支持的彩种，就先用票头元数据搭一张空票，
+        // 让 `ModelRowReader` + `ModelFusion` 有机会按模型整票重建（单式/复式/胆拖/套餐均受票面合计强校验）。
+        // 号码区夹不出来、模型没加载、照片里不止一张票时整段跳过。
         let needsModelRecovery = result.tickets.isEmpty
         if needsModelRecovery, let game = selected,
-           [.qxc, .pl5].contains(game) {
-            var ticket = ScannedTicket(game: game)
-            ticket.issue = TicketTextParser.extractIssue(text, game: game)
-            ticket.totalAmount = TicketTextParser.extractTotal(text)
-            ticket.drawDate = TicketTextParser.extractDrawDate(text)
-            ticket.multiple = TicketTextParser.extractMultiple(text) ?? 1
-            result.tickets = [ticket]
+           Self.modelRecoverableGames.contains(game) {
+            result.tickets = [Self.shellTicket(for: game, text: text)]
             result.warnings = []
         }
         if result.tickets.count == 1, let classifier = DigitClassifier.shared {
@@ -141,6 +136,21 @@ enum TicketVisionScanner {
             if let reading = sevenStarsReading ?? ModelRowReader.read(image: image, fragments: fragments,
                                                  game: result.tickets[0].game, classifier: classifier) {
                 let report = ModelFusion.fuse(&result.tickets[0], rows: reading.rows)
+                // 排列3 组选单式由空壳重建时补上每注对应的组三/组六玩法
+                if result.tickets[0].game == .pl3, result.tickets[0].play == .single,
+                   result.tickets[0].lineModes.isEmpty, result.tickets[0].playMode.isEmpty,
+                   text.contains("组选"), !result.tickets[0].lines.isEmpty {
+                    let modes = result.tickets[0].lines.map { line -> String in
+                        let digits = line[.nums3]
+                        guard digits.count == 3, digits.allSatisfy({ $0 >= 0 }) else { return "" }
+                        return Set(digits).count == 3 ? "group6" : "group3"
+                    }
+                    result.tickets[0].lineModes = modes
+                    let distinct = Set(modes.filter { !$0.isEmpty })
+                    if distinct.count == 1, let only = distinct.first {
+                        result.tickets[0].playMode = only
+                    }
+                }
                 registration.debug.notes.append(report.note)
                 // 模型读到的每一行附在识别原文后面。两个读数都摆出来，哪一步出的岔子才看得出来。
                 if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
@@ -188,7 +198,9 @@ enum TicketVisionScanner {
         // 复核页要能把原文摆出来，否则用户只能干瞪眼。
         if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
         if needsModelRecovery {
-            if forced == nil && headerGame != .qxc && calendarGame == nil {
+            let keepEmpty = (forced != nil || headerGame == .qxc || calendarGame != nil)
+                && result.tickets.first.map { [.qxc, .pl5].contains($0.game) } == true
+            if !keepEmpty {
                 result.tickets.removeAll { !$0.isUsable }
             }
             result.warnings = TicketTextParser.summary(for: result.tickets)
@@ -203,6 +215,28 @@ enum TicketVisionScanner {
         for ticket in result.tickets { page.images[ticket.id] = content }
         page.registration = registration
         return page
+    }
+
+    /// 支持按模型整行重建的彩种（3D 每注行首印玩法，版式不固定，暂不走空壳重建）。
+    static let modelRecoverableGames: Set<GameKey> = [.ssq, .dlt, .qlc, .k8, .pl3, .pl5, .qxc]
+
+    /// Vision 文字层没解析出任何号码行但彩种已确定时，用票头元数据搭一张空票交给模型重建。
+    static func shellTicket(for game: GameKey, text: String) -> ScannedTicket {
+        let playText = TicketTextParser.normalize(text)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !TicketTextParser.isSlogan($0) }
+            .joined(separator: "\n")
+        var ticket = ScannedTicket(game: game)
+        ticket.play = TicketTextParser.detectPlay(playText)
+        ticket.playMode = TicketTextParser.detectPlayMode(game: game, text: text)
+        ticket.addOn = TicketTextParser.detectAddOn(playText)
+        ticket.periods = TicketTextParser.extractPeriods(text)
+        ticket.issue = TicketTextParser.extractIssue(text, game: game)
+        ticket.totalAmount = TicketTextParser.extractTotal(playText) ?? TicketTextParser.extractTotal(text)
+        ticket.drawDate = TicketTextParser.extractDrawDate(text)
+        ticket.multiple = TicketTextParser.extractMultiple(playText) ?? TicketTextParser.extractMultiple(text) ?? 1
+        return ticket
     }
 
     // MARK: - 号码行的二次识别

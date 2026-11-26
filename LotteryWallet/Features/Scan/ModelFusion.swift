@@ -38,8 +38,14 @@ enum ModelFusion {
 
         var note: String {
             guard expected > 0 else { return "模型读行：这种票面不复核" }
-            var text = rebuilt ? "模型读行：\(read) 行号码全部读成、注数和票面合计对得上，按模型读到的行重建"
-                               : "模型读行：\(expected) 行号码读成 \(read) 行"
+            var text: String
+            if rebuilt && read == expected {
+                text = "模型读行：\(read) 行号码全部读成、注数和票面合计对得上，按模型读到的行重建"
+            } else if rebuilt {
+                text = "模型读行：读成 \(read) 行，和 Vision 互补拼成 \(expected) 行、注数和票面合计对得上"
+            } else {
+                text = "模型读行：\(expected) 行号码读成 \(read) 行"
+            }
             if read > 0 { text += "，\(confirmed) 个号码和 Vision 一致" }
             if filled > 0 { text += "，补上 \(filled) 个问号" }
             if disputed > 0 { text += "，\(disputed) 个对不上、已标成问号" }
@@ -67,14 +73,17 @@ enum ModelFusion {
         // 复式、胆拖一个区的号码多了会折到下一行，先接回去
         let rows = ticket.play == .single ? rows : joinWrapped(rows)
         if ticket.play == .dantuo { return rebuildBanker(&ticket, rows: rows) ?? report }
+        if ticket.play == .system, let rebuilt = rebuildSystem(&ticket, rows: rows) { return rebuilt }
         if let rebuilt = rebuild(&ticket, rows: rows) { return rebuilt }
+        if let merged = mergeComplementary(&ticket, rows: rows) { return merged }
         var slots: [Slot] = []
         if ticket.play == .single {
             slots = ticket.lines.indices.filter { !ticket.lines[$0].isEmpty }.map { .line($0) }
         }
         // 套餐票下面那块、复式票的两个区：一个区一行
-        // （一位数的区不看：排列3 组选复式那一行数字的版式还没在真票上量过）
-        if ticket.isPackage || ticket.play == .system {
+        // （一位数的区不看：排列3 组选复式那一行数字的版式还没在真票上量过；
+        // 复式空壳票在上面 `rebuildSystem` 已经用票面合计把关过，对不上时绝不走无锚补位）
+        if ticket.isPackage || (ticket.play == .system && !ticket.selections.isEmpty) {
             slots += ticket.game.sections.filter { digits(per: $0) == 2 }.map { .zone($0.key) }
         }
         report.expected = slots.count
@@ -131,6 +140,70 @@ enum ModelFusion {
             }
         }
         return out
+    }
+
+    /// 复式票的一个区：实票上「红复:」「蓝复:」「前区」等标签常切不成 `x`（或者干脆没切出段，只剩 `1?` 或纯数字），
+    /// 所以直接走 `GlyphRows.readLine` 找唯一一串偶数位升序号码，并要求每一位都达到 `threshold`。
+    private static func systemZoneRow(_ tokens: [GlyphRows.Token], section: GameSection) -> [Value]? {
+        let limit = min(section.range.upperBound, 20)
+        guard section.count <= limit else { return nil }
+        var matches: [[Value]] = []
+        for count in section.count...limit {
+            guard let read = GlyphRows.readLine(tokens, count: count * 2) else { continue }
+            let values = numbers(read, parts: [(section, count)])
+            if ordered(values.map(\.value), section: section),
+               values.allSatisfy({ $0.confidence >= threshold }) {
+                matches.append(values)
+            }
+        }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    /// 复式票：模型把两个区（红/蓝或前/后）都读成、每位数都有把握、展开注数和票面合计对得上，就以模型为准。
+    ///
+    /// 两个区在票面上紧挨着（折行已在 `joinWrapped` 里拼回同一行），跳过空行后后区紧跟在前区下一行，
+    /// 防止福彩下面「倍数:10」这类两位数行被误当成后区。
+    /// 如果 Vision 对同一个区读出了相同个数但不同的号码，以模型为准的同时保留「两种读法不一致」警告。
+    static func rebuildSystem(_ ticket: inout ScannedTicket, rows: [[GlyphRows.Token]]) -> Report? {
+        let sections = ticket.game.sections
+        guard ticket.play == .system, ticket.game == .ssq || ticket.game == .dlt, sections.count == 2,
+              let total = ticket.totalAmount, total > 0 else { return nil }
+        let (front, back) = (sections[0], sections[1])
+        let nonEmpty = rows.filter { !$0.isEmpty }
+        guard nonEmpty.count >= 2 else { return nil }
+
+        let prices: [Double] = ticket.game == .dlt ? [2, 3] : [2]
+        var candidates: [(front: [Value], back: [Value])] = []
+        for index in 0..<(nonEmpty.count - 1) {
+            guard let first = systemZoneRow(nonEmpty[index], section: front),
+                  let second = systemZoneRow(nonEmpty[index + 1], section: back) else { continue }
+            let units = combinations(first.count, front.count) * combinations(second.count, back.count)
+            guard units > 1 else { continue }
+            let scale = Double(units * max(ticket.multiple, 1) * max(ticket.periods, 1))
+            guard prices.contains(where: { abs(scale * $0 - total) < 0.01 }) else { continue }
+            candidates.append((first, second))
+        }
+        guard candidates.count == 1, let picked = candidates.first else { return nil }
+
+        var report = Report(expected: 2, read: 2, rebuilt: true)
+        for (section, values) in [(front, picked.front), (back, picked.back)] {
+            let model = values.map(\.value)
+            let known = ticket.selections[section.key]?.selected.sorted() ?? []
+            if known == model {
+                report.confirmed += model.count
+            } else if known.count != model.count {
+                ticket.selections[section.key] = SectionSelection(selected: model)
+                report.filled += model.count
+            } else {
+                // 个数一样但号码不同：金额验证不了哪一个号对，以模型为准并把 Vision 的读数标进警告
+                ticket.selections[section.key] = SectionSelection(selected: model)
+                report.disputed += 1
+                let other = known.map { String(format: "%02d", $0) }.joined(separator: " ")
+                ticket.warnings.append("\(section.label)这一行两种读法不一致，另一种读到的是 \(other)，请对照票面核对。")
+            }
+        }
+        refreshWarnings(&ticket)
+        return report
     }
 
     /// 一行「标签 + 一串两位数」：前面至少一段不是数字，后面是这个区里升序的号码。
@@ -351,38 +424,7 @@ enum ModelFusion {
         var report = Report(expected: skeleton.lines.count, read: skeleton.lines.count, rebuilt: true)
         var lines: [NumberSet] = []
         for (line, row) in zip(skeleton.lines, skeleton.rows) {
-            let vision = visionAt[row]
-            var numbers = NumberSet()
-            var cursor = 0
-            for (section, count) in skeleton.parts {
-                var values: [Int] = []
-                for _ in 0..<count {
-                    let model = line[cursor]
-                    let seen = vision.flatMap { cursor < $0.count ? $0[cursor] : nil } ?? NumberSet.unknown
-                    cursor += 1
-                    let sure = model.confidence >= threshold
-                    if seen < 0 {
-                        values.append(sure ? model.value : NumberSet.unknown)
-                        if sure { report.filled += 1 }
-                    } else if !sure {
-                        values.append(seen)
-                    } else if seen == model.value {
-                        values.append(seen)
-                        report.confirmed += 1
-                    } else {
-                        values.append(NumberSet.unknown)
-                        report.disputed += 1
-                    }
-                }
-                // 拿 Vision 的值顶上之后不合规了：这一区里 Vision 顶上的那几位退回问号
-                if !ordered(values, section: section) {
-                    for position in values.indices where line[cursor - count + position].confidence < threshold {
-                        values[position] = NumberSet.unknown
-                    }
-                }
-                numbers[section.key] = values
-            }
-            lines.append(numbers)
+            lines.append(combine(model: line, vision: visionAt[row], parts: skeleton.parts, report: &report))
         }
         ticket.lines = lines
         if !skeleton.zones.isEmpty {
@@ -394,6 +436,147 @@ enum ModelFusion {
         }
         refreshWarnings(&ticket)
         return report
+    }
+
+    /// 模型只读出一部分行、Vision 读出另一部分行：把两边互补拼成整张票。
+    ///
+    /// 只有严格满足下面四条才拼，绝不凑数：
+    /// 1. 两边能对齐的行先按常规交叉核对（一致留下、冲突标问号、模型补问号）；
+    /// 2. 模型独有的每一行，**每一个数字**都要达到 `threshold`（0.90），且不和未对齐的 Vision 行重复；
+    /// 3. 未对齐的 Vision 行不含问号（防止残缺的数字行被误当成独立一注），且模型至少贡献了 1 行新注；
+    /// 4. 拼出来的总注数乘单价（含倍数、期数）**正好等于票面合计**。
+    static func mergeComplementary(_ ticket: inout ScannedTicket, rows: [[GlyphRows.Token]]) -> Report? {
+        let game = ticket.game
+        guard ticket.play == .single, !ticket.isPackage, ticket.lineModes.isEmpty,
+              let total = ticket.totalAmount, total > 0,
+              let skeleton = skeleton(game: game, playMode: ticket.playMode, rows: rows) else { return nil }
+        let visionIndices = ticket.lines.indices.filter { !ticket.lines[$0].isEmpty }
+        guard !visionIndices.isEmpty else { return nil }
+
+        let slots = visionIndices.map { Slot.line($0) }
+        var options = [[Option?]](repeating: [Option?](repeating: nil, count: skeleton.rows.count), count: slots.count)
+        for (slotIndex, slot) in slots.enumerated() {
+            for (skelIndex, rowIndex) in skeleton.rows.enumerated() {
+                options[slotIndex][skelIndex] = option(for: slot, in: ticket, tokens: rows[rowIndex])
+            }
+        }
+        let pairs = settle(match(options), options: options)
+        let matchedSlots = Set(pairs.map(\.slot))
+        let matchedSkels = Set(pairs.map(\.row))
+
+        let modelOnlyIndices = skeleton.lines.indices.filter { !matchedSkels.contains($0) }
+        guard !modelOnlyIndices.isEmpty else { return nil }
+        guard modelOnlyIndices.allSatisfy({ skeleton.lines[$0].allSatisfy { $0.confidence >= threshold } }) else {
+            return nil
+        }
+
+        let unmatchedVisionLines = visionIndices.enumerated()
+            .filter { !matchedSlots.contains($0.offset) }
+            .map { ticket.lines[$0.element] }
+        guard unmatchedVisionLines.allSatisfy({ line in
+            !line.values.values.contains { $0.contains { $0 < 0 } }
+        }) else { return nil }
+
+        let unmatchedVisionSets = Set(unmatchedVisionLines)
+        var modelOnlySets: [Int: NumberSet] = [:]
+        for skelIndex in modelOnlyIndices {
+            let set = numberSet(from: skeleton.lines[skelIndex], parts: skeleton.parts)
+            if unmatchedVisionSets.contains(set) { return nil }
+            modelOnlySets[skelIndex] = set
+        }
+
+        let mergedCount = visionIndices.count + modelOnlyIndices.count
+        var multiples = [max(ticket.multiple, 1)]
+        let printed = skeleton.multiples.compactMap { $0 }
+        if printed.count == skeleton.lines.count, let first = printed.first, printed.allSatisfy({ $0 == first }),
+           !multiples.contains(first) { multiples.append(first) }
+        let prices: [Double] = game == .dlt ? [2, 3] : [2]
+        let base = Double(mergedCount * max(ticket.periods, 1))
+        guard let multiple = multiples.first(where: { times in
+            prices.contains { abs(base * Double(times) * $0 - total) < 0.01 }
+        }) else { return nil }
+        ticket.multiple = multiple
+
+        var report = Report(expected: mergedCount, read: skeleton.lines.count, rebuilt: true)
+        var merged: [NumberSet] = []
+        var nextSlot = 0
+        var nextSkel = 0
+
+        func emitUnmatched(upToSlot slotLimit: Int, upToSkel skelLimit: Int) {
+            while nextSlot < slotLimit {
+                if !matchedSlots.contains(nextSlot) {
+                    merged.append(ticket.lines[visionIndices[nextSlot]])
+                }
+                nextSlot += 1
+            }
+            while nextSkel < skelLimit {
+                if let set = modelOnlySets[nextSkel] {
+                    merged.append(set)
+                    report.filled += skeleton.lines[nextSkel].count
+                }
+                nextSkel += 1
+            }
+        }
+
+        for pair in pairs {
+            emitUnmatched(upToSlot: pair.slot, upToSkel: pair.row)
+            let vision = current(of: slots[pair.slot], in: ticket)
+            let fused = combine(model: skeleton.lines[pair.row], vision: vision, parts: skeleton.parts, report: &report)
+            merged.append(fused)
+            nextSlot = pair.slot + 1
+            nextSkel = pair.row + 1
+        }
+        emitUnmatched(upToSlot: slots.count, upToSkel: skeleton.lines.count)
+
+        ticket.lines = merged
+        refreshWarnings(&ticket)
+        return report
+    }
+
+    private static func numberSet(from line: [Value], parts: [(section: GameSection, count: Int)]) -> NumberSet {
+        var numbers = NumberSet()
+        var cursor = 0
+        for (section, count) in parts {
+            numbers[section.key] = line[cursor..<cursor + count].map(\.value)
+            cursor += count
+        }
+        return numbers
+    }
+
+    private static func combine(model line: [Value], vision: [Int]?,
+                                parts: [(section: GameSection, count: Int)],
+                                report: inout Report) -> NumberSet {
+        var numbers = NumberSet()
+        var cursor = 0
+        for (section, count) in parts {
+            var values: [Int] = []
+            for _ in 0..<count {
+                let entry = line[cursor]
+                let seen = vision.flatMap { cursor < $0.count ? $0[cursor] : nil } ?? NumberSet.unknown
+                cursor += 1
+                let sure = entry.confidence >= threshold
+                if seen < 0 {
+                    values.append(sure ? entry.value : NumberSet.unknown)
+                    if sure { report.filled += 1 }
+                } else if !sure {
+                    values.append(seen)
+                } else if seen == entry.value {
+                    values.append(seen)
+                    report.confirmed += 1
+                } else {
+                    values.append(NumberSet.unknown)
+                    report.disputed += 1
+                }
+            }
+            // 拿 Vision 的值顶上之后不合规了：这一区里 Vision 顶上的那几位退回问号
+            if !ordered(values, section: section) {
+                for position in values.indices where line[cursor - count + position].confidence < threshold {
+                    values[position] = NumberSet.unknown
+                }
+            }
+            numbers[section.key] = values
+        }
+        return numbers
     }
 
     static func combinations(_ total: Int, _ pick: Int) -> Int {

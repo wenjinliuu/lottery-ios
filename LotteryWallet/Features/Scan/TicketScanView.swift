@@ -1447,9 +1447,11 @@ struct TicketScanView: View {
     /// 悄悄改掉的话用户看到金额对不上也不知道是哪一步动的。
     private func polish(_ page: inout TicketVisionScanner.ScannedPage) {
         for index in page.result.tickets.indices {
+            let disagreements = page.result.tickets[index].warnings.filter { $0.contains("两种读法不一致") }
             let note = TicketTextParser.reconcileAddOn(&page.result.tickets[index])
             page.result.tickets[index].warnings =
-                (note.map { [$0] } ?? []) + TicketTextParser.validate(page.result.tickets[index])
+                (note.map { [$0] } ?? []) + TicketTextParser.validate(page.result.tickets[index]) + disagreements
+            ModelFusion.refreshWarnings(&page.result.tickets[index])
         }
     }
 
