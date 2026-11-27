@@ -148,7 +148,8 @@ final class GlyphRowsTests: XCTestCase {
     }
 
     /// 体彩号码区最右侧常带竖排「☆中国体育彩票」边条（x ≈ 920–1000），
-    /// 找行投影算进全宽时会把多行粘成一块；截到 `ModelRowReader.sportsRowColumns`（0.85）后各行清晰分开。
+    /// 找行投影算进全宽时会把行带撑高到 0..63/64..133 导致真实数字全部因不够行高 72% 而漏切；
+    /// 截到 `ModelRowReader.sportsRowColumns`（0.85）后各行边界与原图一致且整行照常读成。
     func testSportsRowColumnsIgnoresRightMarginRibbon() throws {
         let (fixture, original) = try fixture()
         let classifier = try XCTUnwrap(DigitClassifier.shared)
@@ -158,12 +159,16 @@ final class GlyphRowsTests: XCTestCase {
                 bordered[y * fixture.width + x] = 60
             }
         }
-        let fullWidthRows = GlyphRows.rows(bordered, width: fixture.width, height: fixture.height, rowColumns: 1.0)
-        XCTAssertLessThan(fullWidthRows.count, fixture.rows.count, "全宽投影会被右侧竖条粘成一整块")
+        let fullReadRows = GlyphRows.read(bordered, width: fixture.width, height: fixture.height,
+                                          rowColumns: 1.0, classifier: classifier)
+        XCTAssertTrue(fullReadRows.allSatisfy { GlyphRows.readLine($0, count: 14) == nil },
+                      "全宽投影会被右侧竖条拉高行带，真实数字段被筛掉、读不出 14 位号码")
 
         let trimmedRows = GlyphRows.rows(bordered, width: fixture.width, height: fixture.height,
                                          rowColumns: ModelRowReader.sportsRowColumns)
         XCTAssertEqual(trimmedRows.count, fixture.rows.count)
+        XCTAssertEqual(trimmedRows.map(\.top), fixture.rows.map(\.top))
+        XCTAssertEqual(trimmedRows.map(\.bottom), fixture.rows.map(\.bottom))
         let readRows = GlyphRows.read(bordered, width: fixture.width, height: fixture.height,
                                       rowColumns: ModelRowReader.sportsRowColumns, classifier: classifier)
         let line = GlyphRows.readLine(readRows[0], count: 14)
