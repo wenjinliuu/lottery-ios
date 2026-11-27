@@ -682,4 +682,130 @@ final class WholeTicketDerivationTests: XCTestCase {
         let fc3d = try XCTUnwrap(TicketTextParser.parseTickets(fc3dOrphan).first)
         XCTAssertEqual(fc3d.lines.map { $0[.nums3] }, [[1, 8, 9], [0, 9, 9]])
     }
+
+    // MARK: - 全国多省市新玩法票面（batch07_web 实票规格）
+
+    func testNewProvincialPlayTypesParseAccurately() throws {
+        // 1. 「数字3」别名（四川/重庆福彩 3D）
+        let shuzi3 = """
+        中国福利彩票
+        玩法:数字3-单式 机号:51010234
+        单选: 3 7 9 (1)
+        开奖期:2026201 26-08-12 合计2元
+        """
+        let s3 = try XCTUnwrap(TicketTextParser.parseTickets(shuzi3).first)
+        XCTAssertEqual(s3.game, .fc3d)
+        XCTAssertEqual(s3.lines.first?[.nums3], [3, 7, 9])
+
+        // 2. 快乐8 选五复式 & 选六胆拖 & 山东紧凑 `[1倍]`
+        let k8Sys = """
+        中国福利彩票
+        玩法:快乐8-选五复式
+        复式:01 05 12 23 34 45
+        开奖期:2026300 26-11-10 合计12元
+        """
+        let k8s = try XCTUnwrap(TicketTextParser.parseTickets(k8Sys).first)
+        XCTAssertEqual(k8s.game, .k8)
+        XCTAssertEqual(k8s.play, .system)
+        XCTAssertEqual(k8s.playMode, "5")
+        XCTAssertEqual(k8s.selections[.nums]?.selected, [1, 5, 12, 23, 34, 45])
+        XCTAssertEqual(k8s.count, 6)
+
+        let k8Dan = """
+        中国福利彩票
+        玩法:快乐8-选六胆拖
+        胆码:02 18
+        拖码:05 11 22 33 44 55
+        开奖期:2026300 26-11-10 合计30元
+        """
+        let k8d = try XCTUnwrap(TicketTextParser.parseTickets(k8Dan).first)
+        XCTAssertEqual(k8d.play, .dantuo)
+        XCTAssertEqual(k8d.playMode, "6")
+        XCTAssertEqual(k8d.selections[.nums]?.dan, [2, 18])
+        XCTAssertEqual(k8d.count, 15)
+
+        let k8Bracket = """
+        中国福利彩票
+        玩法:快乐8-选五单式
+        01 09 18 27 36 [2倍]
+        开奖期:2026300 26-11-10 合计4元
+        """
+        let k8b = try XCTUnwrap(TicketTextParser.parseTickets(k8Bracket).first)
+        XCTAssertEqual(k8b.lines.first?[.nums], [1, 9, 18, 27, 36])
+        XCTAssertEqual(k8b.multiple, 2)
+
+        // 3. 七乐彩不补零单式 & 胆拖
+        let qlcUnpadded = """
+        中国福利彩票
+        玩法:七乐彩-单式
+        A.2 5 9 12 18 23 29 (1)
+        开奖期:2026088 26-08-01 合计2元
+        """
+        let qu = try XCTUnwrap(TicketTextParser.parseTickets(qlcUnpadded).first)
+        XCTAssertEqual(qu.lines.first?[.nums7], [2, 5, 9, 12, 18, 23, 29])
+
+        // 4. 排列3 组选3复式(2号)、组选6复式(粘连 0468)、组选6胆拖、直选定位复式、直组混合单式
+        let pl3G3Two = """
+        体彩 排列3
+        第26250期 2026年09月17日开奖
+        组选3复式票 1倍 合计4元
+        0 5
+        """
+        let g3 = try XCTUnwrap(TicketTextParser.parseTickets(pl3G3Two).first)
+        XCTAssertEqual(g3.play, .system)
+        XCTAssertEqual(g3.playMode, "group3")
+        XCTAssertEqual(g3.count, 2)
+
+        let pl3G6Glued = """
+        体彩 排列3
+        第26250期 2026年09月17日开奖
+        组选6复式票 1倍 合计8元
+        0468
+        """
+        let g6 = try XCTUnwrap(TicketTextParser.parseTickets(pl3G6Glued).first)
+        XCTAssertEqual(g6.selections[.nums3]?.selected, [0, 4, 6, 8])
+        XCTAssertEqual(g6.count, 4)
+
+        let pl3Pos = """
+        体彩 排列3
+        第26250期 2026年09月17日开奖
+        直选定位复式票 1倍 合计12元
+        第①位: 0 1
+        第②位: 2 3 4
+        第③位: 5
+        """
+        let pos = try XCTUnwrap(TicketTextParser.parseTickets(pl3Pos).first)
+        XCTAssertEqual(pos.play, .system)
+        XCTAssertEqual(pos.selections[.nums3]?.positional, [[0, 1], [2, 3, 4], [5]])
+        XCTAssertEqual(pos.count, 6)
+
+        let pl3Mix = """
+        体彩 排列3
+        第26250期 2026年09月17日开奖
+        直组混合单式票 合计4元
+        ① 1 2 3 直选 1倍
+        ② 4 5 6 组选 1倍
+        """
+        let mix = try XCTUnwrap(TicketTextParser.parseTickets(pl3Mix).first)
+        XCTAssertEqual(mix.lines.count, 2)
+        XCTAssertEqual(mix.lineModes, ["single", "group6"])
+
+        // 5. 大乐透胆拖：前区无胆 + OCR 粘连升序续行（`09101112`）
+        let dltGlued = """
+        体彩 超级大乐透
+        第26120期 2026年10月20日开奖
+        胆拖票 1倍 合计84元
+        前区胆:
+        前区拖: 01 03 05
+        09101112
+        后区胆: 02
+        后区拖: 05 08
+        """
+        let dg = try XCTUnwrap(TicketTextParser.parseTickets(dltGlued).first)
+        XCTAssertEqual(dg.play, .dantuo)
+        XCTAssertEqual(dg.selections[.front]?.dan, [])
+        XCTAssertEqual(dg.selections[.front]?.selected, [1, 3, 5, 9, 10, 11, 12])
+        XCTAssertEqual(dg.selections[.back]?.dan, [2])
+        XCTAssertEqual(dg.count, 42)
+    }
 }

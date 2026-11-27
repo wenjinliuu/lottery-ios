@@ -103,8 +103,8 @@ enum GlyphRows {
 
     // MARK: - 行和段
 
-    /// 找出号码区里每一行的纵坐标区间（已经去掉虚线/噪点并切开粘连的两行）。
-    private static func rowBands(_ ink: [Bool], width: Int, height: Int, rowColumns: Double) -> [(top: Int, bottom: Int)] {
+    /// 找出号码区里每一行的纵坐标区间（已经去掉虚线/噪点并递归切开粘连的多行）。
+    static func rowBands(_ ink: [Bool], width: Int, height: Int, rowColumns: Double) -> [(top: Int, bottom: Int)] {
         let limit = Int(Double(width) * rowColumns)
         var profile = [Int](repeating: 0, count: height)
         for y in 0..<height {
@@ -114,9 +114,15 @@ enum GlyphRows {
         }
         let rough = bands(profile, floor: width * 6 / 1000)
         guard !rough.isEmpty else { return [] }
+        // 取下中位数而非上中位数，防止 2 个带子中 1 个粘连导致 tall 被拉大一倍
         let heights = rough.map { $0.1 - $0.0 }.sorted()
-        let tall = heights[heights.count / 2]
-        return splitTall(rough, profile: profile, tall: tall).filter { ($0.1 - $0.0) * 100 >= tall * 55 }
+        var tall = heights[(heights.count - 1) / 2]
+        if tall > 88 { tall = 52 }
+        let split = splitTall(rough, profile: profile, tall: tall)
+        guard !split.isEmpty else { return [] }
+        let finalHeights = split.map { $0.1 - $0.0 }.sorted()
+        let finalTall = finalHeights[(finalHeights.count - 1) / 2]
+        return split.filter { ($0.1 - $0.0) * 100 >= finalTall * 55 }
     }
 
     private static func inkVerticalSpan(x0: Int, x1: Int, top: Int, bottom: Int,
@@ -203,30 +209,34 @@ enum GlyphRows {
         return (left, right, cut)
     }
 
-    /// 比一般的行高出将近一半的行，多半是两行粘在了一起（表头的下半截贴着第一注 ——
-    /// 真机上一张套餐票就这样少了第一注）。
-    ///
-    /// 在它正中间那一小段（38%–62%）里找墨最少的一条线，那条线上的墨不到这一行最浓处的 35% 就从那儿切开。
-    /// 只看正中间：两行差不多高，分界就在中间；放宽了会切到数字的腰上（数字中间的墨本来就少），
-    /// 真机上第一注就这样被拦腰切成了两截。每一行最多切一刀。
+    /// 比一般的行高出 45% 以上、或绝对高度超过 88px 的带子，多半是 2~N 行粘在了一起，
+    /// 递归在中间区间找墨最少的一条波谷切开（与 `row_reader.py:split_tall` 逐步一致）。
     static func splitTall(_ rows: [(Int, Int)], profile: [Int], tall: Int) -> [(Int, Int)] {
         var out: [(Int, Int)] = []
-        for (top, bottom) in rows {
+        var stack = Array(rows.reversed())
+        let maxSingle = min(max(tall * 145 / 100, 48), 88)
+        while let (top, bottom) = stack.popLast() {
             let height = bottom - top
-            guard height * 100 > tall * 145, height >= 8 else {
-                out.append((top, bottom))
-                continue
+            if height > maxSingle, height >= 36 {
+                let margin = min(max(height * 22 / 100, 18), height / 2 - 1)
+                let low = top + margin, high = bottom - margin
+                if high > low {
+                    var cut = low
+                    for y in low..<high where profile[y] < profile[cut] { cut = y }
+                    let peak = profile[top..<bottom].max() ?? 0
+                    let ratio = height > 95 ? 55 : 35
+                    if peak > 0, profile[cut] * 100 <= peak * ratio {
+                        var t1 = top, b1 = cut
+                        var t2 = cut + 1, b2 = bottom
+                        while b1 > t1, profile[b1 - 1] <= 0 { b1 -= 1 }
+                        while t2 < b2, profile[t2] <= 0 { t2 += 1 }
+                        if b2 - t2 >= 12 { stack.append((t2, b2)) }
+                        if b1 - t1 >= 12 { stack.append((t1, b1)) }
+                        continue
+                    }
+                }
             }
-            let low = top + height * 38 / 100, high = bottom - height * 38 / 100
-            var cut = low
-            for y in low..<high where profile[y] < profile[cut] { cut = y }
-            let peak = profile[top..<bottom].max() ?? 0
-            if profile[cut] * 100 <= peak * 35 {
-                out.append((top, cut))
-                out.append((cut + 1, bottom))
-            } else {
-                out.append((top, bottom))
-            }
+            out.append((top, bottom))
         }
         return out
     }

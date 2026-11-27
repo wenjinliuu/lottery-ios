@@ -184,11 +184,23 @@ struct WalletTicketCard: View {
     private var wholeTicket: some View {
         VStack(alignment: .leading, spacing: 7) {
             ForEach(card.whole) { zone in
-                if zone.dan.isEmpty {
-                    wholeRow(zone, title: "复", values: zone.selected)
+                if !zone.positional.isEmpty {
+                    ForEach(Array(zone.positional.enumerated()), id: \.offset) { pos, values in
+                        let label = pos < TicketPreviewBuilder.positionLabels.count
+                            ? TicketPreviewBuilder.positionLabels[pos]
+                            : "第\(pos + 1)位"
+                        let hits = pos < zone.positionalHits.count ? zone.positionalHits[pos] : []
+                        wholeRow(zone, label: label, values: values, hits: hits)
+                    }
+                } else if zone.dan.isEmpty {
+                    let pfx = TicketPreviewBuilder.prefix(game, zone.key)
+                    wholeRow(zone, label: pfx.isEmpty ? "复式" : pfx + "复", values: zone.selected, hits: zone.hits)
                 } else {
-                    wholeRow(zone, title: "胆", values: zone.selected.filter { zone.dan.contains($0) })
-                    wholeRow(zone, title: "拖", values: zone.selected.filter { !zone.dan.contains($0) })
+                    let pfx = TicketPreviewBuilder.prefix(game, zone.key)
+                    wholeRow(zone, label: pfx.isEmpty ? "胆码" : pfx + "胆",
+                             values: zone.selected.filter { zone.dan.contains($0) }, hits: zone.hits)
+                    wholeRow(zone, label: pfx.isEmpty ? "拖码" : pfx + "拖",
+                             values: zone.selected.filter { !zone.dan.contains($0) }, hits: zone.hits)
                 }
             }
             wholeSummary
@@ -246,17 +258,17 @@ struct WalletTicketCard: View {
         return text
     }
 
-    private func wholeRow(_ zone: TicketCard.WholeZone, title: String, values: [Int]) -> some View {
+    private func wholeRow(_ zone: TicketCard.WholeZone, label: String, values: [Int], hits: Set<Int>) -> some View {
         HStack(alignment: .top, spacing: 9) {
-            Text(TicketPreviewBuilder.prefix(game, zone.key) + title)
+            Text(label)
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
-                .frame(width: 34, alignment: .leading)
+                .frame(width: 40, alignment: .leading)
                 .padding(.top, 4)
             TicketNumbersSnapshotView(
                 game: game,
                 numbers: [zone.key: values],
-                matched: [zone.key: values.map { zone.hits.contains($0) }],
+                matched: [zone.key: values.map { hits.contains($0) }],
                 size: 27,
                 dimUnmatched: zone.hasResult
             )

@@ -213,7 +213,7 @@ struct EntryFlowView: View {
                     referenceCard
                     gamePicker
                     if showsPlayModePicker { playModePicker }
-                    if EntryMode.modes(for: game).count > 1 { modePicker }
+                    if EntryMode.modes(for: game, playMode: playMode).count > 1 { modePicker }
                     targetCard
                     pickerPanel
                     previewSection
@@ -225,8 +225,10 @@ struct EntryFlowView: View {
                 // **大乐透除外。** 它的「追加」只改单注价格（2 元 → 3 元），
                 // 号码个数和取值范围一个都不变。跟着清空的话，用户选好七个号
                 // 再想起来这张票是追加的，一打开开关号码全没了。
-                .onChange(of: playMode) { _, _ in
+                .onChange(of: playMode) { _, newMode in
                     guard game != .dlt else { return }
+                    let allowed = EntryMode.modes(for: game, playMode: newMode)
+                    if !allowed.contains(mode) { mode = .manual }
                     resetSelections(clearCandidates: true)
                 }
                 .padding(.horizontal, 16)
@@ -291,8 +293,9 @@ struct EntryFlowView: View {
                 // `resetForGame` 会把 mode 打回 .manual、把 pickedIssue 清空，
                 // 所以这两样都必须放在它后面。
                 if let shape = reference?.shape,
-                   let target = EntryMode.modes(for: game).first(where: { $0.shape == shape }) {
+                   let target = EntryMode.modes(for: game, playMode: playMode).first(where: { $0.shape == shape }) {
                     mode = target
+                    resetSelections(clearCandidates: true)
                 }
                 if let issue = reference?.issue { pickedIssue = issue }
                 await drawStore.loadYearCalendars()
@@ -427,7 +430,7 @@ struct EntryFlowView: View {
 
     private var modePicker: some View {
         Picker("票面类型", selection: $mode.animation(.spring(response: 0.3, dampingFraction: 0.85))) {
-            ForEach(EntryMode.modes(for: game)) { item in
+            ForEach(EntryMode.modes(for: game, playMode: playMode)) { item in
                 Text(item.label).tag(item)
             }
         }
@@ -516,6 +519,8 @@ struct EntryFlowView: View {
                     required: requiredCount(for: section),
                     mode: mode,
                     danPicking: danPicking,
+                    game: game,
+                    playMode: playMode,
                     onReject: { showToast($0, symbol: "hand.raised", feedback: .warning) }
                 )
             }
@@ -696,7 +701,7 @@ struct EntryFlowView: View {
         game = draft.game
         playMode = draft.playMode
         multiple = draft.multiple
-        if let target = EntryMode.modes(for: draft.game).first(where: { $0.shape == draft.shape }) {
+        if let target = EntryMode.modes(for: draft.game, playMode: draft.playMode).first(where: { $0.shape == draft.shape }) {
             mode = target
         }
         switch draft.shape {
@@ -720,23 +725,29 @@ struct EntryFlowView: View {
         danPicking = true
         multiple = 1
         pickedIssue = nil
-        if !EntryMode.modes(for: item).contains(mode) { mode = .manual }
+        if !EntryMode.modes(for: item, playMode: playMode).contains(mode) { mode = .manual }
         resetSelections(for: item, clearCandidates: true)
     }
 
     /// 清空选号。
     ///
-    /// 数字型玩法（3D、排列3/5、七星彩前六位）用的是滚轮，滚轮**永远显示着一个值**。
-    /// 如果 selections 是空的，界面上明明写着 0 0 0，底栏却是"共 0 注"、保存按钮是灰的。
-    /// 所以位选号一开始就按滚轮当前显示的值填好。
+    /// 数字型单式用的是滚轮，滚轮永远显示着一个值，所以单式下按初值填好；
+    /// 复式/胆拖用的是点选球盘，重置为空即可。
     private func resetSelections(for item: GameKey? = nil, clearCandidates: Bool) {
         let target = item ?? game
         var next: [SectionKey: SectionSelection] = [:]
-        for section in target.sections where section.isPositional {
-            let need = target.pickCount(for: section, playMode: playMode)
-            next[section.key] = SectionSelection(
-                selected: Array(repeating: section.range.lowerBound, count: need)
-            )
+        if mode == .manual {
+            for section in target.sections where section.isPositional {
+                let need = target.pickCount(for: section, playMode: playMode)
+                next[section.key] = SectionSelection(
+                    selected: Array(repeating: section.range.lowerBound, count: need)
+                )
+            }
+        } else if mode == .system {
+            for section in target.sections where target.usesPositionalSystem(for: section, playMode: playMode) {
+                let need = target.pickCount(for: section, playMode: playMode)
+                next[section.key] = SectionSelection(positional: Array(repeating: [], count: need))
+            }
         }
         selections = next
         hasPendingEdit = false
@@ -771,11 +782,27 @@ struct EntryFlowView: View {
             var next: [SectionKey: SectionSelection] = [:]
             for section in game.sections {
                 let need = requiredCount(for: section)
-                if section.isPositional {
+                if mode == .system && game.usesPositionalSystem(for: section, playMode: playMode) {
+                    let pools = (0..<need).map { _ in TicketBuilder.pickUnique(count: 2, from: section.range).sorted() }
+                    next[section.key] = SectionSelection(positional: pools)
+                    continue
+                }
+                if section.isPositional && mode == .manual {
                     next[section.key] = SectionSelection(
                         selected: TicketBuilder.randomDigits(game: game, count: need,
                                                              range: section.range, playMode: playMode)
                     )
+                    continue
+                }
+                if (game == .pl3 || game == .fc3d) && mode == .system {
+                    let cnt = playMode == "group3" ? 3 : 5
+                    next[section.key] = SectionSelection(selected: TicketBuilder.pickUnique(count: cnt, from: section.range).sorted())
+                    continue
+                }
+                if (game == .pl3 || game == .fc3d) && mode == .dantuo {
+                    let cnt = playMode == "group3" ? 4 : 5
+                    let picked = TicketBuilder.pickUnique(count: cnt, from: section.range).sorted()
+                    next[section.key] = SectionSelection(selected: picked, dan: Array(picked.prefix(1)))
                     continue
                 }
                 // 复式默认多选两个，胆拖默认一胆，给用户一个起点

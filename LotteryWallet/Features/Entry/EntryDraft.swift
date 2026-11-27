@@ -60,6 +60,19 @@ struct EntryDraft: Identifiable {
             lines = []
             var zones: [SectionKey: SectionSelection] = [:]
             for section in first.game.sections {
+                if shape == .system, first.game.usesPositionalSystem(for: section, playMode: playMode) {
+                    var slots = Array(repeating: Set<Int>(), count: section.count)
+                    for record in records {
+                        let values = record.ticket.numbers[section.key]
+                        guard values.count == section.count else { continue }
+                        for (idx, val) in values.enumerated() { slots[idx].insert(val) }
+                    }
+                    let positional = slots.map { $0.sorted() }
+                    if positional.allSatisfy({ !$0.isEmpty }) {
+                        zones[section.key] = SectionSelection(positional: positional)
+                    }
+                    continue
+                }
                 var union: Set<Int> = []
                 var intersection: Set<Int>?
                 for record in records {

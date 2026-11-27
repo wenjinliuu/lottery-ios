@@ -52,6 +52,12 @@ enum TicketLocator {
         .welfare: ["福利", "彩票", "WELFARE", "LOTTERY", "CHINA", "玩法", "机号"],
         .sports: ["体彩", "乐透", "排列", "星彩", "开奖", "期"]
     ]
+    private static let deskWords = ["请仔细核对", "联系本店", "停售", "敬请谅解", "未回复", "祝您中奖", "有票要说", "请您核对", "清除合计"]
+
+    private static func isDeskSlogan(_ text: String) -> Bool {
+        let compact = text.replacingOccurrences(of: " ", with: "")
+        return deskWords.contains { compact.contains($0) }
+    }
 
     private struct Anchor {
         var kind: Kind
@@ -100,7 +106,9 @@ enum TicketLocator {
         let compact = line.text.replacingOccurrences(of: " ", with: "").uppercased()
         let kind: Kind
         let chars: Double
-        if matches(compact, "[0-9A-Z]{3,5}-[0-9A-Z]{3,5}-[0-9A-Z]{3,5}-[0-9A-Z]{3,5}-[0-9A-Z]{3,5}"), compact.contains("/") {
+        let sep = "[-—–−~_·\\.]"
+        if matches(compact, "[0-9A-Z]{3,5}\(sep)[0-9A-Z]{3,5}\(sep)[0-9A-Z]{3,5}(?:\(sep)[0-9A-Z]{3,5}){1,2}"),
+           (compact.contains("/") || compact.count >= 24) {
             kind = .welfare
             chars = welfareChars
         } else if isSportsSerial(compact) {
@@ -122,14 +130,9 @@ enum TicketLocator {
                       height: max(height, 1))
     }
 
-    /// 找票。返回的顺序是从上到下、从左到右。
-    static func locate(_ lines: [Line]) -> [Found] {
-        let anchors = lines.compactMap(anchor(for:))
-        guard !anchors.isEmpty else { return [] }
-
-        // 每一行文字归给哪个锚。
+    private static func assignMembers(_ lines: [Line], to anchors: [Anchor]) -> [[Int]] {
         var members = Array(repeating: [Int](), count: anchors.count)
-        for (index, line) in lines.enumerated() where line.corners.count == 4 {
+        for (index, line) in lines.enumerated() where line.corners.count == 4 && !isDeskSlogan(line.text) {
             let center = CGPoint(x: line.corners.map(\.x).reduce(0, +) / 4, y: line.corners.map(\.y).reduce(0, +) / 4)
             let upper = line.text.uppercased()
             var best: (rank: (Int, Double), anchor: Int)?
@@ -139,22 +142,87 @@ enum TicketLocator {
                 guard position.u >= -leftSlack * anchor.pitch, position.u <= span * anchor.pitch else { continue }
                 guard position.v >= -(headLines[anchor.kind] ?? 7) * anchor.height else { continue }
                 if position.v < 0 {
-                    // 票底那行「××市福利彩票发行中心承销」也带着「福利」「彩票」两个词。
-                    // 上下挨着放的时候，上面那张的票底正好落在下面那张的票头范围里 ——
-                    // 不排除它，上面那张就丢了票底，下面那张的框还会被撑宽。
                     let isFooter = upper.contains("承销") || upper.contains("发行中心")
                     if isFooter || !(headWords[anchor.kind] ?? []).contains(where: { upper.contains($0) }) { continue }
                 }
-                // 落在某个锚的票头范围里（锚的上方）而且长得像票头，优先归它；
-                // 否则归正上方最近的那个锚。
                 let rank = position.v < 0 ? (0, -position.v) : (1, position.v)
                 if best == nil || rank < best!.rank { best = (rank, number) }
             }
             if let best { members[best.anchor].append(index) }
         }
+        return members
+    }
+
+    private static func fallbackAnchors(_ lines: [Line], claimed: Set<Int>) -> [Anchor] {
+        let unclaimed = lines.indices.filter {
+            !claimed.contains($0) && lines[$0].corners.count == 4 && !isDeskSlogan(lines[$0].text)
+        }
+        guard unclaimed.count >= 3 else { return [] }
+        var seeds: [(pri: Int, anchor: Anchor)] = []
+        for idx in unclaimed {
+            let line = lines[idx]
+            let compact = line.text.replacingOccurrences(of: " ", with: "")
+            let along = CGPoint(x: line.corners[1].x - line.corners[0].x, y: line.corners[1].y - line.corners[0].y)
+            let length = Double(hypot(along.x, along.y))
+            guard length > 0 else { continue }
+            let u = CGPoint(x: Double(along.x) / length, y: Double(along.y) / length)
+            let v = CGPoint(x: -u.y, y: u.x)
+            let height = max(Double(hypot(line.corners[3].x - line.corners[0].x, line.corners[3].y - line.corners[0].y)), 1)
+            if (compact.contains("机号") || compact.contains("玩法") || compact.contains("福利彩票")) && !compact.contains("承销") {
+                let pitch = max(length / Double(max(compact.count, 8)), height * 0.45)
+                var origin = CGPoint(x: line.corners[0].x + CGFloat(Double(v.x) * height * 1.1),
+                                     y: line.corners[0].y + CGFloat(Double(v.y) * height * 1.1))
+                if compact.contains("机号") {
+                    origin = CGPoint(x: origin.x - CGFloat(Double(u.x) * 24 * pitch),
+                                     y: origin.y - CGFloat(Double(u.y) * 24 * pitch))
+                }
+                seeds.append((0, Anchor(kind: .welfare, origin: origin, u: u, v: v, pitch: pitch, height: height)))
+            } else if matches(compact, "开奖.{0,3}20\\d{5}") {
+                let pitch = max(length / Double(max(compact.count, 14)), height * 0.45)
+                let origin = CGPoint(x: line.corners[0].x - CGFloat(Double(v.x) * height * 5.2),
+                                     y: line.corners[0].y - CGFloat(Double(v.y) * height * 5.2))
+                seeds.append((1, Anchor(kind: .welfare, origin: origin, u: u, v: v, pitch: pitch, height: height)))
+            } else if matches(compact, "第2\\d{4}期|第2\\d{6}期") {
+                let pitch = max(length / Double(max(compact.count, 7)), height * 0.48)
+                let origin = CGPoint(x: line.corners[0].x + CGFloat(Double(v.x) * height * 1.1),
+                                     y: line.corners[0].y + CGFloat(Double(v.y) * height * 1.1))
+                seeds.append((0, Anchor(kind: .sports, origin: origin, u: u, v: v, pitch: pitch, height: height)))
+            } else if matches(compact, "\\d{2}-\\d{6}-\\d{3}") {
+                let pitch = max(length / Double(max(compact.count, 20)), height * 0.45)
+                let origin = CGPoint(x: line.corners[0].x - CGFloat(Double(v.x) * height * 10.0),
+                                     y: line.corners[0].y - CGFloat(Double(v.y) * height * 10.0))
+                seeds.append((2, Anchor(kind: .sports, origin: origin, u: u, v: v, pitch: pitch, height: height)))
+            }
+        }
+        guard !seeds.isEmpty else { return [] }
+        seeds.sort { $0.pri < $1.pri }
+        var kept: [Anchor] = []
+        for item in seeds {
+            let duplicate = kept.contains { existing in
+                let delta = existing.local(item.anchor.origin)
+                return abs(delta.u) < 30 * existing.pitch && abs(delta.v) < 12 * existing.height
+            }
+            if !duplicate { kept.append(item.anchor) }
+        }
+        return kept
+    }
+
+    /// 找票。返回的顺序是从上到下、从左到右。
+    static func locate(_ lines: [Line]) -> [Found] {
+        var anchors = lines.compactMap(anchor(for:))
+        let primaryCount = anchors.count
+        var members = assignMembers(lines, to: anchors)
+        let claimed = Set(members.flatMap { $0 })
+        let extras = fallbackAnchors(lines, claimed: claimed)
+        if !extras.isEmpty {
+            anchors.append(contentsOf: extras)
+            members = assignMembers(lines, to: anchors)
+        }
+        guard !anchors.isEmpty else { return [] }
 
         var found: [Found] = []
         for (number, anchor) in anchors.enumerated() {
+            let isPrimary = number < primaryCount
             struct Row { var text: String; var u0: Double; var u1: Double; var v0: Double; var v1: Double }
             var rows: [Row] = members[number].map { index in
                 let points = lines[index].corners.map { anchor.local($0) }
@@ -162,6 +230,7 @@ enum TicketLocator {
                 return Row(text: lines[index].text,
                            u0: us.min() ?? 0, u1: us.max() ?? 0, v0: vs.min() ?? 0, v1: vs.max() ?? 0)
             }
+            guard rows.count >= (isPrimary ? 1 : 4) else { continue }
             // 票底：找到了就在它下面收口，垫子上印的字、压在下面的另一张票都带不进来。
             var end: Double?
             for row in rows {
@@ -182,7 +251,8 @@ enum TicketLocator {
             guard !rows.isEmpty else { continue }
 
             let u0 = (rows.map { $0.u0 }.min() ?? 0) - 2 * anchor.pitch
-            let u1 = (rows.map { $0.u1 }.max() ?? 0) + 2 * anchor.pitch
+            let span = anchor.kind == .welfare ? welfareSpan : sportsSpan
+            let u1 = min((rows.map { $0.u1 }.max() ?? 0) + 2 * anchor.pitch, span * anchor.pitch)
             // 锚行上方至少留够票头的高度：标志、标题就算没认出来也要裁进去，
             // 彩种名就印在那儿。
             let v0 = min((rows.map { $0.v0 }.min() ?? 0) - 1.5 * anchor.height,
@@ -236,12 +306,40 @@ enum TicketLocator {
     }
 
     private static func quads(in image: UIImage) async -> [Located] {
-        // 整张照片里票可能很小，字高门槛要比认单张票时低。
+        let size = image.size
+        guard size.width > 0, size.height > 0 else { return [] }
+        func unit(_ point: CGPoint) -> CGPoint {
+            CGPoint(x: min(max(point.x / size.width, 0), 1), y: min(max(point.y / size.height, 0), 1))
+        }
+
+        // **模型优先找票**：端侧 TicketDetector 直接预测多票四顶点（不依赖条码与 OCR 锚词，
+        // 抗紧裁切、印章、倾斜与杂乱背景），并用 TicketHeaderMeta 标彩种、过滤竞彩/兑奖回执单。
+        // 检测不到受支持票据时再平滑退回 Apple Vision 锚行找票。
+        if let detector = CoreMLTicketDetector.shared {
+            let detections = detector.detect(in: image)
+            if !detections.isEmpty {
+                var located: [Located] = []
+                for det in detections where det.corners.count == 4 {
+                    if det.kind == .unsupported, det.score >= 0.50 { continue }
+                    let quad = TicketQuad(topLeft: unit(det.corners[0]), topRight: unit(det.corners[1]),
+                                          bottomRight: unit(det.corners[2]), bottomLeft: unit(det.corners[3]))
+                    var game: GameKey?
+                    if let headerModel = CoreMLHeaderClassifier.shared,
+                       let warped = TicketImagePreprocessor.correct(image, quad: quad)?.cgImage,
+                       let pred = headerModel.classify(warped) {
+                        if pred.isUnsupported, pred.gameConfidence >= 0.90 { continue }
+                        if pred.gameConfidence >= 0.65 { game = pred.game }
+                    }
+                    located.append(Located(quad: quad, game: game))
+                }
+                if !located.isEmpty { return located }
+            }
+        }
+
+        // 兜底：Apple Vision 文字锚行找票 + 纸边贴合。
         guard let fragments = try? await TicketVisionScanner.recognizeFragments(in: image, minimumTextHeight: 0.004) else {
             return []
         }
-        let size = image.size
-        guard size.width > 0, size.height > 0 else { return [] }
         func pixel(_ point: CGPoint) -> CGPoint {
             // Vision 归一化坐标原点在左下，翻成左上原点的像素。
             CGPoint(x: point.x * size.width, y: (1 - point.y) * size.height)
@@ -261,9 +359,6 @@ enum TicketLocator {
                 let fitted = PaperEdge.fit(raster.pixels, width: raster.width, height: raster.height,
                                            corners: ticket.corners.map { .init(x: Double($0.x) * scaleX, y: Double($0.y) * scaleY) })
                 ticket.corners = fitted.map { CGPoint(x: $0.x / scaleX, y: $0.y / scaleY) }
-            }
-            func unit(_ point: CGPoint) -> CGPoint {
-                CGPoint(x: min(max(point.x / size.width, 0), 1), y: min(max(point.y / size.height, 0), 1))
             }
             let text = ticket.texts.joined(separator: "\n")
             let game = ticket.kind == .welfare ? TicketTextParser.printedWelfareGame(text) : TicketTextParser.detectGame(text, guess: false)

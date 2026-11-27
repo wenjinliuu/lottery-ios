@@ -69,10 +69,17 @@ final class TicketBuilderTests: XCTestCase {
         XCTAssertEqual(tickets?.first?[.nums3], [3, 1, 2])
     }
 
-    /// 「随机」录入模式已经删掉，只保留手选里的随机填充。
+    /// 「随机」录入模式已经删掉，只保留手选里的随机填充；各彩种按真实票面规则开放复式与胆拖。
     func testEntryModesDropRandom() {
         XCTAssertEqual(EntryMode.modes(for: .ssq), [.manual, .system, .dantuo])
-        XCTAssertEqual(EntryMode.modes(for: .k8), [.manual])
+        XCTAssertEqual(EntryMode.modes(for: .qlc), [.manual, .system, .dantuo])
+        XCTAssertEqual(EntryMode.modes(for: .k8), [.manual, .system, .dantuo])
+        XCTAssertEqual(EntryMode.modes(for: .k8, playMode: "1"), [.manual, .system])
+        XCTAssertEqual(EntryMode.modes(for: .pl3, playMode: "single"), [.manual, .system])
+        XCTAssertEqual(EntryMode.modes(for: .pl3, playMode: "group3"), [.manual, .system, .dantuo])
+        XCTAssertEqual(EntryMode.modes(for: .pl3, playMode: "group6"), [.manual, .system, .dantuo])
+        XCTAssertEqual(EntryMode.modes(for: .pl5), [.manual, .system])
+        XCTAssertEqual(EntryMode.modes(for: .qxc), [.manual, .system])
         XCTAssertEqual(EntryMode.allCases, [.manual, .system, .dantuo])
         XCTAssertEqual(EntryMode.manual.label, "单式票")
         XCTAssertEqual(EntryMode.system.label, "复式票")
@@ -180,5 +187,78 @@ final class TicketBuilderTests: XCTestCase {
                 XCTAssertEqual(game.pickCount(for: section, playMode: game.defaultPlayMode), section.count)
             }
         }
+    }
+
+    // MARK: - 新增真实票面复式 / 胆拖 / 定位复式展开
+
+    func testK8AndQlcSystemAndDantuoExpansion() throws {
+        // 快乐8 选五复式 6 个号 → C(6,5) = 6 注
+        let k8Sys = [SectionKey.nums: SectionSelection(selected: [1, 5, 12, 23, 34, 45])]
+        XCTAssertEqual(TicketBuilder.combinationCount(game: .k8, selections: k8Sys, mode: .system, playMode: "5"), 6)
+        let k8SysTickets = try XCTUnwrap(TicketBuilder.expand(game: .k8, selections: k8Sys, mode: .system, playMode: "5", addOn: false))
+        XCTAssertEqual(k8SysTickets.count, 6)
+        XCTAssertTrue(k8SysTickets.allSatisfy { $0[.nums].count == 5 && $0.playCount == 5 })
+
+        // 快乐8 选六胆拖 2 胆 6 拖 → C(6,4) = 15 注
+        let k8Dan = [SectionKey.nums: SectionSelection(selected: [1, 2, 3, 4, 5, 6, 7, 8], dan: [1, 2])]
+        XCTAssertEqual(TicketBuilder.combinationCount(game: .k8, selections: k8Dan, mode: .dantuo, playMode: "6"), 15)
+        let k8DanTickets = try XCTUnwrap(TicketBuilder.expand(game: .k8, selections: k8Dan, mode: .dantuo, playMode: "6", addOn: false))
+        XCTAssertEqual(k8DanTickets.count, 15)
+        XCTAssertTrue(k8DanTickets.allSatisfy { $0[.nums].contains(1) && $0[.nums].contains(2) })
+
+        // 七乐彩 8 号复式 = 8 注；2 胆 7 拖 = C(7,5) = 21 注
+        let qlcSys = [SectionKey.nums7: SectionSelection(selected: [1, 2, 3, 4, 5, 6, 7, 8])]
+        XCTAssertEqual(TicketBuilder.combinationCount(game: .qlc, selections: qlcSys, mode: .system), 8)
+        let qlcDan = [SectionKey.nums7: SectionSelection(selected: Array(1...9), dan: [1, 2])]
+        XCTAssertEqual(TicketBuilder.combinationCount(game: .qlc, selections: qlcDan, mode: .dantuo), 21)
+        let qlcDanTickets = try XCTUnwrap(TicketBuilder.expand(game: .qlc, selections: qlcDan, mode: .dantuo, playMode: "", addOn: false))
+        XCTAssertEqual(qlcDanTickets.count, 21)
+        XCTAssertTrue(qlcDanTickets.allSatisfy { $0[.nums7].contains(1) && $0[.nums7].contains(2) })
+    }
+
+    func testPickThreeGroupSystemAndDantuoExpansion() throws {
+        // 组选3复式 2 个数字 → 2×1 = 2 注（[2,2,5] 和 [5,5,2]）
+        let g3Two = [SectionKey.nums3: SectionSelection(selected: [2, 5])]
+        XCTAssertEqual(TicketBuilder.combinationCount(game: .pl3, selections: g3Two, mode: .system, playMode: "group3"), 2)
+        let g3TwoTickets = try XCTUnwrap(TicketBuilder.expand(game: .pl3, selections: g3Two, mode: .system, playMode: "group3", addOn: false))
+        XCTAssertEqual(g3TwoTickets.map { $0[.nums3] }, [[2, 2, 5], [5, 5, 2]])
+
+        // 组选3胆拖 1 胆 3 拖 → 2×3 = 6 注
+        let g3Dan = [SectionKey.nums3: SectionSelection(selected: [1, 3, 5, 8], dan: [1])]
+        XCTAssertEqual(TicketBuilder.combinationCount(game: .fc3d, selections: g3Dan, mode: .dantuo, playMode: "group3"), 6)
+        let g3DanTickets = try XCTUnwrap(TicketBuilder.expand(game: .fc3d, selections: g3Dan, mode: .dantuo, playMode: "group3", addOn: false))
+        XCTAssertEqual(g3DanTickets.count, 6)
+        XCTAssertTrue(g3DanTickets.allSatisfy { $0[.nums3].contains(1) && Set($0[.nums3]).count == 2 })
+
+        // 组选6胆拖 2 胆 4 拖 → C(4,1) = 4 注；1 胆 4 拖 → C(4,2) = 6 注
+        let g6Dan2 = [SectionKey.nums3: SectionSelection(selected: [1, 2, 3, 4, 5, 6], dan: [1, 2])]
+        XCTAssertEqual(TicketBuilder.combinationCount(game: .pl3, selections: g6Dan2, mode: .dantuo, playMode: "group6"), 4)
+        let g6Dan1 = [SectionKey.nums3: SectionSelection(selected: [1, 3, 4, 5, 6], dan: [1])]
+        XCTAssertEqual(TicketBuilder.combinationCount(game: .pl3, selections: g6Dan1, mode: .dantuo, playMode: "group6"), 6)
+    }
+
+    func testPositionalSystemExpansionForPl3Pl5AndQxc() throws {
+        // 排列3 直选定位复式：[0,1] × [2,3,4] × [5] = 6 注
+        let pl3Pos = [SectionKey.nums3: SectionSelection(positional: [[0, 1], [2, 3, 4], [5]])]
+        XCTAssertEqual(TicketBuilder.combinationCount(game: .pl3, selections: pl3Pos, mode: .system, playMode: "single"), 6)
+        let pl3Tickets = try XCTUnwrap(TicketBuilder.expand(game: .pl3, selections: pl3Pos, mode: .system, playMode: "single", addOn: false))
+        XCTAssertEqual(pl3Tickets.count, 6)
+        XCTAssertEqual(pl3Tickets.first?[.nums3], [0, 2, 5])
+        XCTAssertEqual(pl3Tickets.last?[.nums3], [1, 4, 5])
+        XCTAssertEqual(GameKey.pl3.ticketLabel(modes: ["single"], shape: .system), "直选定位复式票")
+
+        // 排列5 直选定位复式：[1,2] × [3] × [4,5] × [6] × [7,8,9] = 12 注
+        let pl5Pos = [SectionKey.nums5: SectionSelection(positional: [[1, 2], [3], [4, 5], [6], [7, 8, 9]])]
+        XCTAssertEqual(TicketBuilder.combinationCount(game: .pl5, selections: pl5Pos, mode: .system), 12)
+        XCTAssertEqual(TicketBuilder.expand(game: .pl5, selections: pl5Pos, mode: .system, playMode: "", addOn: false)?.count, 12)
+        XCTAssertEqual(GameKey.pl5.ticketLabel(modes: [""], shape: .system), "直选定位复式票")
+
+        // 七星彩 定位复式 + 特别号复式：2 × 1 × 1 × 1 × 1 × 1 × 2 = 4 注
+        let qxcPos: [SectionKey: SectionSelection] = [
+            .nums6: SectionSelection(positional: [[0, 1], [2], [3], [4], [5], [6]]),
+            .tail: SectionSelection(selected: [7, 12])
+        ]
+        XCTAssertEqual(TicketBuilder.combinationCount(game: .qxc, selections: qxcPos, mode: .system), 4)
+        XCTAssertEqual(TicketBuilder.expand(game: .qxc, selections: qxcPos, mode: .system, playMode: "", addOn: false)?.count, 4)
     }
 }

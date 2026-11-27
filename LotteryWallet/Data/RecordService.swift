@@ -444,7 +444,7 @@ struct TicketCard: Identifiable, Hashable {
     /// 整票里的一个号码区。
     struct WholeZone: Identifiable, Hashable {
         let key: SectionKey
-        /// 这个区选了哪些号，升序。
+        /// 这个区选了哪些号，升序（非定位复式/胆拖）。
         let selected: [Int]
         /// 其中哪些是胆码。复式票为空。
         let dan: Set<Int>
@@ -452,6 +452,10 @@ struct TicketCard: Identifiable, Hashable {
         let hits: Set<Int>
         /// 已有完整的逐球核对标记，全部未命中也属于已核对。
         let hasResult: Bool
+        /// 定位复式按位选号（第①位…第N位）；非空时按逐位行展示。
+        var positional: [[Int]] = []
+        /// 定位复式每一位上命中的数字集合。
+        var positionalHits: [Set<Int>] = []
         var id: String { key.rawValue }
     }
 
@@ -486,8 +490,42 @@ struct TicketCard: Identifiable, Hashable {
     /// 那它本来也就等于单式，不影响显示）。
     static func wholeZones(_ records: [TicketRecord], game: GameKey) -> [WholeZone] {
         guard records.count > 1 else { return [] }
+        let playMode = records.first?.playMode ?? ""
+        let rawShape = TicketShape.from(entryLabel: records.first?.entryLabel ?? "")
+        // 单式位选票（排列3/3D/排列5/七星彩）的几注互相独立，绝不能凑交并集画成胆拖/复式
+        if rawShape == .single, game.sections.contains(where: \.isPositional) { return [] }
+        // 混合玩法的单式票（如排列3 直组混合、3D 混选）绝不能拼成复式整票
+        let distinctModes = Set(records.map(\.playMode).filter { !$0.isEmpty })
+        if distinctModes.count > 1 { return [] }
+
         var zones: [WholeZone] = []
         for section in game.sections {
+            if rawShape == .system, game.usesPositionalSystem(for: section, playMode: playMode) {
+                var slots = Array(repeating: Set<Int>(), count: section.count)
+                var slotHits = Array(repeating: Set<Int>(), count: section.count)
+                var hasResult = true
+                for record in records {
+                    let values = record.ticket[section.key]
+                    guard values.count == section.count else { hasResult = false; continue }
+                    let flags = record.matched[section.key] ?? []
+                    if flags.count != values.count { hasResult = false }
+                    for (idx, val) in values.enumerated() {
+                        slots[idx].insert(val)
+                        if idx < flags.count, flags[idx] { slotHits[idx].insert(val) }
+                    }
+                }
+                let positional = slots.map { $0.sorted() }
+                guard positional.allSatisfy({ !$0.isEmpty }) else { return [] }
+                zones.append(WholeZone(key: section.key,
+                                       selected: [],
+                                       dan: [],
+                                       hits: [],
+                                       hasResult: hasResult,
+                                       positional: positional,
+                                       positionalHits: slotHits))
+                continue
+            }
+
             var union: Set<Int> = []
             var intersection: Set<Int>?
             var hits: Set<Int> = []
@@ -513,29 +551,36 @@ struct TicketCard: Identifiable, Hashable {
                                    hits: hits,
                                    hasResult: hasResult))
         }
-        // 玩法决定一注选几个号（快乐8 的选五 / 选八），**对账必须按它算**。
-        // 用 `section.count`（快乐8 是开奖的 20 个）的话，一张选五复式选了
-        // 7 个号，算出来是 `binomial(7, 20) = 0`，和真实的 21 注对不上 ——
-        // 于是快乐8 的复式和胆拖票在票夹里**永远画不成整票**，
-        // 连带「中 N 注 · 奖金」那行小结也跟着消失。
-        let playMode = records.first?.playMode ?? ""
-        // **注数必须正好等于这组选号的展开数**，否则这不是一张复式/胆拖票。
-        //
-        // 只看「有没有某个区多选了」是不够的：手选两注 1-6 和 7-12，
-        // 红球并集是 12 个，同样"多选了"，会被画成一张 12 选 6 的复式 ——
-        // 而那其实是两注互不相干的单式。
-        // 真正的复式/胆拖，展开数和记录条数必然对得上（7 红复式展开 7 注，
-        // 2 胆 5 拖选 4 展开 5 注）；拿两注拼出来的并集展开是 924 注，对不上。
         return combinations(of: zones, game: game, playMode: playMode) == records.count ? zones : []
     }
 
     private static func combinations(of zones: [WholeZone], game: GameKey, playMode: String) -> Int {
+        let effectiveMode = playMode.isEmpty ? game.defaultPlayMode : playMode
         var total = 1
         for section in game.sections {
             guard let zone = zones.first(where: { $0.key == section.key }) else { continue }
-            // 胆码是定下的，真正要组合的是拖码里挑剩下的那几个位置
+            if !zone.positional.isEmpty {
+                for slot in zone.positional {
+                    guard !slot.isEmpty else { return 0 }
+                    total *= slot.count
+                }
+                continue
+            }
             let free = zone.selected.count - zone.dan.count
-            let need = game.pickCount(for: section, playMode: playMode) - zone.dan.count
+            if (game == .pl3 || game == .fc3d) && effectiveMode == "group3" {
+                if zone.dan.isEmpty {
+                    guard free >= 2 else { return 0 }
+                    total *= free * (free - 1)
+                } else if zone.dan.count == 1 {
+                    guard free >= 1 else { return 0 }
+                    total *= 2 * free
+                } else {
+                    return 0
+                }
+                continue
+            }
+            // 胆码是定下的，真正要组合的是拖码里挑剩下的那几个位置
+            let need = game.pickCount(for: section, playMode: effectiveMode) - zone.dan.count
             guard need >= 0 else { return 0 }
             total *= TicketBuilder.binomial(free, need)
             if total == 0 { return 0 }

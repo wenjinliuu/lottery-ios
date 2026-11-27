@@ -507,4 +507,53 @@ final class ModelFusionTests: XCTestCase {
         XCTAssertTrue(TicketVisionScanner.modelRecoverableGames.contains(.qlc))
         XCTAssertFalse(TicketVisionScanner.modelRecoverableGames.contains(.fc3d))
     }
+
+    func testNewPlayTypesRebuildWithTotalVerification() {
+        // 快乐8 选五复式（6 号 = 6 注 12 元）
+        var k8Sys = ScannedTicket(game: .k8)
+        k8Sys.play = .system
+        k8Sys.playMode = "5"
+        k8Sys.totalAmount = 12
+        let k8SysRep = ModelFusion.fuse(&k8Sys, rows: [row("01 05 12 23 34 45")])
+        XCTAssertTrue(k8SysRep.rebuilt)
+        XCTAssertEqual(k8Sys.selections[.nums]?.selected, [1, 5, 12, 23, 34, 45])
+
+        // 快乐8 选六胆拖（2 胆 6 拖 = 15 注 30 元）
+        var k8Dan = ScannedTicket(game: .k8)
+        k8Dan.play = .dantuo
+        k8Dan.playMode = "6"
+        k8Dan.totalAmount = 30
+        let k8DanRep = ModelFusion.fuse(&k8Dan, rows: [row("02 18"), row("05 11 22 33 44 55")])
+        XCTAssertTrue(k8DanRep.rebuilt)
+        XCTAssertEqual(k8Dan.selections[.nums]?.dan, [2, 18])
+        XCTAssertEqual(k8Dan.count, 15)
+
+        // 排列3 组选3 复式（2 号 = 2 注 4 元）
+        var pl3G3 = ScannedTicket(game: .pl3)
+        pl3G3.play = .system
+        pl3G3.playMode = "group3"
+        pl3G3.totalAmount = 4
+        let pl3G3Rep = ModelFusion.fuse(&pl3G3, rows: [row("2 5")])
+        XCTAssertTrue(pl3G3Rep.rebuilt)
+        XCTAssertEqual(pl3G3.selections[.nums3]?.selected, [2, 5])
+
+        // 排列3 直选定位复式（[0,1]×[2,3,4]×[5] = 6 注 12 元）
+        var pl3Pos = ScannedTicket(game: .pl3)
+        pl3Pos.play = .system
+        pl3Pos.playMode = "single"
+        pl3Pos.totalAmount = 12
+        let pl3PosRep = ModelFusion.fuse(&pl3Pos, rows: ["01", "234", "5"].map(row))
+        XCTAssertTrue(pl3PosRep.rebuilt)
+        XCTAssertEqual(pl3Pos.selections[.nums3]?.positional, [[0, 1], [2, 3, 4], [5]])
+
+        // 大乐透空前区胆（7 前拖 + 1 后胆 + 2 后拖 = C(7,5)*C(2,1) = 42 注 84 元）
+        var dltEmptyFrontDan = ScannedTicket(game: .dlt)
+        dltEmptyFrontDan.play = .dantuo
+        dltEmptyFrontDan.totalAmount = 84
+        let dltRep = ModelFusion.fuse(&dltEmptyFrontDan, rows: ["01 03 05 09 10 11 12", "02", "05 08"].map(row))
+        XCTAssertTrue(dltRep.rebuilt)
+        XCTAssertEqual(dltEmptyFrontDan.selections[.front]?.dan, [])
+        XCTAssertEqual(dltEmptyFrontDan.selections[.front]?.selected, [1, 3, 5, 9, 10, 11, 12])
+        XCTAssertEqual(dltEmptyFrontDan.selections[.back]?.dan, [2])
+    }
 }

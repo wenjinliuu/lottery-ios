@@ -130,8 +130,42 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         [.ssq, .dlt, .pl5, .qxc, .qlc].contains(self)
     }
 
-    /// 支持复式与胆拖的彩种。
-    var supportsSystemPlay: Bool { self == .ssq || self == .dlt }
+    /// 支持复式的彩种。八个彩种均已基于真实物理票面支持对应复式玩法。
+    var supportsSystemPlay: Bool { true }
+
+    /// 这个彩种在当前玩法下是否支持胆拖。
+    ///
+    /// - 双色球 / 大乐透 / 七乐彩：支持
+    /// - 快乐8：选二至选十支持（选一无法设胆码）
+    /// - 排列3 / 3D：组三、组六支持组选胆拖；直选走定位复式，不设胆拖
+    /// - 排列5 / 七星彩：定位直选复式，不设胆拖
+    func supportsDantuo(playMode: String = "") -> Bool {
+        let mode = playMode.isEmpty ? defaultPlayMode : playMode
+        switch self {
+        case .ssq, .dlt, .qlc:
+            return true
+        case .k8:
+            return (Int(mode) ?? 10) >= 2
+        case .pl3, .fc3d:
+            return mode == "group3" || mode == "group6"
+        case .pl5, .qxc:
+            return false
+        }
+    }
+
+    /// 复式模式下，该号码区是否按「第①位 / 第②位…」逐位独立多选（直选定位复式）。
+    func usesPositionalSystem(for section: GameSection, playMode: String) -> Bool {
+        guard section.isPositional else { return false }
+        let mode = playMode.isEmpty ? defaultPlayMode : playMode
+        switch self {
+        case .pl5, .qxc:
+            return true
+        case .pl3, .fc3d:
+            return mode.isEmpty || mode == "single"
+        default:
+            return false
+        }
+    }
 
     var isDigitGame: Bool { self == .fc3d || self == .pl3 }
 
@@ -171,12 +205,23 @@ enum GameKey: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     /// `shape` 是票面类型（见 `TicketShape`），两段拼起来才是这张票的全名。
     /// 样票上印的就是「单式票」三个字，所以这里也带「票」字。
     func ticketLabel(modes: Set<String>, shape: TicketShape) -> String {
-        // 排列3 / 3D 的组选复式要写明是哪一种：票面印的就是「组选6复式票」「组选3复式票」，
-        // 两种的注数和奖金都不一样，只写「组选复式票」分不出来。
-        if shape == .system, self == .pl3 || self == .fc3d {
-            let known = modes.filter { !$0.isEmpty }
-            if known == ["group6"] { return "组选6" + shape.label }
-            if known == ["group3"] { return "组选3" + shape.label }
+        let known = modes.filter { !$0.isEmpty }
+        // 排列3 / 3D 复式与胆拖写明具体票型：组选6复式票、组选3复式票、组选6胆拖票、直选定位复式票。
+        if self == .pl3 || self == .fc3d {
+            if shape == .system {
+                if known == ["group6"] { return "组选6" + shape.label }
+                if known == ["group3"] { return "组选3" + shape.label }
+                if known.isEmpty || known == ["single"] { return "直选定位" + shape.label }
+            } else if shape == .dantuo {
+                if known == ["group6"] { return "组选6" + shape.label }
+                if known == ["group3"] { return "组选3" + shape.label }
+            } else if self == .pl3, shape == .single,
+                      known.contains("single"), known.contains("group3") || known.contains("group6") {
+                return "直组混合" + shape.label
+            }
+        }
+        if self == .pl5, shape == .system {
+            return "直选定位" + shape.label
         }
         let play = headPlayLabel(modes: modes)
         return play.isEmpty ? shape.label : play + shape.label

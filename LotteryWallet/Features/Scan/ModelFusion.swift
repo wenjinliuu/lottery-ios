@@ -143,15 +143,21 @@ enum ModelFusion {
     }
 
     /// 复式票的一个区：实票上「红复:」「蓝复:」「前区」等标签常切不成 `x`（或者干脆没切出段，只剩 `1?` 或纯数字），
-    /// 所以直接走 `GlyphRows.readLine` 找唯一一串偶数位升序号码，并要求每一位都达到 `threshold`。
-    private static func systemZoneRow(_ tokens: [GlyphRows.Token], section: GameSection) -> [Value]? {
-        let limit = min(section.range.upperBound, 20)
-        guard section.count <= limit else { return nil }
+    /// 所以直接走 `GlyphRows.readLine` 找唯一一串升序号码，并要求每一位都达到 `threshold`。
+    private static func systemZoneRow(_ tokens: [GlyphRows.Token], section: GameSection,
+                                      minCount: Int? = nil, maxCount: Int? = nil) -> [Value]? {
+        let width = digits(per: section)
+        let low = minCount ?? section.count
+        let high = maxCount ?? min(section.range.upperBound, width == 1 ? 10 : 20)
+        guard low <= high else { return nil }
         var matches: [[Value]] = []
-        for count in section.count...limit {
-            guard let read = GlyphRows.readLine(tokens, count: count * 2) else { continue }
+        for count in low...high {
+            guard let read = GlyphRows.readLine(tokens, count: count * width) else { continue }
             let values = numbers(read, parts: [(section, count)])
-            if ordered(values.map(\.value), section: section),
+            let raw = values.map(\.value)
+            let ascendingUnique = zip(raw, raw.dropFirst()).allSatisfy { $0 < $1 }
+            if raw.allSatisfy(section.range.contains),
+               (count == 1 || ascendingUnique),
                values.allSatisfy({ $0.confidence >= threshold }) {
                 matches.append(values)
             }
@@ -159,99 +165,275 @@ enum ModelFusion {
         return matches.count == 1 ? matches[0] : nil
     }
 
-    /// 复式票：模型把两个区（红/蓝或前/后）都读成、每位数都有把握、展开注数和票面合计对得上，就以模型为准。
+    /// 复式票：模型把对应号码区都读成、每位数都有把握、展开注数和票面合计对得上，就以模型为准。
     ///
-    /// 两个区在票面上紧挨着（折行已在 `joinWrapped` 里拼回同一行），跳过空行后后区紧跟在前区下一行，
-    /// 防止福彩下面「倍数:10」这类两位数行被误当成后区。
-    /// 如果 Vision 对同一个区读出了相同个数但不同的号码，以模型为准的同时保留「两种读法不一致」警告。
+    /// 支持双色球/大乐透双区复式、七乐彩/快乐8 单区复式、排列3/3D 组选3/组选6 复式、
+    /// 以及排列3/排列5 直选定位复式；金额强校验不通过时绝不改票。
     static func rebuildSystem(_ ticket: inout ScannedTicket, rows: [[GlyphRows.Token]]) -> Report? {
         let sections = ticket.game.sections
-        guard ticket.play == .system, ticket.game == .ssq || ticket.game == .dlt, sections.count == 2,
-              let total = ticket.totalAmount, total > 0 else { return nil }
-        let (front, back) = (sections[0], sections[1])
+        guard ticket.play == .system, let total = ticket.totalAmount, total > 0 else { return nil }
         let nonEmpty = rows.filter { !$0.isEmpty }
-        guard nonEmpty.count >= 2 else { return nil }
-
+        guard !nonEmpty.isEmpty else { return nil }
         let prices: [Double] = ticket.game == .dlt ? [2, 3] : [2]
-        var candidates: [(front: [Value], back: [Value])] = []
-        for index in 0..<(nonEmpty.count - 1) {
-            guard let first = systemZoneRow(nonEmpty[index], section: front),
-                  let second = systemZoneRow(nonEmpty[index + 1], section: back) else { continue }
-            let units = combinations(first.count, front.count) * combinations(second.count, back.count)
-            guard units > 1 else { continue }
-            let scale = Double(units * max(ticket.multiple, 1) * max(ticket.periods, 1))
-            guard prices.contains(where: { abs(scale * $0 - total) < 0.01 }) else { continue }
-            candidates.append((first, second))
-        }
-        guard candidates.count == 1, let picked = candidates.first else { return nil }
+        let multPeriods = max(ticket.multiple, 1) * max(ticket.periods, 1)
 
-        var report = Report(expected: 2, read: 2, rebuilt: true)
-        for (section, values) in [(front, picked.front), (back, picked.back)] {
-            let model = values.map(\.value)
+        // 1. 双色球 / 大乐透双区复式
+        if (ticket.game == .ssq || ticket.game == .dlt), sections.count == 2, nonEmpty.count >= 2 {
+            let (front, back) = (sections[0], sections[1])
+            var candidates: [(front: [Value], back: [Value])] = []
+            for index in 0..<(nonEmpty.count - 1) {
+                guard let first = systemZoneRow(nonEmpty[index], section: front),
+                      let second = systemZoneRow(nonEmpty[index + 1], section: back) else { continue }
+                let units = combinations(first.count, front.count) * combinations(second.count, back.count)
+                guard units > 1 else { continue }
+                let scale = Double(units * multPeriods)
+                guard prices.contains(where: { abs(scale * $0 - total) < 0.01 }) else { continue }
+                candidates.append((first, second))
+            }
+            guard candidates.count == 1, let picked = candidates.first else { return nil }
+
+            var report = Report(expected: 2, read: 2, rebuilt: true)
+            for (section, values) in [(front, picked.front), (back, picked.back)] {
+                let model = values.map(\.value)
+                let known = ticket.selections[section.key]?.selected.sorted() ?? []
+                if known == model {
+                    report.confirmed += model.count
+                } else if known.count != model.count {
+                    ticket.selections[section.key] = SectionSelection(selected: model)
+                    report.filled += model.count
+                } else {
+                    ticket.selections[section.key] = SectionSelection(selected: model)
+                    report.disputed += 1
+                    let other = known.map { String(format: "%02d", $0) }.joined(separator: " ")
+                    ticket.warnings.append("\(section.label)这一行两种读法不一致，另一种读到的是 \(other)，请对照票面核对。")
+                }
+            }
+            refreshWarnings(&ticket)
+            return report
+        }
+
+        // 2. 快乐8 / 七乐彩单区复式
+        if (ticket.game == .k8 || ticket.game == .qlc), let section = sections.first {
+            let need = ticket.game == .k8 ? (Int(ticket.playMode) ?? 0) : section.count
+            guard need >= 1 else { return nil }
+            var candidates: [[Value]] = []
+            for row in nonEmpty {
+                guard let values = systemZoneRow(row, section: section, minCount: need + 1, maxCount: 20) else { continue }
+                let units = combinations(values.count, need)
+                guard units > 1, abs(Double(units * multPeriods) * 2.0 - total) < 0.01 else { continue }
+                candidates.append(values)
+            }
+            guard candidates.count == 1, let picked = candidates.first else { return nil }
+            let model = picked.map(\.value)
             let known = ticket.selections[section.key]?.selected.sorted() ?? []
+            var report = Report(expected: 1, read: 1, rebuilt: true)
             if known == model {
                 report.confirmed += model.count
             } else if known.count != model.count {
                 ticket.selections[section.key] = SectionSelection(selected: model)
                 report.filled += model.count
             } else {
-                // 个数一样但号码不同：金额验证不了哪一个号对，以模型为准并把 Vision 的读数标进警告
                 ticket.selections[section.key] = SectionSelection(selected: model)
                 report.disputed += 1
                 let other = known.map { String(format: "%02d", $0) }.joined(separator: " ")
                 ticket.warnings.append("\(section.label)这一行两种读法不一致，另一种读到的是 \(other)，请对照票面核对。")
             }
+            refreshWarnings(&ticket)
+            return report
         }
-        refreshWarnings(&ticket)
-        return report
+
+        // 3. 排列3 / 3D 组选复式（组选3复式 / 组选6复式）与 排列3 / 排列5 直选定位复式
+        if (ticket.game == .pl3 || ticket.game == .fc3d || ticket.game == .pl5), let section = sections.first {
+            let mode = ticket.effectivePlayMode()
+            if (ticket.game == .pl3 || ticket.game == .fc3d), mode == "group3" || mode == "group6" {
+                let minCount = mode == "group3" ? 2 : 4
+                var candidates: [[Value]] = []
+                for row in nonEmpty {
+                    guard let values = systemZoneRow(row, section: section, minCount: minCount, maxCount: 10) else { continue }
+                    let n = values.count
+                    let units = mode == "group3" ? n * (n - 1) : combinations(n, 3)
+                    guard units > 1, abs(Double(units * multPeriods) * 2.0 - total) < 0.01 else { continue }
+                    candidates.append(values)
+                }
+                guard candidates.count == 1, let picked = candidates.first else { return nil }
+                let model = picked.map(\.value)
+                let known = ticket.selections[section.key]?.selected.sorted() ?? []
+                var report = Report(expected: 1, read: 1, rebuilt: true)
+                if known == model {
+                    report.confirmed += model.count
+                } else {
+                    ticket.selections[section.key] = SectionSelection(selected: model)
+                    if known.count == model.count {
+                        report.disputed += 1
+                        let other = known.map(String.init).joined(separator: " ")
+                        ticket.warnings.append("\(section.label)这一行两种读法不一致，另一种读到的是 \(other)，请对照票面核对。")
+                    } else {
+                        report.filled += model.count
+                    }
+                }
+                refreshWarnings(&ticket)
+                return report
+            } else if ticket.game.usesPositionalSystem(for: section, playMode: mode), nonEmpty.count >= section.count {
+                let need = section.count
+                var candidates: [[[Int]]] = []
+                for start in 0...(nonEmpty.count - need) {
+                    var positions: [[Int]] = []
+                    var units = 1
+                    var valid = true
+                    for offset in 0..<need {
+                        guard let values = systemZoneRow(nonEmpty[start + offset], section: section, minCount: 1, maxCount: 10) else {
+                            valid = false; break
+                        }
+                        positions.append(values.map(\.value))
+                        units *= values.count
+                    }
+                    guard valid, units > 1, abs(Double(units * multPeriods) * 2.0 - total) < 0.01 else { continue }
+                    candidates.append(positions)
+                }
+                guard candidates.count == 1, let picked = candidates.first else { return nil }
+                var report = Report(expected: need, read: need, rebuilt: true)
+                let known = ticket.selections[section.key]?.positional ?? []
+                if known == picked {
+                    report.confirmed += picked.reduce(0) { $0 + $1.count }
+                } else {
+                    ticket.selections[section.key] = SectionSelection(positional: picked)
+                    report.filled += picked.reduce(0) { $0 + $1.count }
+                }
+                refreshWarnings(&ticket)
+                return report
+            }
+        }
+        return nil
     }
 
-    /// 一行「标签 + 一串两位数」：前面至少一段不是数字，后面是这个区里升序的号码。
-    private static func labelled(_ tokens: [GlyphRows.Token], section: GameSection) -> [Value]? {
-        guard let first = tokens.first, first.digit == DigitClassifier.reject else { return nil }
+    /// 一行「可选标签 + 一串有序号码」：兼容带标签切字行（`GlyphRows`）与整行序列读数（`CoreMLLineReader`）。
+    private static func labelled(_ tokens: [GlyphRows.Token], section: GameSection,
+                                 allowUnlabelled: Bool = true) -> [Value]? {
+        if !allowUnlabelled {
+            guard let first = tokens.first, first.digit == DigitClassifier.reject else { return nil }
+        }
+        let width = digits(per: section)
+        let maxN = width == 1 ? 10 : 18
         var found: [Value]?
-        for count in 1...18 {
-            guard let read = GlyphRows.readLine(tokens, count: count * 2) else { continue }
+        for count in 1...maxN {
+            guard let read = GlyphRows.readLine(tokens, count: count * width) else { continue }
             let values = numbers(read, parts: [(section, count)])
-            if ordered(values.map(\.value), section: section),
-               values.allSatisfy({ $0.confidence >= threshold }) { found = values }
+            let raw = values.map(\.value)
+            let ascendingUnique = zip(raw, raw.dropFirst()).allSatisfy { $0 < $1 }
+            if raw.allSatisfy(section.range.contains),
+               (count == 1 || ascendingUnique),
+               values.allSatisfy({ $0.confidence >= threshold }) {
+                found = values
+            }
         }
         return found
     }
 
     /// 胆拖票：模型把「胆 / 拖」几行都读成了、注数和票面合计对得上，就以模型为准。
     ///
-    /// 大乐透印四行（前区胆、前区拖、后区胆、后区拖），后区没有胆时是三行；双色球印三行（红胆、红拖、蓝）。
+    /// 支持双色球、大乐透（含后区无胆与前区无胆）、七乐彩、快乐8 与 排列3/3D 组选胆拖。
     /// 对不上就返回 nil，票保持 Vision 读到的样子。
     static func rebuildBanker(_ ticket: inout ScannedTicket, rows: [[GlyphRows.Token]]) -> Report? {
         let sections = ticket.game.sections
-        guard ticket.game == .dlt || ticket.game == .ssq, sections.count == 2,
-              let total = ticket.totalAmount, total > 0 else { return nil }
-        let (front, back) = (sections[0], sections[1])
-        // 号码区里按顺序读得成的标签行。前两行按第一个区读，后面的按第二个区读。
-        var firstRows: [[Int]] = [], secondRows: [[Int]] = []
-        for tokens in rows {
-            if firstRows.count < 2, let values = labelled(tokens, section: front) {
-                firstRows.append(values.map(\.value))
-            } else if firstRows.count == 2, secondRows.count < 2, let values = labelled(tokens, section: back) {
-                secondRows.append(values.map(\.value))
-            }
-        }
-        guard firstRows.count == 2, (1...2).contains(secondRows.count) else { return nil }
-        let frontDan = firstRows[0], frontTuo = firstRows[1]
-        let backDan = secondRows.count == 2 ? secondRows[0] : []
-        let backTuo = secondRows.count == 2 ? secondRows[1] : secondRows[0]
-        guard frontDan.count < front.count, backDan.count < back.count,
-              Set(frontDan).isDisjoint(with: frontTuo), Set(backDan).isDisjoint(with: backTuo) else { return nil }
-        let units = combinations(frontTuo.count, front.count - frontDan.count)
-            * combinations(backTuo.count, back.count - backDan.count)
-        let scale = Double(units * max(ticket.multiple, 1) * max(ticket.periods, 1))
+        guard let total = ticket.totalAmount, total > 0 else { return nil }
+        let multPeriods = max(ticket.multiple, 1) * max(ticket.periods, 1)
         let prices: [Double] = ticket.game == .dlt ? [2, 3] : [2]
-        guard units > 0, prices.contains(where: { abs(scale * $0 - total) < 0.01 }) else { return nil }
 
-        var report = Report(expected: 2 + secondRows.count, read: 2 + secondRows.count, rebuilt: true)
-        for (section, dan, tuo) in [(front, frontDan, frontTuo), (back, backDan, backTuo)] {
-            let model = SectionSelection(selected: (dan + tuo).sorted(), dan: dan)
+        // 1. 双色球 / 大乐透双区胆拖
+        if (ticket.game == .dlt || ticket.game == .ssq), sections.count == 2 {
+            let (front, back) = (sections[0], sections[1])
+            var firstRows: [[Int]] = [], secondRows: [[Int]] = []
+            for tokens in rows {
+                if firstRows.count < 2, let values = labelled(tokens, section: front) {
+                    firstRows.append(values.map(\.value))
+                } else if firstRows.count == 2, secondRows.count < 2, let values = labelled(tokens, section: back) {
+                    secondRows.append(values.map(\.value))
+                }
+            }
+            var resolved: (frontDan: [Int], frontTuo: [Int], backDan: [Int], backTuo: [Int], count: Int)?
+            if firstRows.count == 2, (1...2).contains(secondRows.count) {
+                let fDan = firstRows[0], fTuo = firstRows[1]
+                let bDan = secondRows.count == 2 ? secondRows[0] : []
+                let bTuo = secondRows.count == 2 ? secondRows[1] : secondRows[0]
+                if fDan.count < front.count, bDan.count < back.count,
+                   Set(fDan).isDisjoint(with: fTuo), Set(bDan).isDisjoint(with: bTuo) {
+                    let units = combinations(fTuo.count, front.count - fDan.count)
+                        * combinations(bTuo.count, back.count - bDan.count)
+                    let scale = Double(units * multPeriods)
+                    if units > 0, prices.contains(where: { abs(scale * $0 - total) < 0.01 }) {
+                        resolved = (fDan, fTuo, bDan, bTuo, 2 + secondRows.count)
+                    }
+                }
+            }
+            // 大乐透特例：前区无胆（3 行：前区拖 + 后区胆 + 后区拖）
+            if resolved == nil, ticket.game == .dlt {
+                var fTuo: [Int]?
+                var backRows: [[Int]] = []
+                for tokens in rows {
+                    if fTuo == nil, let values = labelled(tokens, section: front), values.count >= front.count {
+                        fTuo = values.map(\.value)
+                    } else if fTuo != nil, backRows.count < 2, let values = labelled(tokens, section: back) {
+                        backRows.append(values.map(\.value))
+                    }
+                }
+                if let fTuo, backRows.count == 2 {
+                    let bDan = backRows[0], bTuo = backRows[1]
+                    if bDan.count == 1, Set(bDan).isDisjoint(with: bTuo) {
+                        let units = combinations(fTuo.count, front.count) * combinations(bTuo.count, back.count - bDan.count)
+                        let scale = Double(units * multPeriods)
+                        if units > 0, prices.contains(where: { abs(scale * $0 - total) < 0.01 }) {
+                            resolved = ([], fTuo, bDan, bTuo, 3)
+                        }
+                    }
+                }
+            }
+            guard let picked = resolved else { return nil }
+
+            var report = Report(expected: picked.count, read: picked.count, rebuilt: true)
+            for (section, dan, tuo) in [(front, picked.frontDan, picked.frontTuo), (back, picked.backDan, picked.backTuo)] {
+                let model = SectionSelection(selected: (dan + tuo).sorted(), dan: dan)
+                let known = ticket.selections[section.key]
+                if known?.selected.sorted() == model.selected, known?.dan.sorted() == model.dan.sorted() {
+                    report.confirmed += model.selected.count
+                } else {
+                    report.filled += model.selected.count
+                }
+                ticket.selections[section.key] = model
+            }
+            refreshWarnings(&ticket)
+            return report
+        }
+
+        // 2. 快乐8 / 七乐彩 / 排列3 / 3D 单区胆拖（两行：胆码 + 拖码）
+        if (ticket.game == .k8 || ticket.game == .qlc || ticket.game == .pl3 || ticket.game == .fc3d),
+           let section = sections.first {
+            let mode = ticket.effectivePlayMode()
+            let readable = rows.compactMap { labelled($0, section: section)?.map(\.value) }
+            guard readable.count >= 2 else { return nil }
+            var candidates: [(dan: [Int], tuo: [Int])] = []
+            for idx in 0..<(readable.count - 1) {
+                let dan = readable[idx], tuo = readable[idx + 1]
+                guard Set(dan).isDisjoint(with: tuo), !dan.isEmpty, !tuo.isEmpty else { continue }
+                let units: Int
+                if ticket.game == .pl3 || ticket.game == .fc3d {
+                    if mode == "group3", dan.count == 1 {
+                        units = 2 * tuo.count
+                    } else if mode == "group6", (1...2).contains(dan.count) {
+                        units = combinations(tuo.count, 3 - dan.count)
+                    } else {
+                        continue
+                    }
+                } else {
+                    let need = ticket.game == .k8 ? (Int(ticket.playMode) ?? 0) : section.count
+                    guard need >= 2, dan.count < need, dan.count + tuo.count >= need else { continue }
+                    units = combinations(tuo.count, need - dan.count)
+                }
+                guard units > 0, abs(Double(units * multPeriods) * 2.0 - total) < 0.01 else { continue }
+                candidates.append((dan, tuo))
+            }
+            guard candidates.count == 1, let picked = candidates.first else { return nil }
+            let model = SectionSelection(selected: (picked.dan + picked.tuo).sorted(), dan: picked.dan)
+            var report = Report(expected: 2, read: 2, rebuilt: true)
             let known = ticket.selections[section.key]
             if known?.selected.sorted() == model.selected, known?.dan.sorted() == model.dan.sorted() {
                 report.confirmed += model.selected.count
@@ -259,9 +441,10 @@ enum ModelFusion {
                 report.filled += model.selected.count
             }
             ticket.selections[section.key] = model
+            refreshWarnings(&ticket)
+            return report
         }
-        refreshWarnings(&ticket)
-        return report
+        return nil
     }
 
     // MARK: - 以模型读到的行为准

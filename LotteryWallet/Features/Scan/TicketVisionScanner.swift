@@ -57,6 +57,18 @@ enum TicketVisionScanner {
             .joined(separator: "\n")
         var welfare = TicketTextParser.hasWelfareIssuer(text)
         var headerGame = welfare ? TicketTextParser.printedWelfareGame(text) : TicketTextParser.namedGame(title)
+        let visualHeader = image.cgImage.flatMap { CoreMLHeaderClassifier.shared?.classify($0) }
+        let visualLayout = image.cgImage.flatMap { CoreMLZoneLayout.shared?.predict($0) }
+        if forced == nil, headerGame == nil, let visualHeader {
+            if let predicted = visualHeader.game, visualHeader.gameConfidence >= 0.72 {
+                headerGame = predicted
+                welfare = [.ssq, .qlc, .k8, .fc3d].contains(predicted)
+            } else if visualHeader.isUnsupported, visualHeader.gameConfidence >= 0.92,
+                      TicketTextParser.detectGame(text, guess: false) == nil {
+                page.result = ScanResult(rawText: text, warnings: ["这张票据暂不支持自动识别（如竞彩或兑奖回执单）"])
+                return page
+            }
+        }
         if forced == nil, !welfare, headerGame == nil, let cgImage = image.cgImage,
            let label = TicketHeaderModel.shared?.classify(cgImage) {
             welfare = label == .welfare
@@ -67,7 +79,8 @@ enum TicketVisionScanner {
         var selected = forced ?? headerGame ?? calendarGame ?? (welfare ? nil : TicketTextParser.detectGame(text, guess: false))
         var sevenStarsReading: ModelRowReader.Reading?
         if !welfare, selected == nil, let classifier = DigitClassifier.shared,
-           let reading = ModelRowReader.read(image: image, fragments: fragments, game: .qxc, classifier: classifier),
+           let reading = ModelRowReader.read(image: image, fragments: fragments, game: .qxc,
+                                             classifier: classifier, visualLayout: visualLayout, preferLineModel: false),
            ModelFusion.matchesSevenStars(rows: reading.rows, text: text) {
             selected = .qxc
             sevenStarsReading = reading
@@ -125,16 +138,60 @@ enum TicketVisionScanner {
         let needsModelRecovery = result.tickets.isEmpty
         if needsModelRecovery, let game = selected,
            Self.modelRecoverableGames.contains(game) {
-            result.tickets = [Self.shellTicket(for: game, text: text)]
+            var shell = Self.shellTicket(for: game, text: text)
+            if let vh = visualHeader {
+                if shell.play == .single, !shell.isPackage, vh.playConfidence >= 0.80 {
+                    if vh.isPackage, game == .dlt {
+                        shell.isPackage = true
+                    } else if let p = vh.play, p != .single {
+                        shell.play = p
+                    }
+                }
+                if game == .k8, shell.playMode.isEmpty, (1...10).contains(vh.k8Pick), vh.k8Confidence >= 0.70 {
+                    shell.playMode = String(vh.k8Pick)
+                }
+                if game == .dlt, !shell.addOn, vh.addOnProbability >= 0.85 {
+                    shell.addOn = true
+                }
+            }
+            result.tickets = [shell]
             result.warnings = []
         }
-        if result.tickets.count == 1, let classifier = DigitClassifier.shared {
+        // **端侧 MetaFieldOCR 元数据补全**：当期号/开奖日/合计/倍数/期数/追加被 Vision 漏读或模糊时，
+        // 在模型整票重建之前优先用端侧元数据模型补齐，确保金额校验与开奖日历准确闭合。
+        if result.tickets.count == 1, let cgImage = image.cgImage {
+            if let vh = visualHeader, result.tickets[0].game == .k8,
+               result.tickets[0].playMode.isEmpty, (1...10).contains(vh.k8Pick), vh.k8Confidence >= 0.70 {
+                result.tickets[0].playMode = String(vh.k8Pick)
+            }
+            let t = result.tickets[0]
+            let totalMismatch = t.totalAmount.map { abs(t.totalCost - $0) > 0.01 } ?? false
+            let missingMeta = t.issue.isEmpty || t.drawDate.isEmpty || t.totalAmount == nil || totalMismatch
+            if missingMeta, let metaReader = CoreMLMetaReader.shared, let layout = visualLayout {
+                let sports = [GameKey.dlt, .pl3, .pl5, .qxc].contains(t.game)
+                let boxes = sports ? [layout.header, layout.meta] : [layout.meta, layout.header]
+                let metaRead = metaReader.readRegion(cgImage, normalizedBoxes: boxes, sports: sports)
+                let fields = metaRead.fields
+                if result.tickets[0].issue.isEmpty, !fields.issue.isEmpty { result.tickets[0].issue = fields.issue }
+                if result.tickets[0].drawDate.isEmpty, !fields.drawDate.isEmpty { result.tickets[0].drawDate = fields.drawDate }
+                if result.tickets[0].totalAmount == nil, let total = fields.totalAmount { result.tickets[0].totalAmount = total }
+                if result.tickets[0].multiple == 1, let mult = fields.multiple, mult > 1 { result.tickets[0].multiple = mult }
+                if result.tickets[0].periods == 1, fields.periods > 1 { result.tickets[0].periods = fields.periods }
+                if result.tickets[0].game == .dlt, !result.tickets[0].addOn, fields.addOn { result.tickets[0].addOn = true }
+                if !metaRead.lines.isEmpty {
+                    registration.debug.notes.append("元数据模型：\(metaRead.lines.joined(separator: " | "))")
+                }
+            }
+        }
+        if result.tickets.count == 1, (CoreMLLineReader.shared != nil || DigitClassifier.shared != nil) {
             let beforeRecovery = result.tickets[0].unknownCount
             var recoveredCells = 0
             var searchStrip: CGRect?
             var recoveryNotes: [String] = []
             if let reading = sevenStarsReading ?? ModelRowReader.read(image: image, fragments: fragments,
-                                                 game: result.tickets[0].game, classifier: classifier) {
+                                                                      game: result.tickets[0].game,
+                                                                      classifier: DigitClassifier.shared,
+                                                                      visualLayout: visualLayout) {
                 let report = ModelFusion.fuse(&result.tickets[0], rows: reading.rows)
                 // 排列3 组选单式由空壳重建时补上每注对应的组三/组六玩法
                 if result.tickets[0].game == .pl3, result.tickets[0].play == .single,
@@ -151,10 +208,12 @@ enum TicketVisionScanner {
                         result.tickets[0].playMode = only
                     }
                 }
-                registration.debug.notes.append(report.note)
+                let engineTag = reading.usedLineModel ? "LineNet" : "DigitNet"
+                let zoneTag = reading.usedVisualZone ? "+VisualZone" : ""
+                registration.debug.notes.append("[\(engineTag)\(zoneTag)] \(report.note)")
                 // 模型读到的每一行附在识别原文后面。两个读数都摆出来，哪一步出的岔子才看得出来。
                 if result.rawText.isEmpty { result.rawText = LayoutSegmenter.lines(fragments) }
-                result.rawText += "\n\n［模型读行］\(report.note.replacingOccurrences(of: "模型读行：", with: ""))\n"
+                result.rawText += "\n\n［模型读行·\(engineTag)\(zoneTag)］\(report.note.replacingOccurrences(of: "模型读行：", with: ""))\n"
                     + ModelFusion.describe(reading.rows)
                 if let source = image.cgImage {
                     searchStrip = reading.zone

@@ -374,19 +374,73 @@ enum TicketTextParser {
         let isMultipleMark: Bool
     }
 
-    /// `红单 / 红复 / 红胆 / 红拖 / 蓝单 / 蓝复 / 前区 / 前区胆 / 前区拖 / 后区 / 后区胆 / 后区拖`
-    ///
-    /// `unlabelled`：大乐透的「前区 / 后区」第一个字被认错时（真机上「前区」读成过「豚区」），
-    /// 这一行算哪个区 —— 调用方按「前区还空着就是前区，否则后区」给。
+    /// 提取单数字序列（用于 0–9 组选复式、组选胆拖、直选定位复式，兼容 OCR 粘连如 `0468` / `34567`）。
+    static func singleDigits(in text: String) -> [Int] {
+        var result: [Int] = []
+        for ch in text {
+            if let v = plainDigitValue(ch) { result.append(v) }
+        }
+        return result
+    }
+
+    /// 定位复式行标签：`第①位: 0 1 4 5 7 9` / `第1位: 3 6`。
+    private static func positionLabel(_ line: String, count: Int) -> (index: Int, rest: String)? {
+        guard let match = firstMatch(in: line, pattern: "^\\s*第\\s*([①②③④⑤⑥1-6一二三四五六])\\s*位\\s*[:：]?\\s*(.*)$"),
+              match.groups.count >= 2 else { return nil }
+        let token = match.groups[0]
+        let map: [String: Int] = [
+            "①": 0, "1": 0, "一": 0,
+            "②": 1, "2": 1, "二": 1,
+            "③": 2, "3": 2, "三": 2,
+            "④": 3, "4": 3, "四": 3,
+            "⑤": 4, "5": 4, "五": 4,
+            "⑥": 5, "6": 5, "六": 5,
+        ]
+        guard let idx = map[token], idx < count else { return nil }
+        return (idx, match.groups[1])
+    }
+
+    /// `红单 / 红复 / 红胆 / 红拖 / 蓝单 / 蓝复 / 前区 / 前区胆 / 前区拖 / 后区 / 后区胆 / 后区拖 / 胆码 / 拖码 / 复式`
     private static func zoneLabel(_ line: String, game: GameKey,
                                   unlabelled: SectionKey? = nil) -> (label: ZoneLabel, rest: String)? {
-        let patterns: [(String, SectionKey)] = game == .ssq
-            ? [("^\\s*红\\s*([单复胆拖])?\\s*[:：]?", .red), ("^\\s*蓝\\s*([单复胆拖])?\\s*[:：]?", .blue)]
-            : [("^\\s*前\\s*区\\s*([胆拖])?\\s*[:：]?", .front), ("^\\s*后\\s*区\\s*([胆拖])?\\s*[:：]?", .back)]
+        let patterns: [(String, SectionKey)]
+        switch game {
+        case .ssq:
+            patterns = [("^\\s*红\\s*([单复胆拖])?\\s*[:：]?", .red), ("^\\s*蓝\\s*([单复胆拖])?\\s*[:：]?", .blue)]
+        case .dlt:
+            patterns = [("^\\s*前\\s*区\\s*([胆拖])?\\s*[:：]?", .front), ("^\\s*后\\s*区\\s*([胆拖])?\\s*[:：]?", .back)]
+        case .k8:
+            patterns = [
+                ("^\\s*(胆)\\s*码?\\s*[:：]?", .nums),
+                ("^\\s*(拖)\\s*码?\\s*[:：]?", .nums),
+                ("^\\s*(复)\\s*式\\s*[:：]", .nums),
+            ]
+        case .qlc:
+            patterns = [
+                ("^\\s*(胆)\\s*码?\\s*[:：]?", .nums7),
+                ("^\\s*(拖)\\s*码?\\s*[:：]?", .nums7),
+                ("^\\s*(复)\\s*式\\s*[:：]", .nums7),
+            ]
+        case .pl3, .fc3d:
+            patterns = [
+                ("^\\s*(胆)\\s*码\\s*[:：]?", .nums3),
+                ("^\\s*(拖)\\s*码\\s*[:：]?", .nums3),
+                ("^\\s*(复)\\s*式\\s*[:：]", .nums3),
+            ]
+        case .qxc:
+            patterns = [
+                ("^\\s*(特)\\s*别\\s*号\\s*[:：]?", .tail),
+                ("^\\s*(后)\\s*区\\s*[:：]?", .tail),
+            ]
+        case .pl5:
+            patterns = []
+        }
         for (pattern, key) in patterns {
             guard let match = firstMatch(in: line, pattern: pattern), match.length > 0 else { continue }
             let mark = match.groups.first ?? ""
             let rest = String((line as NSString).substring(from: match.range.location + match.range.length))
+            // 避免把单式票头「复式票」「胆拖票」误当成号码区标签
+            if rest.trimmingCharacters(in: .whitespaces).hasPrefix("票") { continue }
             return (ZoneLabel(key: key, isDan: mark == "胆", isMultipleMark: mark == "复"), rest)
         }
         // 「X区」+ 号码：X 不是数字也不是「前 / 后」。只有大乐透这么印。
@@ -439,9 +493,12 @@ enum TicketTextParser {
     ///   或 3D `1 8 9 1 )`）。默认 `false` 只摘孤立右括号本身，避免把 `A.09 17 24 45 52 )`
     ///   这种左括号和倍数一起丢掉的行误删成 4 个号。
     static func betBody(_ line: String, stripOrphanToken: Bool = false) -> String? {
-        // 1. 有左括号的倍数括号（完整 `(1)` 或丢右括号 `(1`）确定不是号码，一律摘掉。
+        // 1. 有左括号的倍数括号（完整 `(1)`、丢右括号 `(1`、山东方括号 `[1倍]`）与体彩直组混合行尾「直选 1倍 / 组选 1倍」
         var body = line.replacingOccurrences(
-            of: "[(（]\\s*[-—0-9OQDIloq|!]{1,3}\\s*[)）]?\\s*$",
+            of: "[(（\\[]\\s*[-—0-9OQDIloq|!]{1,3}\\s*倍?\\s*[)）\\]]?\\s*$",
+            with: "", options: .regularExpression)
+        body = body.replacingOccurrences(
+            of: "\\s*(?:直选|组选|组三|组六|单选)\\s*[0-9OQDIloq|!]{1,2}\\s*倍\\s*$",
             with: "", options: .regularExpression)
         if stripOrphanToken {
             // 2a. 兜底分支：丢了左括号但留着倍数字（`... 63 72 1 )`、`... 45 52 10 )`）。
@@ -758,9 +815,15 @@ enum TicketTextParser {
     /// **必须锚在行尾。** 体彩的注序号有时会被打成 `(1)` 放在**行首**，
     /// 不锚定的话第一注的倍数就被读成 1 了。
     private static func lineMultiple(_ line: String) -> Int? {
-        guard let match = firstMatch(in: line, pattern: "\\(\\s*([0-9OQDIloq|!]{1,2})\\s*\\)\\s*$"),
-              let text = match.groups.first else { return nil }
-        return intValue(text)
+        if let match = firstMatch(in: line, pattern: "[(（\\[]\\s*([0-9OQDIloq|!]{1,2})\\s*倍?\\s*[)）\\]]\\s*$"),
+           let text = match.groups.first {
+            return intValue(text)
+        }
+        if let match = firstMatch(in: line, pattern: "(?:直选|组选|组三|组六|单选)\\s*([0-9OQDIloq|!]{1,2})\\s*倍\\s*$"),
+           let text = match.groups.first {
+            return intValue(text)
+        }
+        return nil
     }
 
     private static func intValue(_ text: String?) -> Int? {
@@ -829,6 +892,30 @@ enum TicketTextParser {
         Set(digits).count == 3 ? "group6" : "group3"
     }
 
+    /// 仅用于 `openLabel` 续行判断：允许热敏票 OCR 粘连的长升序续行（如 `09101112` / `20212223242526`），
+    /// 同时用「严格升序且大于已有最大号」把机号 `32030192` 等随机长串 100% 挡在外面。
+    private static func isContinuationLine(_ line: String,
+                                           section: GameSection,
+                                           previous: [Int]) -> [Int]? {
+        if isNumberOnlyLine(line) {
+            let values = section.isPositional
+                ? singleDigits(in: line).filter { section.range.contains($0) }
+                : numbers(in: line, range: section.range)
+            return values.isEmpty ? nil : values
+        }
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed.allSatisfy({ $0.isWhitespace || ($0.isASCII && $0.isNumber) }) else { return nil }
+        let values = section.isPositional
+            ? singleDigits(in: trimmed)
+            : numbers(in: trimmed, range: section.range)
+        guard values.count >= 2, values.allSatisfy(section.range.contains), isAscendingUnique(values) else { return nil }
+        let expectedDigits = section.isPositional ? values.count : values.count * 2
+        let actualDigits = trimmed.filter { $0.isASCII && $0.isNumber }.count
+        guard actualDigits == expectedDigits else { return nil }
+        if let prevMax = previous.max(), let first = values.first, first <= prevMax { return nil }
+        return values
+    }
+
     static func parseTicket(_ block: String, game forced: GameKey? = nil) -> ScannedTicket? {
         let lines = normalize(block)
             .split(separator: "\n", omittingEmptySubsequences: false)
@@ -838,7 +925,8 @@ enum TicketTextParser {
         let playText = lines.filter { !isSlogan($0) }.joined(separator: "\n")
         var ticket = ScannedTicket(game: game)
         ticket.play = detectPlay(playText)
-        let expectedK8Count = game == .k8 ? Int(detectPlayMode(game: game, text: block)) : nil
+        ticket.playMode = detectPlayMode(game: game, text: block)
+        let expectedK8Count = game == .k8 ? Int(ticket.playMode) : nil
 
         var selections: [SectionKey: SectionSelection] = [:]
         var singleLines: [NumberSet] = []
@@ -860,6 +948,21 @@ enum TicketTextParser {
                 packageHeader = true
             }
 
+            // 直选定位复式行：「第①位: 0 1 4 5 7 9」（排列3 / 3D / 排列5 / 七星彩）
+            if let posSection = game.sections.first(where: \.isPositional),
+               let (posIdx, rest) = positionLabel(line, count: posSection.count) {
+                let digits = Array(Set(singleDigits(in: rest).filter { posSection.range.contains($0) })).sorted()
+                if !digits.isEmpty {
+                    var sel = selections[posSection.key] ?? SectionSelection()
+                    while sel.positional.count < posSection.count { sel.positional.append([]) }
+                    sel.positional[posIdx] = Array(Set(sel.positional[posIdx] + digits)).sorted()
+                    selections[posSection.key] = sel
+                    ticket.play = .system
+                    openLabel = nil
+                    continue
+                }
+            }
+
             // 标签的第一个字认坏了的时候，这一行算哪个区：第一个区还空着就是它，否则第二个
             let vacant: SectionKey? = game.sections.count == 2
                 ? ((selections[game.sections[0].key]?.selected.isEmpty ?? true) ? game.sections[0].key : game.sections[1].key)
@@ -874,7 +977,9 @@ enum TicketTextParser {
                 orphans = []
                 let section = game.sections.first { $0.key == label.key }
                 let range = section?.range ?? 1...99
-                let values = numbers(in: rest, range: range)
+                let values = (section?.isPositional == true)
+                    ? singleDigits(in: rest).filter { range.contains($0) }
+                    : numbers(in: rest, range: range)
                 append(values, to: &selections, key: label.key, isDan: label.isDan)
                 // 「后区胆」那一行在票面上可能是空的（样票里就有），
                 // 但它仍然占着标签位，下一行的号码属于「后区拖」而不是它。
@@ -882,20 +987,32 @@ enum TicketTextParser {
                 continue
             }
 
-            if let openLabel, isNumberOnlyLine(line) {
-                let section = game.sections.first { $0.key == openLabel.key }
-                let values = numbers(in: line, range: section?.range ?? 1...99)
-                append(values, to: &selections, key: openLabel.key, isDan: openLabel.isDan)
-                continue
+            if let openLabel, let section = game.sections.first(where: { $0.key == openLabel.key }) {
+                let existing = openLabel.isDan
+                    ? (selections[openLabel.key]?.dan ?? [])
+                    : (selections[openLabel.key]?.tuo ?? [])
+                if let values = isContinuationLine(line, section: section, previous: existing) {
+                    append(values, to: &selections, key: openLabel.key, isDan: openLabel.isDan)
+                    continue
+                }
             }
             openLabel = nil
 
-            // 排列3 / 3D 的组选复式：票面只有一行数字（`1 3 5 6 8`），没有标签。
-            if ticket.play == .system, game == .pl3 || game == .fc3d, let section = game.sections.first {
+            // 排列3 / 3D 的组选复式：票面只有一行数字（`1 3 5 6 8` 或 OCR 粘连 `0468`），没有标签。
+            if ticket.play == .system, game == .pl3 || game == .fc3d,
+               let section = game.sections.first, selections[section.key]?.positional.isEmpty ?? true {
                 let tokens = line.split(whereSeparator: \.isWhitespace)
                 if tokens.count >= 2, tokens.allSatisfy({ $0.count == 1 && $0.first?.isASCII == true && $0.first?.isNumber == true }) {
                     append(tokens.compactMap { Int($0) }, to: &selections, key: section.key, isDan: false)
                     continue
+                }
+                if !isSerialLine(line), isBareNumberLine(line) {
+                    let digs = singleDigits(in: line)
+                    let uniq = Array(Set(digs)).sorted()
+                    if digs.count == uniq.count, (2...10).contains(uniq.count) {
+                        append(uniq, to: &selections, key: section.key, isDan: false)
+                        continue
+                    }
                 }
             }
 
@@ -976,7 +1093,6 @@ enum TicketTextParser {
         let transaction = transactionLines.joined(separator: "\n")
         ticket.totalAmount = extractTotal(transaction) ?? extractTotal(playText)
         ticket.multiple = extractMultiple(transaction) ?? extractMultiple(playText) ?? lineMultiples.first ?? 1
-        ticket.playMode = detectPlayMode(game: game, text: block)
         // 快乐8：玩法说选几，每一注就必须正好几个号。读出来对不上的那几注
         // 多半是把机号或金额当成号码了，宁可丢掉也不要留一注错的。
         if game == .k8, let want = Int(ticket.playMode) {
@@ -1033,9 +1149,12 @@ enum TicketTextParser {
                                   playMode: String,
                                   selections: [SectionKey: SectionSelection]) -> ScanPlay {
         if selections.values.contains(where: { !$0.dan.isEmpty }) { return .dantuo }
+        if selections.values.contains(where: { !$0.positional.isEmpty }) { return .system }
         for section in game.sections {
+            let count = selections[section.key]?.selected.count ?? 0
+            if (game == .pl3 || game == .fc3d), playMode == "group3", count >= 2 { return .system }
             let need = game.pickCount(for: section, playMode: playMode)
-            if (selections[section.key]?.selected.count ?? 0) > need { return .system }
+            if count > need { return .system }
         }
         return .single
     }
@@ -1062,7 +1181,7 @@ enum TicketTextParser {
     /// 福彩共用标识。彩种来自交易区的印字，可以单列、换行或跟在「玩法」后。
     static func printedWelfareGame(_ text: String) -> GameKey? {
         var games = Set<GameKey>()
-        let names = #"^(?:中国福利彩票|福利彩票|福彩)?(?:玩法|彩种|游戏名称|游戏)?[:：]?(双色球|七乐[彩釆]|快乐[八8８]|3[DdＤ])"#
+        let names = #"^(?:中国福利彩票|福利彩票|福彩)?(?:玩法|彩种|游戏名称|游戏)?[:：]?(双色球|七乐[彩釆]|快乐[八8８]|3[DdＤ]|数字[3三])"#
         for line in text.components(separatedBy: .newlines) where !isSlogan(line) && !isSerialLine(line) {
             let compact = line.filter { !$0.isWhitespace }
             guard let match = firstMatch(in: compact, pattern: names),
@@ -1151,7 +1270,7 @@ enum TicketTextParser {
         if text.range(of: "大乐|乐透", options: .regularExpression) != nil { return .dlt }
         // 3D 放在双色球之后：「玩法:3D-单式」这种行里没有别的彩种名，
         // 但 `3D` 两个字符太短，摆在最前面容易被别处的噪声命中。
-        if text.range(of: "(^|[^0-9A-Za-z])3\\s*[DdＤ]([^0-9A-Za-z]|$)", options: .regularExpression) != nil { return .fc3d }
+        if text.range(of: "(^|[^0-9A-Za-z])3\\s*[DdＤ]([^0-9A-Za-z]|$)|数字\\s*[3三]", options: .regularExpression) != nil { return .fc3d }
         return nil
     }
 
@@ -1210,8 +1329,8 @@ enum TicketTextParser {
     }
 
     static func detectPlay(_ text: String) -> ScanPlay {
-        if text.contains("胆拖") || text.range(of: "红胆|前区胆|后区胆", options: .regularExpression) != nil { return .dantuo }
-        if text.contains("复式") || text.range(of: "红复|蓝复", options: .regularExpression) != nil { return .system }
+        if text.contains("胆拖") || text.range(of: "红胆|前区胆|后区胆|胆码|拖码", options: .regularExpression) != nil { return .dantuo }
+        if text.contains("复式") || text.range(of: "红复|蓝复|第\\s*[①②③④⑤⑥1-6]\\s*位", options: .regularExpression) != nil { return .system }
         return .single
     }
 
@@ -1441,7 +1560,7 @@ enum TicketTextParser {
     static func summary(for tickets: [ScannedTicket]) -> [String] {
         var warnings: [String] = []
         if tickets.isEmpty {
-            warnings.append("没认出票面号码。目前支持双色球、大乐透、七乐彩、快乐8、3D、排列3、排列5、七星彩的单式票，以及双色球和大乐透的复式、胆拖票。")
+            warnings.append("没认出票面号码。支持双色球、大乐透、七乐彩、快乐8、3D、排列3、排列5、七星彩的单式、复式及对应胆拖票。")
         } else if tickets.count > 1 {
             warnings.append("这张照片里认出了 \(tickets.count) 张票，请逐张核对。")
         }

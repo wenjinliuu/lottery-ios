@@ -109,4 +109,33 @@ final class EntryDraftTests: XCTestCase {
     func testEmptyRecordsYieldNil() {
         XCTAssertNil(EntryDraft(records: []))
     }
+
+    func testPositionalSystemAndNewDantuoRoundTrip() throws {
+        // 排列3 直选定位复式还原按位选号
+        let pl3Tickets = try XCTUnwrap(TicketBuilder.expand(
+            game: .pl3,
+            selections: [.nums3: SectionSelection(positional: [[0, 2], [4, 5, 6], [9]])],
+            mode: .system, playMode: "single", addOn: false
+        ))
+        let pl3Records = pl3Tickets.enumerated().map { idx, t in
+            record([.nums3: t[.nums3]], entryLabel: EntryMode.system.label, game: .pl3, playMode: "single", index: idx + 1)
+        }
+        let pl3Draft = try XCTUnwrap(EntryDraft(records: pl3Records))
+        XCTAssertEqual(pl3Draft.shape, .system)
+        XCTAssertEqual(pl3Draft.selections[.nums3]?.positional, [[0, 2], [4, 5, 6], [9]])
+
+        // 快乐8 选六胆拖还原胆码与拖码
+        let k8Tickets = try XCTUnwrap(TicketBuilder.expand(
+            game: .k8,
+            selections: [.nums: SectionSelection(selected: [1, 2, 10, 20, 30, 40, 50], dan: [1, 2])],
+            mode: .dantuo, playMode: "6", addOn: false
+        ))
+        let k8Records = k8Tickets.enumerated().map { idx, t in
+            record([.nums: t[.nums]], entryLabel: EntryMode.dantuo.label, game: .k8, playMode: "6", index: idx + 1)
+        }
+        let k8Draft = try XCTUnwrap(EntryDraft(records: k8Records))
+        XCTAssertEqual(k8Draft.shape, .dantuo)
+        XCTAssertEqual(k8Draft.selections[.nums]?.dan, [1, 2])
+        XCTAssertEqual(k8Draft.selections[.nums]?.selected, [1, 2, 10, 20, 30, 40, 50])
+    }
 }

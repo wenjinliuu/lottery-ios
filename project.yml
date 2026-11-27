@@ -43,6 +43,7 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         SUPPORTS_MACCATALYST: NO
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+        COREML_CODEGEN_LANGUAGE: None
     info:
       path: LotteryWallet/Resources/Info.plist
       properties:

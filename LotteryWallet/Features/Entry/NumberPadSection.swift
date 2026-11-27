@@ -10,6 +10,9 @@ struct NumberPadSection: View {
     let mode: EntryMode
     /// 胆拖模式下，当前点选的是胆码还是拖码。
     let danPicking: Bool
+    /// 所属彩种与玩法（用于区分排列3/3D 的直选定位复式、组三复式、组六复式/胆拖）。
+    var game: GameKey? = nil
+    var playMode: String = ""
     /// 允许某一位停在「没认出来」（问号）上。
     ///
     /// 只有扫描复核页会打开：识别出来的票可能有某一位是问号，
@@ -21,7 +24,28 @@ struct NumberPadSection: View {
     /// 只会以为是按钮坏了。
     var onReject: ((String) -> Void)?
 
-    private var isDigitSection: Bool { section.isPositional }
+    private var effectivePlayMode: String {
+        if !playMode.isEmpty { return playMode }
+        return game?.defaultPlayMode ?? ""
+    }
+
+    private var usesPositionalMultiSelect: Bool {
+        guard mode == .system else { return false }
+        if let game { return game.usesPositionalSystem(for: section, playMode: effectivePlayMode) }
+        return false
+    }
+
+    private var isGroup3Mode: Bool {
+        (game == .pl3 || game == .fc3d) && effectivePlayMode == "group3"
+    }
+
+    private var isGroup6Mode: Bool {
+        (game == .pl3 || game == .fc3d) && effectivePlayMode == "group6"
+    }
+
+    private var isDigitSection: Bool {
+        section.isPositional && mode == .manual
+    }
 
     /// 球的直径。跟着动态字体一起放大，字号调大时球不会把数字挤掉。
     @ScaledMetric(relativeTo: .body) private var ballSize: CGFloat = 38
@@ -29,7 +53,9 @@ struct NumberPadSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            if isDigitSection {
+            if usesPositionalMultiSelect {
+                positionalMultiGrid
+            } else if isDigitSection {
                 digitPickers
             } else {
                 ballGrid
@@ -57,10 +83,13 @@ struct NumberPadSection: View {
     }
 
     /// 数字型玩法按「补齐了几位」报，其余按「选了几个」报。
-    ///
-    /// 号码盘那一路也要报问号：识别出来的票可能有一位是问号，而问号不在
-    /// 号码盘上（−1 不在值域里），光报「已选 1」用户看不出还差一个。
     private var countText: String {
+        if usesPositionalMultiSelect {
+            let filled = (0..<required).filter { idx in
+                idx < selection.positional.count && !selection.positional[idx].isEmpty
+            }.count
+            return "已填 \(filled)/\(required) 位"
+        }
         let unknown = selection.selected.filter { $0 < 0 }.count
         guard isDigitSection else {
             let picked = selection.selected.count - unknown
@@ -70,7 +99,19 @@ struct NumberPadSection: View {
     }
 
     private var isSettled: Bool {
-        selection.selected.count == required && !selection.selected.contains { $0 < 0 }
+        if usesPositionalMultiSelect {
+            return selection.positional.count == required && selection.positional.allSatisfy { !$0.isEmpty }
+        }
+        if mode == .system {
+            if isGroup3Mode { return selection.selected.count >= 2 }
+            if isGroup6Mode { return selection.selected.count >= 4 }
+            return selection.selected.count >= required
+        }
+        if mode == .dantuo {
+            if isGroup3Mode { return selection.dan.count == 1 && !selection.tuo.isEmpty }
+            return !selection.dan.isEmpty && selection.dan.count < required && selection.selected.count >= required
+        }
+        return selection.selected.count == required && !selection.selected.contains { $0 < 0 }
     }
 
     private var hint: String {
@@ -78,14 +119,75 @@ struct NumberPadSection: View {
         case .manual:
             return "选 \(required) 个"
         case .system:
+            if usesPositionalMultiSelect { return "每位至少选 1 个" }
+            if isGroup3Mode { return "至少选 2 个不同数字" }
+            if isGroup6Mode { return "至少选 4 个不同数字" }
             return "至少 \(required) 个"
         case .dantuo:
+            if isGroup3Mode {
+                return danPicking ? "胆码限选 1 个" : "拖码至少 1 个"
+            }
             // 胆码要留出至少一个拖码的位置；拖码和胆码合计够 required 个才能展开
             guard danPicking else { return "拖码，与胆码合计至少 \(required) 个" }
             // 只选一个号的区（双色球蓝球）留不出拖码，本来就不支持胆码，
             // 别再显示"胆码最多 0 个"这种看不懂的提示
             return required > 1 ? "胆码最多 \(required - 1) 个" : "该区不设胆码"
         }
+    }
+
+    // MARK: - 定位复式按位多选
+
+    private var positionalMultiGrid: some View {
+        let circled = ["第①位", "第②位", "第③位", "第④位", "第⑤位", "第⑥位"]
+        let compactColumns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 5)
+        return VStack(alignment: .leading, spacing: 12) {
+            ForEach(0..<required, id: \.self) { position in
+                let picked = position < selection.positional.count ? selection.positional[position] : []
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(position < circled.count ? circled[position] : "第 \(position + 1) 位")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(section.color.accentColor)
+                        Spacer()
+                        Text(picked.isEmpty ? "未选" : "已选 \(picked.count) 个")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(picked.isEmpty ? Color.secondary : section.color.accentColor)
+                    }
+                    LazyVGrid(columns: compactColumns, spacing: 6) {
+                        ForEach(Array(section.range), id: \.self) { value in
+                            let isOn = picked.contains(value)
+                            Button {
+                                togglePositional(position: position, value: value)
+                            } label: {
+                                BallView(value: value,
+                                         color: section.color,
+                                         size: min(ballSize, 36),
+                                         isHit: false,
+                                         isHollow: !isOn,
+                                         padded: false)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(Text("第 \(position + 1) 位 \(value)"))
+                            .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+                        }
+                    }
+                }
+            }
+        }
+        .animation(.spring(response: 0.28, dampingFraction: 0.75), value: selection)
+        .sensoryFeedback(.selection, trigger: selection)
+    }
+
+    private func togglePositional(position: Int, value: Int) {
+        var next = selection
+        while next.positional.count < required { next.positional.append([]) }
+        if next.positional[position].contains(value) {
+            next.positional[position].removeAll { $0 == value }
+        } else {
+            next.positional[position].append(value)
+            next.positional[position].sort()
+        }
+        selection = next
     }
 
     // MARK: - 球区
@@ -140,10 +242,11 @@ struct NumberPadSection: View {
             if next.dan.contains(value) {
                 next.dan.removeAll { $0 == value }
             } else {
-                // 胆码数量必须少于该区所需个数，否则就没有拖码可选了
-                guard next.dan.count < required - 1 else {
-                    onReject?(required > 1
-                              ? "\(section.label)最多选 \(required - 1) 个胆码，再多就没有拖码的位置了"
+                // 胆码数量上限：组三胆拖限 1 个，其余区必须少于该区所需个数
+                let maxDan = isGroup3Mode ? 1 : required - 1
+                guard next.dan.count < maxDan else {
+                    onReject?(maxDan > 0
+                              ? "\(section.label)最多选 \(maxDan) 个胆码，再多就没有拖码的位置了"
                               : "\(section.label)只选 1 个号，不设胆码")
                     return
                 }

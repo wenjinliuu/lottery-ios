@@ -46,9 +46,12 @@ enum TicketPreviewBuilder {
         case (.ssq, .blue): "蓝"
         case (.dlt, .front): "前区"
         case (.dlt, .back): "后区"
+        case (.qxc, .tail): "特别号"
         default: ""
         }
     }
+
+    static let positionLabels = ["第①位", "第②位", "第③位", "第④位", "第⑤位", "第⑥位"]
 
     /// 大乐透票面只写「前区 / 后区」，不标单复；双色球才写「红单 / 红复」。
     private static func marksSingleOrMultiple(_ game: GameKey) -> Bool { game == .ssq }
@@ -61,36 +64,51 @@ enum TicketPreviewBuilder {
                      selections: [SectionKey: SectionSelection]) -> TicketPreview {
         var rows: [TicketPreview.Row] = []
         var names: [String] = []
+        let effectiveMode = playMode.isEmpty ? game.defaultPlayMode : playMode
 
         for section in game.sections {
             let selection = selections[section.key] ?? SectionSelection()
-            let need = game.pickCount(for: section, playMode: playMode)
-            let base = prefix(game, section.key).isEmpty ? section.label : prefix(game, section.key)
+            let need = game.pickCount(for: section, playMode: effectiveMode)
+            let pfx = prefix(game, section.key)
             let padded = section.padsNumbers
 
-            // 只选一个号的区（双色球蓝球）留不出拖码，票面上永远写「蓝单／蓝复」。
+            if mode == .system, game.usesPositionalSystem(for: section, playMode: effectiveMode) {
+                for pos in 0..<need {
+                    let values = pos < selection.positional.count ? selection.positional[pos].sorted() : []
+                    let label = pos < positionLabels.count ? positionLabels[pos] : "第\(pos + 1)位"
+                    rows.append(.init(id: rows.count, label: label, color: section.color,
+                                      values: values, padded: false))
+                }
+                continue
+            }
+
+            // 只选一个号的区（双色球蓝球、七星彩特别号）留不出拖码。
             if mode == .dantuo, need > 1 {
-                rows.append(.init(id: rows.count, label: base + "胆", color: section.color,
+                let danLabel = pfx.isEmpty ? "胆码" : pfx + "胆"
+                let tuoLabel = pfx.isEmpty ? "拖码" : pfx + "拖"
+                rows.append(.init(id: rows.count, label: danLabel, color: section.color,
                                   values: selection.dan.sorted(), padded: padded))
-                rows.append(.init(id: rows.count, label: base + "拖", color: section.color,
+                rows.append(.init(id: rows.count, label: tuoLabel, color: section.color,
                                   values: selection.tuo.sorted(), padded: padded))
-                names.append(base + "胆拖")
+                names.append((pfx.isEmpty ? section.label : pfx) + "胆拖")
             } else {
                 let isMultiple = selection.selected.count > need
                 let suffix = marksSingleOrMultiple(game) ? (isMultiple ? "复" : "单") : ""
-                rows.append(.init(id: rows.count, label: base + suffix, color: section.color,
+                let rowLabel: String
+                if pfx.isEmpty {
+                    rowLabel = mode == .system ? "复式" : section.label
+                } else {
+                    rowLabel = pfx + suffix
+                }
+                rows.append(.init(id: rows.count, label: rowLabel, color: section.color,
                                   values: selection.selected.sorted(), padded: padded))
-                names.append(base + suffix)
+                names.append(rowLabel)
             }
         }
 
-        let title: String
-        switch mode {
-        case .dantuo: title = "\(game.label) · \(TicketShape.dantuo.label)"
-        case .system: title = "\(game.label) · \(TicketShape.system.label)"
-        case .manual: title = "\(game.label) · \(TicketShape.single.label)"
-        }
-        // 双色球票面会把「红单蓝复」这种组合名印出来，大乐透不印。
+        let shapeTitle = game.ticketLabel(modes: effectiveMode.isEmpty ? [] : [effectiveMode], shape: mode.shape)
+        let title = "\(game.label) · \(shapeTitle)"
+        // 双色球票面会把「红单蓝复」这种组合名印出来，其余彩种不印。
         let combined = marksSingleOrMultiple(game) ? names.joined() : ""
         return TicketPreview(title: combined.isEmpty ? title : "\(title) · \(combined)", rows: rows)
     }

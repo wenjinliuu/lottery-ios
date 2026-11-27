@@ -34,8 +34,10 @@ enum NumberZone {
             // 流水号下面那一行是「XX票 N倍 合计N元」。认出「合计」最好；
             // 认不出就取流水号下面的第一行。
             let below = placed.filter { $0.minY > (serial.minY + serial.maxY) / 2 }
-            guard let header = below.first(where: { $0.text.contains("合计") })
-                    ?? below.first(where: { $0.minY >= serial.maxY - (serial.maxY - serial.minY) * 0.3 }) else { return nil }
+            guard let header = below.first(where: {
+                $0.text.contains("合计") || $0.text.contains("单式票") || $0.text.contains("复式票")
+                    || $0.text.contains("胆拖票") || $0.text.contains("套餐票")
+            }) ?? below.first(where: { $0.minY >= serial.maxY - (serial.maxY - serial.minY) * 0.3 }) else { return nil }
             // 从这一行的**半腰**起算：识别框的下沿常常压到第一注号码的头上，
             // 切在半腰的话这一行剩下的半截自成一行（认不成数字），第一注是完整的。
             let middle = (header.minY + header.maxY) / 2
@@ -47,18 +49,41 @@ enum NumberZone {
             }
             right = rightEdge
             bottom = placed.first { line in
-                line.minY > middle + (line.maxY - line.minY) * 0.6 && hanCount(line.text) >= 4
+                line.minY > middle + (line.maxY - line.minY) * 0.6
+                    && hanCount(line.text) >= 4
+                    && !line.text.contains("前区") && !line.text.contains("后区") && !line.text.contains("中国体育彩票")
             }?.minY
+            if bottom == nil, let station = placed.first(where: {
+                $0.minY > middle + 20 && matches($0.text, "\\d{2}-\\d{6}-\\d{3}")
+            }) {
+                bottom = station.minY - (station.maxY - station.minY) * 1.5
+            }
         } else {
+            let welfareBottom: (String) -> Bool = {
+                $0.contains("开奖期") || $0.contains("开奖") || $0.contains("合计") || $0.contains("销售期")
+            }
             for line in placed {
-                if top == nil, line.text.contains("/"),
-                   matches(line.text, "[0-9A-Z]{3,5}-[0-9A-Z]{3,5}-[0-9A-Z]{3,5}") {
+                let upper = line.text.uppercased()
+                if top == nil, (upper.contains("/") || upper.count >= 24),
+                   matches(upper, "[0-9A-Z]{3,5}[-—–−~_·\\.][0-9A-Z]{3,5}[-—–−~_·\\.][0-9A-Z]{3,5}") {
                     top = line.maxY
                     // 从哈希行的左端起算：再往左是票纸的边，那条暗边会把所有行连成一行
                     left = line.minX - (line.maxX - line.minX) / 39 * 1.5
                     right = imageWidth
-                } else if top != nil, bottom == nil, line.text.contains("开奖期") {
+                } else if top != nil, bottom == nil, welfareBottom(line.text) {
                     bottom = line.minY
+                }
+            }
+            // 次级兜底：哈希行被 OCR 漏读时，用第一行号码顶部推算上界
+            if top == nil {
+                for line in placed where matches(line.text, "^(?:[A-E][.．\\d]|红[单复胆]|蓝[单复胆]|胆[码:：]|拖[码:：]|复式[:：]|单选|组[三六])") {
+                    top = line.minY - (line.maxY - line.minY) * 0.35
+                    left = max(0, line.minX - (line.maxX - line.minX) * 0.08)
+                    right = imageWidth
+                    break
+                }
+                if let topVal = top {
+                    bottom = placed.first { $0.minY > topVal && welfareBottom($0.text) }?.minY
                 }
             }
         }

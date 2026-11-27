@@ -305,7 +305,7 @@ struct TicketScanView: View {
             VStack(spacing: 6) {
                 Text("把整张票放进取景框")
                     .font(.headline)
-                Text("识别全部在这台设备上完成，照片不上传也不保存。双色球、大乐透支持单式、复式、胆拖；七乐彩、快乐8、七星彩、排列3、排列5、3D 目前支持单式票。\n一张照片里有几张票都可以，会自动分开；找不到票时再手动框。")
+                Text("识别全部在这台设备上完成，照片不上传也不保存。支持双色球、大乐透、快乐8、七乐彩、排列3、3D、排列5、七星彩的单式、复式及对应胆拖票。\n一张照片里有几张票都可以，会自动分开；找不到票时再手动框。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -927,7 +927,7 @@ struct TicketScanView: View {
                             .buttonStyle(.plain)
                             .accessibilityLabel("补上\(row.label)的号码")
                         } else {
-                            BallRowView(values: row.values, color: row.color, size: 26) { _ in
+                            BallRowView(values: row.values, color: row.color, size: 26, padded: row.padded) { _ in
                                 zoneEditorTarget = ZoneEditorTarget(ticketID: ticket.id, key: row.key)
                             }
                         }
@@ -965,31 +965,37 @@ struct TicketScanView: View {
         let label: String
         let color: BallColor
         let values: [Int]
+        var padded: Bool = true
     }
 
-    /// 复式 / 胆拖按票面的排版分行：红胆 / 红拖 / 蓝复、前区胆 / 前区拖 / 后区胆 / 后区拖。
+    /// 复式 / 胆拖按票面的排版分行：红胆 / 红拖 / 蓝复、前区胆 / 前区拖、胆码 / 拖码、第①位…第⑤位。
     private func zoneRows(_ ticket: ScannedTicket) -> [ZoneRow] {
         var rows: [ZoneRow] = []
+        let playMode = ticket.effectivePlayMode()
         for section in ticket.game.sections {
             let selection = ticket.selections[section.key] ?? SectionSelection()
-            let base: String
-            switch (ticket.game, section.key) {
-            case (.ssq, .red): base = "红"
-            case (.ssq, .blue): base = "蓝"
-            case (.dlt, .front): base = "前区"
-            case (.dlt, .back): base = "后区"
-            default: base = section.label
-            }
-            // 一律问 `pickCount`，不用 `section.count`。这两处在双色球上
-            // 碰巧一样，正是这种「碰巧对」让快乐8 那个 bug 活了很久。
             let need = ticket.pickCount(for: section)
+            if ticket.play == .system, ticket.game.usesPositionalSystem(for: section, playMode: playMode) {
+                for pos in 0..<need {
+                    let vals = pos < selection.positional.count ? selection.positional[pos] : []
+                    let label = pos < TicketPreviewBuilder.positionLabels.count
+                        ? TicketPreviewBuilder.positionLabels[pos] : "第\(pos + 1)位"
+                    rows.append(ZoneRow(key: section.key, label: label, color: section.color,
+                                        values: vals, padded: false))
+                }
+                continue
+            }
+            let pfx = TicketPreviewBuilder.prefix(ticket.game, section.key)
             if ticket.play == .dantuo, need > 1 {
-                rows.append(ZoneRow(key: section.key, label: base + "胆", color: section.color, values: selection.dan))
-                rows.append(ZoneRow(key: section.key, label: base + "拖", color: section.color, values: selection.tuo))
+                rows.append(ZoneRow(key: section.key, label: pfx.isEmpty ? "胆码" : pfx + "胆",
+                                    color: section.color, values: selection.dan, padded: section.padsNumbers))
+                rows.append(ZoneRow(key: section.key, label: pfx.isEmpty ? "拖码" : pfx + "拖",
+                                    color: section.color, values: selection.tuo, padded: section.padsNumbers))
             } else {
                 let suffix = ticket.game == .ssq ? (selection.selected.count > need ? "复" : "单") : ""
-                rows.append(ZoneRow(key: section.key, label: base + suffix,
-                                    color: section.color, values: selection.selected))
+                let label = pfx.isEmpty ? (ticket.play == .system ? "复式" : section.label) : pfx + suffix
+                rows.append(ZoneRow(key: section.key, label: label,
+                                    color: section.color, values: selection.selected, padded: section.padsNumbers))
             }
         }
         return rows
@@ -1056,7 +1062,8 @@ struct TicketScanView: View {
     /// 和录入页那个分段控件是同一条。
     @ViewBuilder
     private func shapeMenu(_ value: ScannedTicket) -> some View {
-        let canSwitch = EntryMode.modes(for: value.game).count > 1
+        let allowedShapes = EntryMode.modes(for: value.game, playMode: value.effectivePlayMode()).map(\.shape)
+        let canSwitch = allowedShapes.count > 1
         let capsule = HStack(spacing: 3) {
             Text(headLabel(value))
             if canSwitch {
@@ -1072,7 +1079,7 @@ struct TicketScanView: View {
 
         if canSwitch {
             Menu {
-                ForEach(TicketShape.allCases) { shape in
+                ForEach(allowedShapes) { shape in
                     Button {
                         guard value.isPackage || shape != value.play.shape else { return }
                         if shape == .single, let index = tickets.firstIndex(where: { $0.id == value.id }),
@@ -1085,7 +1092,7 @@ struct TicketScanView: View {
                             Text(shape.label)
                         }
                     }
-                } 
+                }
             } label: {
                 capsule
             }
@@ -1176,8 +1183,16 @@ struct TicketScanView: View {
     @ViewBuilder
     private func playModeRow(_ ticket: Binding<ScannedTicket>) -> some View {
         let value = ticket.wrappedValue
-        let modes = value.game.playModes
-        if value.game == .k8, modes.count > 1 {
+        let modes: [PlayMode] = {
+            if value.game == .k8 { return value.game.playModes }
+            if (value.game == .pl3 || value.game == .fc3d), value.play != .single {
+                return value.play == .dantuo
+                    ? value.game.playModes.filter { $0.key != "single" }
+                    : value.game.playModes
+            }
+            return []
+        }()
+        if modes.count > 1 {
             let current = value.playMode.isEmpty ? value.game.defaultPlayMode : value.playMode
             let currentLabel = modes.first(where: { $0.key == current })?.label ?? current
             HStack(spacing: 8) {
@@ -1639,6 +1654,8 @@ private struct ScanZoneEditor: View {
                                          // 套餐票的这一块是复式，哪怕整张票按单式存着那几注
                                          mode: ticket.isPackage ? .system : ticket.play.entryMode,
                                          danPicking: danPicking,
+                                         game: ticket.game,
+                                         playMode: ticket.effectivePlayMode(),
                                          onReject: { showToast($0, symbol: "hand.raised", feedback: .warning) })
                     }
                     .contentCard()
